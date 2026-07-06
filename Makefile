@@ -33,7 +33,7 @@ logs-storage:
 	$(COMPOSE) logs -f --tail=100 telegram-migrate content-processing-migrate n8n_postgres telegram_postgres content_processing_postgres redis
 
 logs-app:
-	$(COMPOSE) logs -f --tail=100 video-processing telegram-auth telegram-request
+	$(COMPOSE) logs -f --tail=100  telegram-auth
 
 logs-celery:
 	$(COMPOSE) logs -f --tail=100 video-processing-worker

@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Final
 
-from web_analyzer.core.common.settings import settings
 
 RESET = "\033[0m"
 
@@ -217,8 +216,8 @@ class AgentFormatter(logging.Formatter):
             record.phase = original_phase
 
 
-def setup_logging() -> None:
-    level = os.getenv("LOG_LEVEL", settings.LOG_LEVEL).upper()
+def setup_logging(log_level:str) -> None:
+    level = os.getenv("LOG_LEVEL", log_level).upper()
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(

@@ -2,7 +2,7 @@ services:
   telegram-auth-migrate:
     build:
       context: ../..
-      dockerfile: docker/storage/Dockerfile.migrate
+      dockerfile: docker/storage/Dockerfile
     container_name: telegram_auth_migrate
     env_file:
       - .env.storage.docker

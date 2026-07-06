@@ -2,12 +2,12 @@ services:
   telegram-auth:
     build:
       context: ../..
-      dockerfile: docker/app/Dockerfile.app
+      dockerfile: docker/app/Dockerfile
       target: telegram-auth
     container_name: telegram_auth_app
     env_file:
       - .env.telegram_auth.docker
-    command: uvicorn telegram_agent.core.telegram_auth.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn telegram_agent.core.telegram_auth.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ../..:/app
     networks:

@@ -16,21 +16,21 @@ COPY pyproject.toml uv.lock ./
 
 FROM base AS telegram-auth
 
-RUN uv sync --extra telegram-auth --no-dev --frozen --no-install-project
+RUN uv sync --extra telegram-auth --extra apps --no-dev --frozen --no-install-project
 
 COPY src ./src
 
-RUN uv sync --extra telegram-auth --no-dev --frozen
+RUN uv sync --extra telegram-auth --extra apps --no-dev --frozen
 
 
 
 FROM base AS orchestration
 
-RUN uv sync --extra orchestration --no-dev --frozen --no-install-project
+RUN uv sync --extra orchestration --extra apps --no-dev --frozen --no-install-project
 
 COPY src ./src
 
-RUN uv sync --extra orchestration --no-dev --frozen
+RUN uv sync --extra orchestration --extra apps --no-dev --frozen
 
 
 
@@ -40,8 +40,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN uv sync --extra video-processing --no-dev --frozen --no-install-project
+RUN uv sync --extra video-processing --extra apps --no-dev --frozen --no-install-project
 
 COPY src ./src
 
-RUN uv sync --extra video-processing --no-dev --frozen
+RUN uv sync --extra video-processing --extra apps --no-dev --frozen

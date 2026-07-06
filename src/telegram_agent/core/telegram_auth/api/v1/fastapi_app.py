@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from telegram_agent.core.common.api.exception_handlers import register_exception_handlers
 from telegram_agent.core.common.logging import setup_logging
 from telegram_agent.core.telegram_auth.api.v1.router import api_router
+from telegram_agent.core.telegram_auth.common.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ def create_app() -> FastAPI:
         finally:
             pass
 
-    setup_logging()
+    setup_logging(settings.LOG_LEVEL)
     f_app = FastAPI(
         title="Telegram Auth API",
         description="Telegram Auth API for FatolAI WebAnalyzer",
