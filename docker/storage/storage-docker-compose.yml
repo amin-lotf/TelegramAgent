@@ -1,0 +1,61 @@
+services:
+  telegram-auth-migrate:
+    build:
+      context: ../..
+      dockerfile: docker/storage/Dockerfile.migrate
+    container_name: telegram_auth_migrate
+    env_file:
+      - .env.storage.docker
+    environment:
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@telegram_auth_postgres:5432/telegram_agent
+    command: alembic -n telegram_auth upgrade head
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    depends_on:
+      telegram_auth_postgres:
+        condition: service_healthy
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+    restart: "no"
+  n8n_postgres:
+    image: postgres:16
+    container_name: n8n-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=@WebAnalyzer2026
+      - POSTGRES_DB=n8n
+    volumes:
+      - n8n_postgres_data:/var/lib/postgresql/data
+    networks:
+      - fatol-net
+  telegram_auth_postgres:
+    image: postgres:16
+    container_name: telegram-auth-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=telegram
+      - POSTGRES_PASSWORD=Telegram2026
+      - POSTGRES_DB=telegram_agent
+    volumes:
+      - telegram_auth_postgres_data:/var/lib/postgresql/data
+    networks:
+      - fatol-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U telegram -d telegram_agent" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:8.6-alpine
+    container_name: telegram_agent_redis
+    networks:
+      - fatol-net
+volumes:
+  n8n_postgres_data:
+    external: true
+    name: webanalyzer_n8n_postgres_data
+  telegram_auth_postgres_data:
+networks:
+  fatol-net:

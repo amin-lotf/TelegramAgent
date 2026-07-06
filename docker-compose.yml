@@ -1,0 +1,7 @@
+# docker-compose.yml
+name: fatol
+
+include:
+  - path: ./docker/storage/storage-docker-compose.yml
+  - path: ./docker/n8n/n8n-docker-compose.yml
+  - path: ./docker/app/app-docker-compose.yml

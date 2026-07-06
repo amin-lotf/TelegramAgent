@@ -1,0 +1,33 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:stable
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file:
+      - .env.n8n.docker
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=n8n_postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=@WebAnalyzer2026
+      - TELEGRAM_AUTH_BASE_URL=http://telegram-auth:8000/api/v1/telegram-auth
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - fatol-net
+volumes:
+  n8n_data:
+    external: true
+    name: webanalyzer_n8n_data
+networks:
+  fatol-net:

@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "telegramagent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0.50",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.0",
+]
+
+[project.optional-dependencies]
+
+apps = [
+    "asyncpg>=0.31.0",
+    "fastapi>=0.136.1",
+    "colorlog>=6.10.1",
+    "uvicorn>=0.50.1",
+]
+
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+]
+
+telegram-auth = [
+]
+
+orchestration = [
+    "redis>=8.0.0",
+]
+
+
+migration = [
+    "alembic>=1.18.4",
+    "psycopg2-binary>=2.9.12",
+]
+
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/telegram_agent"]
+
+[tool.coverage.run]
+source = ["src"]
+include = ["telegram_agent*"]
+omit = ["*/tests/*", "*/test_*.py"]
+
+
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+
