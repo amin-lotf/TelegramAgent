@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/telegram-auth",
     tags=["telegram-auth"],
-    dependencies=[Depends(VerifyApiToken(settings.AUTH_SERVICE_TOKEN))],
+    dependencies=[Depends(VerifyApiToken(settings.auth_service_token))],
 )
 
 

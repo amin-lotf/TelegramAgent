@@ -7,11 +7,11 @@ services:
     env_file:
       - .env.storage.docker
     environment:
-      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@telegram_ingress_postgres:5432/telegram_agent
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@telegram_ingress_postgress:5432/telegram_agent
     command: alembic -n telegram_ingress upgrade head
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     depends_on:
-      telegram_ingress_postgres:
+      telegram_ingress_postgress:
         condition: service_healthy
     volumes:
       - ../..:/app
@@ -66,9 +66,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  telegram_ingress_postgres:
+  telegram_ingress_postgress:
     image: postgres:16
-    container_name: telegram-ingress-postgres
+    container_name: telegram-ingress-postgress
     restart: unless-stopped
     environment:
       - POSTGRES_USER=telegram

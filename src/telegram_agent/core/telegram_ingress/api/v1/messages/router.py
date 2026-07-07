@@ -1,7 +1,8 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 import logging
 
-from sqlalchemy.sql.annotation import Annotated
 from starlette import status
 
 from telegram_agent.core.common.api.security.token_verification import VerifyApiToken
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/telegram",
     tags=["telegram"],
-    dependencies=[Depends(VerifyApiToken(settings.AUTH_SERVICE_TOKEN))], )
+    dependencies=[Depends(VerifyApiToken(settings.auth_service_token))], )
 
 
 @router.post("/messages", status_code=status.HTTP_202_ACCEPTED)

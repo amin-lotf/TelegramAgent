@@ -12,5 +12,18 @@ services:
       - ../..:/app
     networks:
       - fatol-net
+  telegram-ingress:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: telegram-ingress
+    container_name: telegram_ingress_app
+    env_file:
+      - .env.telegram_ingress.docker
+    command: python -m uvicorn telegram_agent.core.telegram_ingress.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
 networks:
   fatol-net:

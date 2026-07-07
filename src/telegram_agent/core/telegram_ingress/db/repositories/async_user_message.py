@@ -3,9 +3,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
+import logging
 from telegram_agent.core.telegram_ingress.db.models.user_message import UserMessage
 
+logger = logging.getLogger(__name__)
 
 class SqlAlchemyUserMessageRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -48,7 +49,6 @@ class SqlAlchemyUserMessageRepository:
             .where(UserMessage.update_id == update_id)
             .options(selectinload(UserMessage.attachment))
         )
-
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 

@@ -24,7 +24,7 @@ RUN uv sync --extra telegram-auth --extra apps --no-dev --frozen
 
 
 
-FROM base AS orchestration
+FROM base AS telegram-ingress
 
 RUN uv sync --extra orchestration --extra apps --no-dev --frozen --no-install-project
 
