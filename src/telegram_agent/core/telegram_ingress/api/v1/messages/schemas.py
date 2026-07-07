@@ -13,17 +13,16 @@ class TelegramAttachmentPayload(BaseModel):
 
 class TelegramUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
+    telegram_user_id: int
+    chat_id: int
+    message_id: int
     update_id: int | None = None
-
-    telegram_user_id: int | None = None
-    chat_id: int | None = None
 
     first_name: str | None = None
     last_name: str | None = None
     username: str | None = None
 
-    message_id: int | None = None
+
     reply_to_message_id: int | None = None
 
     text: str | None = None

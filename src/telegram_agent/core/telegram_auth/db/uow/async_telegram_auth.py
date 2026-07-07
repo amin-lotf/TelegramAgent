@@ -15,6 +15,9 @@ class SqlAlchemyTelegramAuthUnitOfWork:
     async def rollback(self) -> None:
         await self._session.rollback()
 
+    async def flush(self) -> None:
+        await self._session.flush()
+
     async def __aenter__(self) -> "SqlAlchemyTelegramAuthUnitOfWork":
         return self
 
