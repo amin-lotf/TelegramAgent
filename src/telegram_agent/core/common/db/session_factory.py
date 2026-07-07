@@ -9,6 +9,7 @@ def normalize_async_db_url(url: str) -> str:
         return url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return url
 
+
 def normalize_sync_db_url(url: str) -> str:
     if url.startswith("postgresql://"):
         return url.replace("postgresql://", "postgresql+psycopg2://", 1)
@@ -28,8 +29,13 @@ def create_async_session_factory(database_url: str) -> async_sessionmaker[AsyncS
         class_=AsyncSession,
     )
 
+
 def create_sync_session_factory(database_url: str) -> sessionmaker[Session]:
-    engine_sync = create_engine(normalize_sync_db_url(database_url), echo=False, future=True)
+    engine_sync = create_engine(
+        normalize_sync_db_url(database_url),
+        echo=False,
+        future=True,
+        pool_pre_ping=True)
     return sessionmaker(
         bind=engine_sync,
         autoflush=False,

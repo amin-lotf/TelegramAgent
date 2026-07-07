@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends
 import logging
 
+from telegram_agent.core.common.api.security.token_verification import VerifyApiToken
 from telegram_agent.core.telegram_auth.api.v1.auth.dependencies import get_telegram_auth_service
 from telegram_agent.core.telegram_auth.api.v1.auth.schemas import TelegramVerifyResponse, TelegramVerifyRequest, \
     TelegramCheckResponse, TelegramCheckRequest
 from telegram_agent.core.telegram_auth.common.commands import VerifyTelegramUserCommand
-from telegram_agent.core.telegram_auth.security.token_verification import verify_api_token
+from telegram_agent.core.telegram_auth.common.settings import settings
 from telegram_agent.core.telegram_auth.services.user_authentication import UserAuthenticationService
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/telegram-auth",
     tags=["telegram-auth"],
-    dependencies=[Depends(verify_api_token)],
+    dependencies=[Depends(VerifyApiToken(settings.AUTH_SERVICE_TOKEN))],
 )
 
 

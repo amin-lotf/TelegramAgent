@@ -1,5 +1,11 @@
 import re
 from datetime import datetime, timezone
+from enum import StrEnum
+
+
+def get_enum_values(enum_cls: type[StrEnum]) -> list[str]:
+    return [item.value for item in enum_cls]
+
 
 
 def utcnow() -> datetime:

@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, String, DateTime, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from telegram_agent.core.telegram_auth.db.base import Base
+from telegram_agent.core.common.db.base import Base
 
 
 class TelegramUser(Base):

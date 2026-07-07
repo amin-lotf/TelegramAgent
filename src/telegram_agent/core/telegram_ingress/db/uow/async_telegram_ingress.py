@@ -1,13 +1,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from telegram_agent.core.telegram_auth.db.repositories.telegram_user import SqlAlchemyTelegramUserRepository
+from telegram_agent.core.telegram_ingress.db.repositories.user_message import SqlAlchemyUserMessageRepository
 
 
-class SqlAlchemyTelegramAuthUnitOfWork:
+class SqlAlchemyTelegramIngressUnitOfWork:
     def __init__(self, session: AsyncSession):
         self._session = session
-        self.telegram_users = SqlAlchemyTelegramUserRepository(session)
-
+        self.user_requests = SqlAlchemyUserMessageRepository(session)
 
     async def commit(self) -> None:
         await self._session.commit()
@@ -15,7 +14,7 @@ class SqlAlchemyTelegramAuthUnitOfWork:
     async def rollback(self) -> None:
         await self._session.rollback()
 
-    async def __aenter__(self) -> "SqlAlchemyTelegramAuthUnitOfWork":
+    async def __aenter__(self) -> "SqlAlchemyTelegramIngressUnitOfWork":
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:

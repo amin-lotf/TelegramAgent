@@ -30,10 +30,10 @@ logs:
 	$(COMPOSE) logs -f --tail=100
 
 logs-storage:
-	$(COMPOSE) logs -f --tail=100 telegram-migrate content-processing-migrate n8n_postgres telegram_postgres content_processing_postgres redis
+	$(COMPOSE) logs -f --tail=100 telegram-ingress-migrate  telegram-auth-migrate n8n_postgres telegram_auth_postgres telegram_ingress_postgres  redis
 
 logs-app:
-	$(COMPOSE) logs -f --tail=100  telegram-auth
+	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress
 
 logs-celery:
 	$(COMPOSE) logs -f --tail=100 video-processing-worker
@@ -47,8 +47,7 @@ logs-vllm:
 logs-whisperx:
 	$(COMPOSE) logs -f --tail=100 whisperx
 
-shell-app:
-	$(COMPOSE) exec app bash
+
 
 shell-celery:
 	$(COMPOSE) exec celery-worker bash
@@ -56,8 +55,12 @@ shell-celery:
 migrate-telegram-auth:
 	$(COMPOSE) run --rm telegram-auth-migrate alembic -n telegram_auth upgrade head
 
-heads:
-	$(COMPOSE) run --rm content-processing-migrate alembic heads
+migrate-telegram-ingress:
+	$(COMPOSE) run --rm telegram-ingress-migrate alembic -n telegram_ingress upgrade head
 
-revision:
-	$(COMPOSE) run --rm content-processing-migrate alembic -n content_processing  revision --autogenerate -m "$(msg)"
+
+revision-telegram-auth:
+	$(COMPOSE) run --rm telegram-auth-migrate alembic -n telegram_auth  revision --autogenerate -m "$(msg)"
+
+revision-telegram-ingress:
+	$(COMPOSE) run --rm telegram-ingress-migrate alembic -n telegram_ingress  revision --autogenerate -m "$(msg)"

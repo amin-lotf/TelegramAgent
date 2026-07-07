@@ -6,6 +6,7 @@ from alembic import context
 from dotenv import load_dotenv
 
 from telegram_agent.core.common.db.base import Base
+import telegram_agent.core.telegram_ingress.db.models.user_message # noqa: F401
 
 load_dotenv()
 
