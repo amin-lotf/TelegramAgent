@@ -8,3 +8,4 @@ DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:5678,"
     "https://ops.fatolai.com,"
 )
+DEFAULT_TELEGRAM_AUTH_BASE_URL="http://localhost:8000/api/v1/telegram-auth"

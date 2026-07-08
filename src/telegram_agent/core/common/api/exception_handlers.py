@@ -5,6 +5,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from telegram_agent.core.common.exceptions import TelegramUserUnauthorizedError, \
+    TelegramAuthUnavailableError, TelegramAuthBadResponseError
+
 logger = logging.getLogger(__name__)
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -26,3 +29,29 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": jsonable_encoder(exc.errors())},
         )
+
+    @app.exception_handler(TelegramUserUnauthorizedError)
+    async def telegram_user_unauthorized_handler(_: Request, exc: TelegramUserUnauthorizedError):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(TelegramAuthUnavailableError)
+    async def telegram_auth_unavailable_handler(_: Request, exc: TelegramAuthUnavailableError):
+        logger.warning("Telegram auth service unavailable: %s", exc)
+
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Auth service temporarily unavailable"},
+        )
+
+    @app.exception_handler(TelegramAuthBadResponseError)
+    async def telegram_auth_bad_response_handler(_: Request, exc: TelegramAuthBadResponseError):
+        logger.error("Bad response from Telegram auth service: %s", exc)
+
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": "Invalid response from auth service"},
+        )
+

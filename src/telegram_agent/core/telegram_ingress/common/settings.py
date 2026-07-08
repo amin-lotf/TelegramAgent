@@ -5,7 +5,8 @@ from typing import Any,  get_args
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.telegram_ingress.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS
+from telegram_agent.core.telegram_ingress.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS, \
+    DEFAULT_TELEGRAM_AUTH_BASE_URL
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -28,6 +29,12 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("AUTH_SERVICE_TOKEN", "auth_service_token"),
         description="API token for accessing the authentication service API.",
+    )
+
+    telegram_auth_base_url: str = Field(
+        default=DEFAULT_TELEGRAM_AUTH_BASE_URL,
+        validation_alias=AliasChoices("TELEGRAM_AUTH_BASE_URL", "telegram_auth_base_url"),
+        description="Base URL for the Telegram authentication service API.",
     )
 
 

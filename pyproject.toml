@@ -20,6 +20,8 @@ apps = [
     "fastapi>=0.136.1",
     "colorlog>=6.10.1",
     "uvicorn>=0.50.1",
+    "tenacity>=9.1.4",
+    "httpx>=0.28.1",
 ]
 
 dev = [
@@ -33,7 +35,7 @@ dev = [
 telegram-auth = [
 ]
 
-orchestration = [
+telegram-ingress = [
     "redis>=8.0.0",
 ]
 
