@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from telegram_agent.core.telegram_ingress.common.types import TelegramAttachmentType
+from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.telegram_ingress.db.repositories.async_user_message import (
     SqlAlchemyUserMessageRepository,
 )

@@ -39,6 +39,10 @@ telegram-ingress = [
     "redis>=8.0.0",
 ]
 
+content-processing = [
+
+]
+
 
 migration = [
     "alembic>=1.18.4",

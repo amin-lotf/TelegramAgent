@@ -25,5 +25,18 @@ services:
       - ../..:/app
     networks:
       - fatol-net
+  content-processing:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: content-processing
+    container_name: content_processing_app
+    env_file:
+      - .env.content_processing.docker
+    command: python -m uvicorn telegram_agent.core.content_processing.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
 networks:
   fatol-net:

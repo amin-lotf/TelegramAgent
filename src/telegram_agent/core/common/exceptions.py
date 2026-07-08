@@ -8,3 +8,11 @@ class TelegramAuthBadResponseError(Exception):
 
 class TelegramUserUnauthorizedError(Exception):
     pass
+
+
+class ContentProcessingUnavailableError(Exception):
+    pass
+
+
+class ContentProcessingBadResponseError(Exception):
+    pass

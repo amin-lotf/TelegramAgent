@@ -34,14 +34,14 @@ RUN uv sync --extra telegram-ingress --extra apps --no-dev --frozen
 
 
 
-FROM base AS video-processing
+FROM base AS content-processing
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN uv sync --extra video-processing --extra apps --no-dev --frozen --no-install-project
+RUN uv sync --extra content-processing --extra apps --no-dev --frozen --no-install-project
 
 COPY src ./src
 
-RUN uv sync --extra video-processing --extra apps --no-dev --frozen
+RUN uv sync --extra content-processing --extra apps --no-dev --frozen

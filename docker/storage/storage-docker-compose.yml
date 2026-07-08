@@ -1,4 +1,23 @@
 services:
+  content-processing-migrate:
+    build:
+      context: ../..
+      dockerfile: docker/storage/Dockerfile
+    container_name: content_processing_migrate
+    env_file:
+      - .env.storage.docker
+    environment:
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@content_processing_postgress:5432/telegram_agent
+    command: alembic -n content_processing upgrade head
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    depends_on:
+      content_processing_postgress:
+        condition: service_healthy
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+    restart: "no"
   telegram-ingress-migrate:
     build:
       context: ../..
@@ -83,6 +102,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  content_processing_postgress:
+    image: postgres:16
+    container_name: content-processing-postgress
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=telegram
+      - POSTGRES_PASSWORD=Telegram2026
+      - POSTGRES_DB=telegram_agent
+    volumes:
+      - content_processing_postgres_data:/var/lib/postgresql/data
+    networks:
+      - fatol-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U telegram -d telegram_agent" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   redis:
     image: redis:8.6-alpine
     container_name: telegram_agent_redis
@@ -94,5 +130,6 @@ volumes:
     name: webanalyzer_n8n_postgres_data
   telegram_auth_postgres_data:
   telegram_ingress_postgres_data:
+  content_processing_postgres_data:
 networks:
   fatol-net:

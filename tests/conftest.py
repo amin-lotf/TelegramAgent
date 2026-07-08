@@ -36,7 +36,7 @@ from telegram_agent.core.telegram_auth.db.models.telegram_user import TelegramUs
 from telegram_agent.core.telegram_auth.db.uow.async_telegram_auth import (  # noqa: E402
     SqlAlchemyTelegramAuthUnitOfWork,
 )
-from telegram_agent.core.telegram_ingress.common.types import TelegramAttachmentType  # noqa: E402
+from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.telegram_ingress.db.models.user_message import (  # noqa: E402
     Attachment,
     UserMessage,

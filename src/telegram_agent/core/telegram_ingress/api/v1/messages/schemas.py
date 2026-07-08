@@ -1,6 +1,6 @@
 from pydantic import ConfigDict, BaseModel
 
-from telegram_agent.core.telegram_ingress.common.types import TelegramAttachmentType
+from telegram_agent.core.common.types import TelegramAttachmentType
 
 
 class TelegramAttachmentPayload(BaseModel):

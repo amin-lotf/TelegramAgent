@@ -9,7 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.utils import get_enum_values
-from telegram_agent.core.telegram_ingress.common.types import TelegramAttachmentType, AttachmentStatus
+from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
+from telegram_agent.core.common.types import TelegramAttachmentType
 
 
 class UserMessage(Base):

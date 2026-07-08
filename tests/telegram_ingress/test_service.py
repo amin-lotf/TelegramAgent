@@ -12,8 +12,7 @@ from telegram_agent.core.telegram_ingress.db.repositories.async_user_message imp
 from telegram_agent.core.telegram_ingress.services.async_user_message import (
     AsyncUserMessageService,
 )
-from telegram_agent.core.telegram_ingress.common.types import TelegramAttachmentType
-
+from telegram_agent.core.common.types import TelegramAttachmentType
 
 pytestmark = pytest.mark.asyncio
 

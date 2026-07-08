@@ -5,8 +5,8 @@ from typing import Any,  get_args
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.telegram_ingress.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS, \
-    DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_CONTENT_PROCESSING_BASE_URL
+from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS, \
+    DEFAULT_TELEGRAM_AUTH_BASE_URL
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -31,6 +31,11 @@ class Settings(BaseSettings):
         description="API token for accessing the authentication service API.",
     )
 
+    content_processing_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CONTENT_PROCESSING_SERVICE_TOKEN", "content_processing_service_token"),
+        description="API token for accessing the authentication service API.",
+    )
 
     telegram_auth_base_url: str = Field(
         default=DEFAULT_TELEGRAM_AUTH_BASE_URL,
@@ -38,16 +43,6 @@ class Settings(BaseSettings):
         description="Base URL for the Telegram authentication service API.",
     )
 
-    content_processing_base_url: str = Field(
-        default=DEFAULT_CONTENT_PROCESSING_BASE_URL,
-        validation_alias=AliasChoices("CONTENT_PROCESSING_BASE_URL", "content_processing_base_url"),
-        description="Base URL for the content processing service API.",
-    )
-    content_processing_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CONTENT_PROCESSING_SERVICE_TOKEN", "content_processing_service_token"),
-        description="API token for accessing the authentication service API.",
-    )
 
     sqlalchemy_database_url: str = Field(
         default=DEFAULT_SQLALCHEMY_DATABASE_URL,

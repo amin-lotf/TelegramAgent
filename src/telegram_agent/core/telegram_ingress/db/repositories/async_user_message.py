@@ -1,10 +1,12 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import logging
-from telegram_agent.core.telegram_ingress.db.models.user_message import UserMessage
+
+from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
+from telegram_agent.core.telegram_ingress.db.models.user_message import UserMessage, Attachment
 
 logger = logging.getLogger(__name__)
 
@@ -68,3 +70,15 @@ class SqlAlchemyUserMessageRepository:
             chat_id=chat_id,
             message_id=message_id,
         )
+
+    async def update_attachment_status(
+            self,
+            attachment_id: UUID,
+            status: AttachmentStatus,
+    ) -> None:
+        stmt = (
+            update(Attachment)
+            .where(Attachment.id == attachment_id)
+            .values(status=status)
+        )
+        await self._session.execute(stmt)

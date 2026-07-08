@@ -930,7 +930,7 @@ requires-dist = [
     { name = "tenacity", marker = "extra == 'apps'", specifier = ">=9.1.4" },
     { name = "uvicorn", marker = "extra == 'apps'", specifier = ">=0.50.1" },
 ]
-provides-extras = ["apps", "dev", "telegram-auth", "telegram-ingress", "migration"]
+provides-extras = ["apps", "dev", "telegram-auth", "telegram-ingress", "content-processing", "migration"]
 
 [[package]]
 name = "tenacity"
