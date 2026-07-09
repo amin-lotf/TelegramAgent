@@ -50,7 +50,7 @@ logs-whisperx:
 
 
 shell-celery:
-	$(COMPOSE) exec celery-worker bash
+	$(COMPOSE) exec video-processing-worker bash
 
 migrate-telegram-auth:
 	$(COMPOSE) run --rm telegram-auth-migrate alembic -n telegram_auth upgrade head

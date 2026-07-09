@@ -45,3 +45,13 @@ RUN uv sync --extra content-processing --extra apps --no-dev --frozen --no-insta
 COPY src ./src
 
 RUN uv sync --extra content-processing --extra apps --no-dev --frozen
+
+
+FROM content-processing AS content-processing-worker
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    unzip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+RUN deno --version

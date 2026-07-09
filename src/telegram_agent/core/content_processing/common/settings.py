@@ -5,8 +5,9 @@ from typing import Any,  get_args
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS, \
-    DEFAULT_TELEGRAM_AUTH_BASE_URL
+from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, \
+    DEFAULT_ALLOWED_ORIGINS, \
+    DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_REDIS_URL
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -59,6 +60,12 @@ class Settings(BaseSettings):
             "allowed_origins",
         ),
         description="List of allowed origins (for CORS)"
+    )
+
+    redis_url: str = Field(
+        default=DEFAULT_REDIS_URL,
+        validation_alias=AliasChoices("REDIS_URL", "redis_url"),
+        description="Redis URL for the application.",
     )
 
 

@@ -1,0 +1,24 @@
+services:
+  video-processing-worker:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: content-processing-worker
+    container_name: video_processing_worker
+    env_file:
+      - .env.content_processing.docker
+    # For a dedicated transcript worker, run:
+    # celery -A web_analyzer.core.content_processor.celery_app.celery_app worker
+    # -Q video_transcript --concurrency=1 --prefetch-multiplier=1 --loglevel=info
+    command: >
+      python -m celery -A telegram_agent.core.content_processing.celery.celery_app.celery_app worker
+      -Q telegram_download
+      --loglevel=info
+
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+
+networks:
+  fatol-net:

@@ -9,3 +9,5 @@ DEFAULT_ALLOWED_ORIGINS = (
     "https://ops.fatolai.com,"
 )
 DEFAULT_TELEGRAM_AUTH_BASE_URL="http://localhost:8000/api/v1/telegram-auth"
+DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+

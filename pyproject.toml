@@ -40,7 +40,7 @@ telegram-ingress = [
 ]
 
 content-processing = [
-
+    "celery[redis]>=5.3.1",
 ]
 
 
