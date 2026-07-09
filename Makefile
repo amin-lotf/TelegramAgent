@@ -68,3 +68,6 @@ revision-telegram-auth:
 
 revision-telegram-ingress:
 	$(COMPOSE) run --rm telegram-ingress-migrate alembic -n telegram_ingress  revision --autogenerate -m "$(msg)"
+
+revision-content-processing:
+	$(COMPOSE) run --rm content-processing-migrate alembic -n content_processing  revision --autogenerate -m "$(msg)"

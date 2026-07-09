@@ -4,7 +4,7 @@ import pytest
 
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.telegram_ingress.db.repositories.async_user_message import (
-    SqlAlchemyUserMessageRepository,
+    AsyncSqlAlchemyUserMessageRepository,
 )
 
 
@@ -12,7 +12,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_add_and_get_by_id_returns_attachment(ingress_session) -> None:
-    repository = SqlAlchemyUserMessageRepository(ingress_session)
+    repository = AsyncSqlAlchemyUserMessageRepository(ingress_session)
 
     user_message = await _create_message_with_attachment(repository, ingress_session)
     persisted = await repository.get_by_id(user_message.id)
@@ -35,7 +35,7 @@ async def test_get_existing_returns_message_by_update_id(
         update_id=5000,
         text="Original message",
     )
-    repository = SqlAlchemyUserMessageRepository(ingress_session)
+    repository = AsyncSqlAlchemyUserMessageRepository(ingress_session)
 
     existing = await repository.get_existing(
         update_id=5000,
@@ -57,7 +57,7 @@ async def test_get_existing_falls_back_to_chat_and_message_id(
         update_id=None,
         text="Fallback lookup",
     )
-    repository = SqlAlchemyUserMessageRepository(ingress_session)
+    repository = AsyncSqlAlchemyUserMessageRepository(ingress_session)
 
     existing = await repository.get_existing(
         update_id=None,

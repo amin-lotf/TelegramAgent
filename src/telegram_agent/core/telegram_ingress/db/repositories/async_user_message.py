@@ -10,7 +10,7 @@ from telegram_agent.core.telegram_ingress.db.models.user_message import UserMess
 
 logger = logging.getLogger(__name__)
 
-class SqlAlchemyUserMessageRepository:
+class AsyncSqlAlchemyUserMessageRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 

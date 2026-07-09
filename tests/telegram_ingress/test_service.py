@@ -7,7 +7,7 @@ from telegram_agent.core.telegram_ingress.common.commands import (
     CreateUserMessageCommand,
 )
 from telegram_agent.core.telegram_ingress.db.repositories.async_user_message import (
-    SqlAlchemyUserMessageRepository,
+    AsyncSqlAlchemyUserMessageRepository,
 )
 from telegram_agent.core.telegram_ingress.services.async_user_message import (
     AsyncUserMessageService,
@@ -35,7 +35,7 @@ async def test_create_user_message_persists_update_id(
     )
 
     async with ingress_sessionmaker() as session:
-        repository = SqlAlchemyUserMessageRepository(session)
+        repository = AsyncSqlAlchemyUserMessageRepository(session)
         persisted = await repository.get_by_id(created.id)
 
     assert persisted is not None
@@ -118,7 +118,7 @@ async def test_create_user_message_persists_attachment(
     )
 
     async with ingress_sessionmaker() as session:
-        repository = SqlAlchemyUserMessageRepository(session)
+        repository = AsyncSqlAlchemyUserMessageRepository(session)
         persisted = await repository.get_by_id(created.id)
 
     assert persisted is not None
