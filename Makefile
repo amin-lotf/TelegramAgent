@@ -58,6 +58,9 @@ migrate-telegram-auth:
 migrate-telegram-ingress:
 	$(COMPOSE) run --rm telegram-ingress-migrate alembic -n telegram_ingress upgrade head
 
+migrate-content_processing:
+	$(COMPOSE) run --rm content-processing-migrate alembic -n content_processing upgrade head
+
 heads-telegram-ingress:
 	$(COMPOSE) run --rm telegram-ingress-migrate alembic -n telegram_ingress heads
 

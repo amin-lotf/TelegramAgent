@@ -7,7 +7,7 @@ from telegram_agent.core.content_processing.db.uow.async_content_processing impo
 
 
 @asynccontextmanager
-async def async_telegram_ingress_uow_factory() -> AsyncIterator[AsyncSqlAlchemyContentProcessingUnitOfWork]:
+async def async_content_processing_uow_factory() -> AsyncIterator[AsyncSqlAlchemyContentProcessingUnitOfWork]:
     async with AsyncSessionLocal() as session:
         async with AsyncSqlAlchemyContentProcessingUnitOfWork(session) as uow:
             yield uow
