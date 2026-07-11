@@ -9,9 +9,9 @@ from telegram_agent.core.content_processing.db.repositories.async_telegram_sourc
 class AsyncSqlAlchemyContentProcessingUnitOfWork:
     def __init__(self, session: AsyncSession):
         self._session = session
-        self.job_repository = AsyncSqlAlchemyJobRepository(session)
-        self.telegram_source_repository = AsyncSqlAlchemyTelegramSourceRepository(session)
-        self.media_asset_repository = AsyncSqlAlchemyMediaAssetRepository(session)
+        self.jobs = AsyncSqlAlchemyJobRepository(session)
+        self.telegram_sources = AsyncSqlAlchemyTelegramSourceRepository(session)
+        self.media_assets = AsyncSqlAlchemyMediaAssetRepository(session)
 
     async def commit(self) -> None:
         await self._session.commit()

@@ -212,6 +212,11 @@ class Transcript(Base):
         Integer,
         nullable=True,
     )
+    segments: Mapped[list["TranscriptSegment"]] = relationship(
+        back_populates="transcript",
+        cascade="all, delete-orphan",
+        order_by="TranscriptSegment.segment_index",
+    )
 
 
 class TranscriptSegment(Base):

@@ -2,8 +2,7 @@ from enum import StrEnum
 
 
 class JobKind(StrEnum):
-    VIDEO = "video"
-    WEB = "web"
+    TELEGRAM_ATTACHMENT="telegram attachment"
 
 
 class JobStatus(StrEnum):

@@ -15,6 +15,17 @@ class AsyncSqlAlchemyJobRepository:
         await self._session.flush()
         return job
 
+    async def get_by_idempotency_key(
+            self,
+            idempotency_key: str,
+    ) -> Job | None:
+        stmt = select(Job).where(
+            Job.idempotency_key == idempotency_key,
+        )
+
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_id(self, job_id: UUID) -> Job | None:
         stmt = select(Job).where(Job.id == job_id)
         result = await self._session.execute(stmt)
