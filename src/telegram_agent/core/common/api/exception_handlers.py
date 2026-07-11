@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from telegram_agent.core.common.exceptions import TelegramUserUnauthorizedError, \
-    TelegramAuthUnavailableError, TelegramAuthBadResponseError, JobCreationError
+    TelegramAuthUnavailableError, TelegramAuthBadResponseError, JobCreationError, WhisperXBackendBusyError, \
+    WhisperXBackendUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -68,3 +69,20 @@ def register_exception_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(WhisperXBackendBusyError)
+    async def whisperx_backend_busy_handler(_: Request, exc: WhisperXBackendBusyError) -> JSONResponse:
+        logger.warning("WhisperX backend is busy: %s", exc)
+
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "WhisperX backend is busy"},
+        )
+
+    @app.exception_handler(WhisperXBackendUnavailableError)
+    async def whisperx_backend_unavailable_handler(_: Request, exc: WhisperXBackendUnavailableError) -> JSONResponse:
+        logger.error("WhisperX backend is unavailable: %s", exc)
+
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "WhisperX backend is unavailable"},
+        )

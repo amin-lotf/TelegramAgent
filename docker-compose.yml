@@ -6,3 +6,4 @@ include:
   - path: ./docker/n8n/n8n-docker-compose.yml
   - path: ./docker/app/app-docker-compose.yml
   - path: ./docker/app/celery-docker-compose.yml
+  - path: ./docker/app/whisperx-docker-compose.yml

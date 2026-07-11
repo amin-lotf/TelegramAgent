@@ -1,0 +1,24 @@
+services:
+  whisperx:
+    build:
+      context: .
+      dockerfile: docker/whisperx/Dockerfile
+    env_file:
+      - docker/whisperx/.env.whisperx.docker
+    container_name: whisperx_service
+    runtime: nvidia
+    volumes:
+      - ./.cache/huggingface:/root/.cache/huggingface
+      - .:/app
+    ipc: host
+    expose:
+      - "8000"
+    command: >
+      uvicorn web_analyzer.core.api.v1.whisperx.fastapi_app:fastapi_app
+      --host 0.0.0.0
+      --port 8000
+    networks:
+      - fatol-net
+
+networks:
+  fatol-net:

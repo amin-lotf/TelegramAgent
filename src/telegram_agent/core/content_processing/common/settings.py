@@ -44,6 +44,18 @@ class Settings(BaseSettings):
         description="Base URL for the Telegram authentication service API.",
     )
 
+    telegram_bot_token: str = Field(
+        default=None,
+        validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
+        description="API token for accessing the Telegram bot API.",
+    )
+
+    whisperx_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("WHISPERX_SERVICE_TOKEN", "whisperx_service_token"),
+        description="API token for accessing the whisperx service API.",
+    )
+
 
     sqlalchemy_database_url: str = Field(
         default=DEFAULT_SQLALCHEMY_DATABASE_URL,

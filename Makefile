@@ -3,15 +3,18 @@ HOST_GID := $(shell id -g)
 
 COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 
-.PHONY: up up-build down restart ps logs \
+.PHONY: up up-build down down-v restart ps logs \
         logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx \
-        shell-app shell-celery migrate heads
+        shell-celery \
+        migrate-telegram-auth migrate-telegram-ingress migrate-content_processing \
+        heads-telegram-ingress \
+        revision-telegram-auth revision-telegram-ingress revision-content-processing
 
 up:
 	$(COMPOSE) up -d
 
 up-build:
-	$(COMPOSE) up -d --build
+	$(COMPOSE) up -d --build $(SERVICE)
 
 down:
 	$(COMPOSE) down

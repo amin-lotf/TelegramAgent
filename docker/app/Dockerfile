@@ -55,3 +55,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 RUN deno --version
+
+
+FROM base AS whisperx
+
+RUN apt-get update -o Acquire::Retries=5 \
+ && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    git \
+    libgl1 \
+    libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN uv sync --extra whisperx --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra whisperx --extra apps --no-dev --frozen
