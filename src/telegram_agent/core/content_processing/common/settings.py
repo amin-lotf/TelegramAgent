@@ -68,6 +68,39 @@ class Settings(BaseSettings):
         description="Redis URL for the application.",
     )
 
+    outbox_dispatch_batch_size: int = Field(
+        default=50,
+        validation_alias=AliasChoices("OUTBOX_DISPATCH_BATCH_SIZE", "outbox_dispatch_batch_size"),
+        description="Maximum number of outbox events a dispatcher claims per poll.",
+    )
+
+    outbox_dispatch_poll_interval_seconds: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices(
+            "OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS",
+            "outbox_dispatch_poll_interval_seconds",
+        ),
+        description="Celery Beat polling interval for dispatching outbox events.",
+    )
+
+    outbox_dispatch_lease_seconds: int = Field(
+        default=60,
+        validation_alias=AliasChoices("OUTBOX_DISPATCH_LEASE_SECONDS", "outbox_dispatch_lease_seconds"),
+        description="Seconds before an in-flight outbox dispatch lease can be reclaimed.",
+    )
+
+    outbox_retry_base_seconds: int = Field(
+        default=5,
+        validation_alias=AliasChoices("OUTBOX_RETRY_BASE_SECONDS", "outbox_retry_base_seconds"),
+        description="Base delay for outbox exponential retry backoff.",
+    )
+
+    outbox_retry_max_seconds: int = Field(
+        default=300,
+        validation_alias=AliasChoices("OUTBOX_RETRY_MAX_SECONDS", "outbox_retry_max_seconds"),
+        description="Maximum delay for outbox exponential retry backoff.",
+    )
+
 
     LOG_LEVEL: str = Field(
         default="DEBUG",

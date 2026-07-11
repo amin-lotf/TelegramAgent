@@ -6,7 +6,7 @@ from alembic import context
 from dotenv import load_dotenv
 
 from telegram_agent.core.common.db.base import Base
-from telegram_agent.core.content_processing.db.models.content_processing import Job,TelegramSource,MediaAsset,Transcript,TranscriptSegment # noqa: F401
+from telegram_agent.core.content_processing.db.models.content_processing import Job,TelegramSource,MediaAsset,OutboxEvent,Transcript,TranscriptSegment # noqa: F401
 
 load_dotenv()
 
@@ -110,4 +110,3 @@ if context.is_offline_mode():
         context.run_migrations()
 else:
     run_migrations_online()
-

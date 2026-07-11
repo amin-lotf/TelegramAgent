@@ -10,4 +10,4 @@ DEFAULT_ALLOWED_ORIGINS = (
 )
 DEFAULT_TELEGRAM_AUTH_BASE_URL="http://localhost:8000/api/v1/telegram-auth"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
-
+CONTENT_PROCESSING_JOB_AGGREGATE_TYPE = "content_processing_job"

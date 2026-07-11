@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telegram_agent.core.content_processing.db.repositories.async_job import AsyncSqlAlchemyJobRepository
 from telegram_agent.core.content_processing.db.repositories.async_media_asset import AsyncSqlAlchemyMediaAssetRepository
+from telegram_agent.core.content_processing.db.repositories.async_outbox import AsyncSqlAlchemyOutboxRepository
 from telegram_agent.core.content_processing.db.repositories.async_telegram_source import \
     AsyncSqlAlchemyTelegramSourceRepository
 
@@ -12,6 +13,7 @@ class AsyncSqlAlchemyContentProcessingUnitOfWork:
         self.jobs = AsyncSqlAlchemyJobRepository(session)
         self.telegram_sources = AsyncSqlAlchemyTelegramSourceRepository(session)
         self.media_assets = AsyncSqlAlchemyMediaAssetRepository(session)
+        self.outbox_events = AsyncSqlAlchemyOutboxRepository(session)
 
     async def commit(self) -> None:
         await self._session.commit()

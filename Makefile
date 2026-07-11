@@ -36,7 +36,7 @@ logs-app:
 	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing
 
 logs-celery:
-	$(COMPOSE) logs -f --tail=100   content-processing-worker:
+	$(COMPOSE) logs -f --tail=100   content-processing-worker content-processing-beat
 
 logs-n8n:
 	$(COMPOSE) logs -f --tail=100 n8n

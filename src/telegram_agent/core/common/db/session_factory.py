@@ -11,6 +11,8 @@ def normalize_async_db_url(url: str) -> str:
 
 
 def normalize_sync_db_url(url: str) -> str:
+    if url.startswith("postgresql+asyncpg://"):
+        return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
     if url.startswith("postgresql://"):
         return url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return url

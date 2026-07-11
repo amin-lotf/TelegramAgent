@@ -41,6 +41,7 @@ telegram-ingress = [
 
 content-processing = [
     "celery[redis]>=5.3.1",
+    "psycopg2-binary>=2.9.12",
 ]
 
 

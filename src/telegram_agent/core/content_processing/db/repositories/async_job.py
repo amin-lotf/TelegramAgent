@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telegram_agent.core.content_processing.common.types import JobStatus
 from telegram_agent.core.content_processing.db.models.content_processing import Job
 
 
@@ -46,3 +47,20 @@ class AsyncSqlAlchemyJobRepository:
 
         await self._session.flush()
         return job
+
+    async def claim_for_download(self, job_id: UUID) -> Job | None:
+        stmt = (
+            update(Job)
+            .where(
+                Job.id == job_id,
+                Job.status == JobStatus.QUEUED,
+            )
+            .values(
+                status=JobStatus.RUNNING,
+                updated_at=func.now(),
+            )
+            .returning(Job)
+        )
+
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()

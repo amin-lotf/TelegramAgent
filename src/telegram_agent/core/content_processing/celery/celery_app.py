@@ -10,7 +10,8 @@ def create_celery_app() -> Celery:
         broker=settings.redis_url,
         backend=settings.redis_url,
         include=[
-
+            "telegram_agent.core.content_processing.celery.tasks.media_download",
+            "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
         ],
     )
 
@@ -36,12 +37,28 @@ def create_celery_app() -> Celery:
                 Exchange("content_processing", type="direct"),
                 routing_key="telegram.download",
             ),
+            Queue(
+                "outbox_dispatch",
+                Exchange("content_processing", type="direct"),
+                routing_key="outbox.dispatch",
+            ),
         ),
 
         task_routes={
+            "outbox.dispatch": {
+                "queue": "outbox_dispatch",
+                "routing_key": "outbox.dispatch",
+            },
             "telegram.download": {
                 "queue": "telegram_download",
                 "routing_key": "telegram.download",
+            },
+        },
+
+        beat_schedule={
+            "dispatch-content-processing-outbox": {
+                "task": "outbox.dispatch",
+                "schedule": settings.outbox_dispatch_poll_interval_seconds,
             },
         },
     )

@@ -5,7 +5,7 @@ import socket
 import subprocess
 import sys
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -19,6 +19,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,7 @@ if str(SRC) not in sys.path:
 
 
 from telegram_agent.core.common.db.session_factory import (  # noqa: E402
+    create_sync_session_factory,
     normalize_async_db_url,
     normalize_sync_db_url,
 )
@@ -44,10 +46,25 @@ from telegram_agent.core.telegram_ingress.db.models.user_message import (  # noq
 from telegram_agent.core.telegram_ingress.db.uow.async_telegram_ingress import (  # noqa: E402
     AsyncSqlAlchemyTelegramIngressUnitOfWork,
 )
+from telegram_agent.core.content_processing.db.models.content_processing import Job  # noqa: E402
+from telegram_agent.core.content_processing.db.uow.async_content_processing import (  # noqa: E402
+    AsyncSqlAlchemyContentProcessingUnitOfWork,
+)
+from telegram_agent.core.content_processing.db.uow.sync_content_processing import (  # noqa: E402
+    SyncSqlAlchemyContentProcessingUnitOfWork,
+)
 
 
 AUTH_TABLES = ("telegram_users",)
 INGRESS_TABLES = ("voice_attachments", "attachments", "user_messages")
+CONTENT_PROCESSING_TABLES = (
+    "outbox_events",
+    "transcript_segments",
+    "transcripts",
+    "media_assets",
+    "telegram_sources",
+    "jobs",
+)
 
 
 def _find_free_port() -> int:
@@ -190,9 +207,11 @@ def postgres_admin_url() -> str:
 def database_urls(postgres_admin_url: str) -> dict[str, str]:
     auth_database = f"telegram_auth_test_{uuid4().hex[:8]}"
     ingress_database = f"telegram_ingress_test_{uuid4().hex[:8]}"
+    content_database = f"content_processing_test_{uuid4().hex[:8]}"
     database_names = {
         "auth": auth_database,
         "ingress": ingress_database,
+        "content": content_database,
     }
 
     try:
@@ -201,13 +220,17 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
 
         auth_url = postgres_admin_url.rsplit("/", 1)[0] + f"/{auth_database}"
         ingress_url = postgres_admin_url.rsplit("/", 1)[0] + f"/{ingress_database}"
+        content_url = postgres_admin_url.rsplit("/", 1)[0] + f"/{content_database}"
 
         _run_migrations("telegram_auth", auth_url)
         _run_migrations("telegram_ingress", ingress_url)
+        _run_migrations("content_processing", content_url)
 
         yield {
             "auth": normalize_async_db_url(auth_url),
             "ingress": normalize_async_db_url(ingress_url),
+            "content": normalize_async_db_url(content_url),
+            "content_sync": normalize_sync_db_url(content_url),
         }
     finally:
         for database_name in reversed(tuple(database_names.values())):
@@ -226,6 +249,15 @@ async def auth_engine(database_urls: dict[str, str]) -> AsyncEngine:
 @pytest_asyncio.fixture
 async def ingress_engine(database_urls: dict[str, str]) -> AsyncEngine:
     engine = create_async_engine(database_urls["ingress"], future=True)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def content_engine(database_urls: dict[str, str]) -> AsyncEngine:
+    engine = create_async_engine(database_urls["content"], future=True)
     try:
         yield engine
     finally:
@@ -259,6 +291,19 @@ async def ingress_sessionmaker(
 
 
 @pytest_asyncio.fixture
+async def content_sessionmaker(
+    content_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    await _truncate_tables(content_engine, CONTENT_PROCESSING_TABLES)
+    yield async_sessionmaker(
+        content_engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+    await _truncate_tables(content_engine, CONTENT_PROCESSING_TABLES)
+
+
+@pytest_asyncio.fixture
 async def auth_session(
     auth_sessionmaker: async_sessionmaker[AsyncSession],
 ) -> AsyncSession:
@@ -271,6 +316,14 @@ async def ingress_session(
     ingress_sessionmaker: async_sessionmaker[AsyncSession],
 ) -> AsyncSession:
     async with ingress_sessionmaker() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
+async def content_session(
+    content_sessionmaker: async_sessionmaker[AsyncSession],
+) -> AsyncSession:
+    async with content_sessionmaker() as session:
         yield session
 
 
@@ -291,6 +344,33 @@ def ingress_uow_factory(ingress_sessionmaker: async_sessionmaker[AsyncSession]):
     async def _factory() -> Any:
         async with ingress_sessionmaker() as session:
             async with AsyncSqlAlchemyTelegramIngressUnitOfWork(session) as uow:
+                yield uow
+
+    return _factory
+
+
+@pytest.fixture
+def content_uow_factory(content_sessionmaker: async_sessionmaker[AsyncSession]):
+    @asynccontextmanager
+    async def _factory() -> Any:
+        async with content_sessionmaker() as session:
+            async with AsyncSqlAlchemyContentProcessingUnitOfWork(session) as uow:
+                yield uow
+
+    return _factory
+
+
+@pytest.fixture
+def content_sync_sessionmaker(database_urls: dict[str, str]) -> sessionmaker[Session]:
+    return create_sync_session_factory(database_urls["content_sync"])
+
+
+@pytest.fixture
+def content_sync_uow_factory(content_sync_sessionmaker: sessionmaker[Session]):
+    @contextmanager
+    def _factory() -> Any:
+        with content_sync_sessionmaker() as session:
+            with SyncSqlAlchemyContentProcessingUnitOfWork(session) as uow:
                 yield uow
 
     return _factory
@@ -385,3 +465,26 @@ def ingress_message_factory(ingress_sessionmaker: async_sessionmaker[AsyncSessio
             return user_message
 
     return _create_message
+
+
+@pytest.fixture
+def content_job_factory(content_sessionmaker: async_sessionmaker[AsyncSession]):
+    async def _create_job(**overrides: Any) -> Job:
+        from telegram_agent.core.content_processing.common.types import JobKind, JobStatus
+
+        values = {
+            "kind": JobKind.TELEGRAM_ATTACHMENT,
+            "status": JobStatus.QUEUED,
+            "idempotency_key": f"job-{uuid4()}",
+            "callback_required": True,
+        }
+        values.update(overrides)
+
+        async with content_sessionmaker() as session:
+            job = Job(**values)
+            session.add(job)
+            await session.commit()
+            await session.refresh(job)
+            return job
+
+    return _create_job

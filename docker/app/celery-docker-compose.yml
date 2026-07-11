@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: docker/app/Dockerfile
       target: content-processing-worker
-    container_name: video_processing_worker
+    container_name: content_processing_worker
     env_file:
       - .env.content_processing.docker
     # For a dedicated transcript worker, run:
@@ -12,9 +12,25 @@ services:
     # -Q video_transcript --concurrency=1 --prefetch-multiplier=1 --loglevel=info
     command: >
       python -m celery -A telegram_agent.core.content_processing.celery.celery_app.celery_app worker
-      -Q telegram_download
+      -Q telegram_download,outbox_dispatch
       --loglevel=info
 
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+
+  content-processing-beat:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: content-processing-worker
+    container_name: content_processing_beat
+    env_file:
+      - .env.content_processing.docker
+    command: >
+      python -m celery -A telegram_agent.core.content_processing.celery.celery_app.celery_app beat
+      --loglevel=info
     volumes:
       - ../..:/app
     networks:

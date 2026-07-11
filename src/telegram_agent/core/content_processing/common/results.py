@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -11,3 +12,11 @@ class CreateTelegramJobResult(BaseModel):
     job_id: UUID
     status: JobStatus
     created: bool
+
+
+@dataclass(frozen=True)
+class OutboxDispatchResult:
+    claimed: int = 0
+    published: int = 0
+    retryable_failures: int = 0
+    permanent_failures: int = 0

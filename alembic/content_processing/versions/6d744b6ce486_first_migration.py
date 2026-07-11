@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -39,7 +40,7 @@ def upgrade() -> None:
         "media_assets",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("job_id", sa.UUID(), nullable=False),
-        sa.Column("local_path", sa.Text(), nullable=False),
+        sa.Column("local_path", sa.Text(), nullable=True),
         sa.Column("media_type", sa.String(length=32), nullable=False),
         sa.Column("mime_type", sa.String(length=128), nullable=True),
         sa.Column("duration_ms", sa.Integer(), nullable=True),
@@ -67,6 +68,42 @@ def upgrade() -> None:
     op.create_index(op.f("ix_telegram_sources_job_id"), "telegram_sources", ["job_id"], unique=True)
     op.create_index(op.f("ix_telegram_sources_telegram_file_unique_id"), "telegram_sources", ["telegram_file_unique_id"], unique=False)
     op.create_index(op.f("ix_telegram_sources_telegram_user_id"), "telegram_sources", ["telegram_user_id"], unique=False)
+
+    op.create_table(
+        "outbox_events",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("event_type", sa.String(length=128), nullable=False),
+        sa.Column("aggregate_type", sa.String(length=128), nullable=False),
+        sa.Column("aggregate_id", sa.UUID(), nullable=False),
+        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
+        sa.Column("attempt_count", sa.Integer(), server_default=sa.text("0"), nullable=False),
+        sa.Column("available_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("locked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("locked_by", sa.String(length=255), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.CheckConstraint("attempt_count >= 0", name="ck_outbox_events_attempt_count_non_negative"),
+        sa.ForeignKeyConstraint(["aggregate_id"], ["jobs.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("event_type", "aggregate_type", "aggregate_id", name="uq_outbox_events_initial_dispatch"),
+    )
+    op.create_index("ix_outbox_events_aggregate", "outbox_events", ["aggregate_type", "aggregate_id"], unique=False)
+    op.create_index(
+        "ix_outbox_events_pending_available",
+        "outbox_events",
+        ["available_at", "created_at"],
+        unique=False,
+        postgresql_where=sa.text("status = 'pending'"),
+    )
+    op.create_index(
+        "ix_outbox_events_processing_lease",
+        "outbox_events",
+        ["locked_at"],
+        unique=False,
+        postgresql_where=sa.text("status = 'processing'"),
+    )
 
     op.create_table(
         "transcripts",
@@ -120,6 +157,11 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_telegram_sources_ingress_message_id"), table_name="telegram_sources")
     op.drop_index(op.f("ix_telegram_sources_ingress_attachment_id"), table_name="telegram_sources")
     op.drop_table("telegram_sources")
+
+    op.drop_index("ix_outbox_events_processing_lease", table_name="outbox_events")
+    op.drop_index("ix_outbox_events_pending_available", table_name="outbox_events")
+    op.drop_index("ix_outbox_events_aggregate", table_name="outbox_events")
+    op.drop_table("outbox_events")
 
     op.drop_index(op.f("ix_media_assets_job_id"), table_name="media_assets")
     op.drop_table("media_assets")

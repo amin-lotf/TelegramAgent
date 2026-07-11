@@ -1028,6 +1028,7 @@ apps = [
 ]
 content-processing = [
     { name = "celery", extra = ["redis"] },
+    { name = "psycopg2-binary" },
 ]
 dev = [
     { name = "alembic" },
@@ -1054,6 +1055,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'apps'", specifier = ">=0.136.1" },
     { name = "httpx", marker = "extra == 'apps'", specifier = ">=0.28.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "psycopg2-binary", marker = "extra == 'content-processing'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'dev'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'migration'", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
