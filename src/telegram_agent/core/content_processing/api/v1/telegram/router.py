@@ -3,7 +3,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 import logging
 
-from pydantic import BaseModel
 from starlette import status
 
 from telegram_agent.core.common.api.security.token_verification import VerifyApiToken

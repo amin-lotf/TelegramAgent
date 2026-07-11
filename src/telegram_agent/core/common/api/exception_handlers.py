@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from telegram_agent.core.common.exceptions import TelegramUserUnauthorizedError, \
-    TelegramAuthUnavailableError, TelegramAuthBadResponseError
+    TelegramAuthUnavailableError, TelegramAuthBadResponseError, JobCreationError
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +19,6 @@ def register_exception_handlers(app: FastAPI) -> None:
             headers=exc.headers,
         )
 
-    @app.exception_handler(ValueError)
-    async def value_error_handler(_: Request, exc: ValueError):
-        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)})
 
     @app.exception_handler(ValidationError)
     async def validation_error_handler(_: Request, exc: ValidationError):
@@ -53,5 +50,21 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={"detail": "Invalid response from auth service"},
+        )
+
+    @app.exception_handler(JobCreationError)
+    async def job_creation_error_handler(
+            _: Request,
+            exc: JobCreationError,
+    ) -> JSONResponse:
+        logger.error(
+            "Content-processing job creation failed",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "Unable to create the processing job",
+            },
         )
 

@@ -3,6 +3,7 @@ from typing import Callable
 
 from sqlalchemy.exc import IntegrityError
 
+from telegram_agent.core.common.exceptions import JobCreationError
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
 from telegram_agent.core.content_processing.common.results import CreateTelegramJobResult
 from telegram_agent.core.content_processing.common.types import JobKind, JobStatus
@@ -66,19 +67,20 @@ class AsyncTelegramJobService:
                     created=True,
                 )
 
-        except IntegrityError:
-            # The failed UoW must finish and roll back before opening another one.
+
+        except IntegrityError as exc:
+            # The first UoW has exited and rolled back by this point.
             async with self._uow_factory() as uow:
                 existing_job = await uow.jobs.get_by_idempotency_key(
                     command.idempotency_key,
                 )
-
-                if existing_job is None:
-                    # Not an idempotency collision; some other DB constraint failed.
-                    raise
-
-                return CreateTelegramJobResult(
-                    job_id=existing_job.id,
-                    status=existing_job.status,
-                    created=False,
-                )
+                if existing_job is not None:
+                    return CreateTelegramJobResult(
+                        job_id=existing_job.id,
+                        status=existing_job.status,
+                        created=False,
+                    )
+            # It was not the expected idempotency collision.
+            raise JobCreationError(
+                "Failed to persist content-processing job"
+            ) from exc

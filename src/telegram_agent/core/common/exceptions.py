@@ -16,3 +16,6 @@ class ContentProcessingUnavailableError(Exception):
 
 class ContentProcessingBadResponseError(Exception):
     pass
+
+class JobCreationError(RuntimeError):
+    """Raised when a content-processing job cannot be persisted."""
