@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from telegram_agent.core.telegram_ingress.api.v1.fastapi_app import create_app
 from telegram_agent.core.telegram_ingress.api.v1.messages.dependencies import (
+    get_telegram_auth_client,
     get_user_message_service,
 )
 
@@ -18,11 +19,17 @@ class StubUserMessageService:
         return object()
 
 
+class StubTelegramAuthClient:
+    async def check_user(self, _telegram_user_id: int) -> None:
+        return None
+
+
 def test_receive_telegram_message_accepts_request_and_maps_caption(telegram_message_payload) -> None:
     service = StubUserMessageService()
     app = create_app()
     set_expected_api_token(app, "test-token")
     app.dependency_overrides[get_user_message_service] = lambda: service
+    app.dependency_overrides[get_telegram_auth_client] = lambda: StubTelegramAuthClient()
 
     payload = dict(telegram_message_payload)
     payload["text"] = None
@@ -57,6 +64,7 @@ def test_receive_telegram_message_requires_api_token(telegram_message_payload) -
     app = create_app()
     set_expected_api_token(app, "test-token")
     app.dependency_overrides[get_user_message_service] = lambda: service
+    app.dependency_overrides[get_telegram_auth_client] = lambda: StubTelegramAuthClient()
 
     with LiveServer(app) as server:
         response = server.request(
@@ -74,6 +82,7 @@ def test_receive_telegram_message_rejects_empty_message(telegram_message_payload
     app = create_app()
     set_expected_api_token(app, "test-token")
     app.dependency_overrides[get_user_message_service] = lambda: service
+    app.dependency_overrides[get_telegram_auth_client] = lambda: StubTelegramAuthClient()
 
     payload = dict(telegram_message_payload)
     payload["text"] = None

@@ -3,7 +3,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from telegram_agent.core.common.types import TelegramAttachmentType
+from telegram_agent.core.common.types import (
+    AttachmentProcessingResultStatus,
+    TelegramAttachmentType,
+)
 
 
 class CreateTelegramJobCommand(BaseModel):
@@ -48,3 +51,12 @@ class RecordTranscriptCommand:
     language_probability: float | None
     duration_ms: int | None
     segments: tuple[RecordTranscriptSegmentCommand, ...]
+
+
+class NotifyAttachmentProcessingResultCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ingress_message_id: UUID
+    ingress_attachment_id: UUID
+    status: AttachmentProcessingResultStatus
+    transcribed_text: str | None = None

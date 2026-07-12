@@ -13,6 +13,7 @@ def create_celery_app() -> Celery:
             "telegram_agent.core.content_processing.celery.tasks.media_download",
             "telegram_agent.core.content_processing.celery.tasks.transcription",
             "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
+            "telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback",
         ],
     )
 
@@ -48,6 +49,11 @@ def create_celery_app() -> Celery:
                 Exchange("content_processing", type="direct"),
                 routing_key="outbox.dispatch",
             ),
+            Queue(
+                "telegram_ingress_callback",
+                Exchange("content_processing", type="direct"),
+                routing_key="telegram_ingress.processing_result",
+            ),
         ),
 
         task_routes={
@@ -62,6 +68,10 @@ def create_celery_app() -> Celery:
             "media.transcribe": {
                 "queue": "media_transcription",
                 "routing_key": "media.transcribe",
+            },
+            "telegram_ingress.processing_result": {
+                "queue": "telegram_ingress_callback",
+                "routing_key": "telegram_ingress.processing_result",
             },
         },
 

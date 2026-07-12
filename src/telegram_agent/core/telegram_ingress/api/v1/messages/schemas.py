@@ -1,5 +1,8 @@
+from uuid import UUID
+
 from pydantic import ConfigDict, BaseModel
 
+from telegram_agent.core.common.types import AttachmentProcessingResultStatus
 from telegram_agent.core.common.types import TelegramAttachmentType
 
 
@@ -29,3 +32,11 @@ class TelegramUserRequest(BaseModel):
     caption: str | None = None
 
     attachment: TelegramAttachmentPayload | None = None
+
+
+class AttachmentProcessingResultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ingress_message_id: UUID
+    status: AttachmentProcessingResultStatus
+    transcribed_text: str | None = None

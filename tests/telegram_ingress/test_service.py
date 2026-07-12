@@ -17,11 +17,27 @@ from telegram_agent.core.common.types import TelegramAttachmentType
 pytestmark = pytest.mark.asyncio
 
 
+
+class StubContentProcessingClient:
+    def __init__(self) -> None:
+        self.commands = []
+
+    async def process_attachment(self, command) -> None:
+        self.commands.append(command)
+
+
+def _service(uow_factory) -> AsyncUserMessageService:
+    return AsyncUserMessageService(
+        uow_factory=uow_factory,
+        content_processing_client=StubContentProcessingClient(),
+    )
+
+
 async def test_create_user_message_persists_update_id(
     ingress_uow_factory,
     ingress_sessionmaker,
 ) -> None:
-    service = AsyncUserMessageService(uow_factory=ingress_uow_factory)
+    service = _service(ingress_uow_factory)
 
     created = await service.create_user_message(
         CreateUserMessageCommand(
@@ -53,7 +69,7 @@ async def test_create_user_message_returns_existing_message_for_same_update_id(
         update_id=9091,
         text="Already stored",
     )
-    service = AsyncUserMessageService(uow_factory=ingress_uow_factory)
+    service = _service(ingress_uow_factory)
 
     created = await service.create_user_message(
         CreateUserMessageCommand(
@@ -79,7 +95,7 @@ async def test_create_user_message_returns_existing_message_for_same_chat_and_me
         update_id=None,
         text="Already stored",
     )
-    service = AsyncUserMessageService(uow_factory=ingress_uow_factory)
+    service = _service(ingress_uow_factory)
 
     created = await service.create_user_message(
         CreateUserMessageCommand(
@@ -99,7 +115,7 @@ async def test_create_user_message_persists_attachment(
     ingress_uow_factory,
     ingress_sessionmaker,
 ) -> None:
-    service = AsyncUserMessageService(uow_factory=ingress_uow_factory)
+    service = _service(ingress_uow_factory)
 
     created = await service.create_user_message(
         CreateUserMessageCommand(

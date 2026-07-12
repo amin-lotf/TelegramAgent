@@ -56,7 +56,7 @@ from telegram_agent.core.content_processing.db.uow.sync_content_processing impor
 
 
 AUTH_TABLES = ("telegram_users",)
-INGRESS_TABLES = ("voice_attachments", "attachments", "user_messages")
+INGRESS_TABLES = ("attachments", "user_messages")
 CONTENT_PROCESSING_TABLES = (
     "outbox_events",
     "transcript_segments",
@@ -362,7 +362,18 @@ def content_uow_factory(content_sessionmaker: async_sessionmaker[AsyncSession]):
 
 @pytest.fixture
 def content_sync_sessionmaker(database_urls: dict[str, str]) -> sessionmaker[Session]:
-    return create_sync_session_factory(database_urls["content_sync"])
+    factory = create_sync_session_factory(database_urls["content_sync"])
+    table_names = ", ".join(CONTENT_PROCESSING_TABLES)
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+    yield factory
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
 
 
 @pytest.fixture

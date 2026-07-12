@@ -1,6 +1,11 @@
 from enum import StrEnum
 
 
+class AttachmentProcessingResultStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class TelegramAttachmentType(StrEnum):
     VOICE = "voice"
     VIDEO = "video"

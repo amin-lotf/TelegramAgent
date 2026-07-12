@@ -8,3 +8,10 @@ class AttachmentStatus(StrEnum):
     FAILED = "failed"
 
 
+class ConversationStatus(StrEnum):
+    PENDING = "pending"
+    ENQUEUED = "enqueued"
+    DISPATCHED = "dispatched"
+    FAILED = "failed"
+
+

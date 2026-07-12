@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.utils import get_enum_values
-from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
+from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus, ConversationStatus
 from telegram_agent.core.common.types import TelegramAttachmentType
 
 
@@ -54,6 +54,18 @@ class UserMessage(Base):
     text: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
+    )
+
+    conversation_status: Mapped[ConversationStatus] = mapped_column(
+        sa.Enum(
+            ConversationStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=ConversationStatus.PENDING,
+        server_default=ConversationStatus.PENDING.value,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -140,33 +152,3 @@ class Attachment(Base):
     message: Mapped[UserMessage] = relationship(
         back_populates="attachment",
     )
-
-
-
-
-class VoiceAttachment(Base):
-    __tablename__ = "voice_attachments"
-
-    attachment_id: Mapped[UUID] = mapped_column(
-        sa.UUID(as_uuid=True),
-        ForeignKey("attachments.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-
-    audio_path: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    duration_seconds: Mapped[float | None] = mapped_column(
-        sa.Float,
-        nullable=True,
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-
-    attachment: Mapped[Attachment] = relationship()

@@ -64,7 +64,7 @@ def test_download_service_creates_one_transcription_event(
     assert events[0].payload == {}
 
 
-def test_non_transcribable_download_completes_without_event(
+def test_non_transcribable_download_creates_completion_event(
     content_sync_sessionmaker: sessionmaker[Session], content_sync_uow_factory, monkeypatch
 ) -> None:
     job_id, asset_id = _seed_job(content_sync_sessionmaker, TelegramAttachmentType.DOCUMENT)
@@ -79,7 +79,8 @@ def test_non_transcribable_download_completes_without_event(
         job = session.get(Job, job_id)
         events = list(session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id)))
     assert job is not None and job.status == JobStatus.COMPLETED
-    assert events == []
+    assert [event.event_type for event in events] == [OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value]
+    assert events[0].payload == {}
 
 
 def test_download_service_claims_once_and_returns_detached_source_context(
@@ -142,6 +143,9 @@ def test_transcription_service_persists_complete_supported_result(
     with content_sync_sessionmaker() as session:
         job = session.get(Job, job_id)
         transcript = session.scalar(select(Transcript).where(Transcript.job_id == job_id))
+        events = list(
+            session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id))
+        )
         segment_count = session.scalar(
             select(func.count()).select_from(Transcript).join(Transcript.segments).where(Transcript.job_id == job_id)
         )
@@ -149,6 +153,9 @@ def test_transcription_service_persists_complete_supported_result(
     assert job is not None and job.status == JobStatus.COMPLETED
     assert transcript is not None and transcript.duration_ms == 1500
     assert segment_count == 1
+    assert [event.event_type for event in events] == [
+        OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
+    ]
 
 
 def _stub_telegram_downloader(monkeypatch, asset_id: UUID) -> None:

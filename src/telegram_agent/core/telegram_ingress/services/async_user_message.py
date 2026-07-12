@@ -1,17 +1,16 @@
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
 from typing import Callable
 from uuid import UUID
 from telegram_agent.core.common.exceptions import (
     ContentProcessingBadResponseError,
     ContentProcessingUnavailableError,
 )
-from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.telegram_ingress.clients.content_processing import ContentProcessingClient
 from telegram_agent.core.telegram_ingress.common.commands import (
     CreateUserMessageCommand,
     ProcessAttachmentCommand,
 )
+from telegram_agent.core.telegram_ingress.common.results import CreateUserMessageResult
 from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
 from telegram_agent.core.telegram_ingress.db.models.user_message import (
     Attachment,
@@ -22,13 +21,6 @@ from telegram_agent.core.telegram_ingress.db.uow.async_telegram_ingress import (
 )
 
 
-
-@dataclass(frozen=True)
-class CreateUserMessageResult:
-    user_message_id: UUID
-    attachment_id: UUID | None
-    process_attachment_command: ProcessAttachmentCommand | None
-    was_created: bool
 
 
 class AsyncUserMessageService:
@@ -105,8 +97,14 @@ class AsyncUserMessageService:
 
             if attachment is not None:
                 attachment_id = attachment.id
-                process_attachment_command = ProcessAttachmentCommand.from_user_message(
-                    user_message,
+                process_attachment_command = ProcessAttachmentCommand.create(
+                    ingress_message_id=user_message.id,
+                    ingress_attachment_id=attachment.id,
+                    telegram_user_id=user_message.telegram_user_id,
+                    telegram_file_id=attachment.file_id,
+                    telegram_file_unique_id=attachment.file_unique_id,
+                    attachment_type=attachment.type,
+                    callback_required=True,
                 )
 
             return CreateUserMessageResult(
@@ -156,10 +154,3 @@ class AsyncUserMessageService:
                 attachment_id=attachment_id,
                 status=status,
             )
-
-    @staticmethod
-    def _requires_callback(attachment_type: TelegramAttachmentType) -> bool:
-        return attachment_type in {
-            TelegramAttachmentType.VOICE,
-            TelegramAttachmentType.VIDEO_NOTE,
-        }

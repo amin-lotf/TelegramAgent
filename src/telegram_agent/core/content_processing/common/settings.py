@@ -16,6 +16,12 @@ from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHE
     DEFAULT_WHISPERX_REQUEST_TIMEOUT_SECONDS, DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE, \
     DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS, DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS, \
     DEFAULT_OUTBOX_RETRY_BASE_SECONDS, DEFAULT_OUTBOX_RETRY_MAX_SECONDS, DEFAULT_LOG_LEVEL
+from telegram_agent.core.content_processing.common.const import (
+    DEFAULT_CALLBACK_TASK_MAX_RETRIES,
+    DEFAULT_CALLBACK_TASK_RETRY_BASE_SECONDS,
+    DEFAULT_TELEGRAM_INGRESS_BASE_URL,
+    DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
+)
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -76,6 +82,31 @@ class Settings(BaseSettings):
     media_task_max_retries: int = Field(default=DEFAULT_MEDIA_TASK_MAX_RETRIES, validation_alias=AliasChoices("MEDIA_TASK_MAX_RETRIES", "media_task_max_retries"), ge=0)
     media_task_retry_base_seconds: int = Field(default=DEFAULT_MEDIA_TASK_RETRY_BASE_SECONDS, validation_alias=AliasChoices("MEDIA_TASK_RETRY_BASE_SECONDS", "media_task_retry_base_seconds"), gt=0)
     whisperx_base_url: str = Field(default=DEFAULT_WHISPERX_BASE_URL, validation_alias=AliasChoices("WHISPERX_BASE_URL", "whisperx_base_url"))
+    telegram_ingress_base_url: str = Field(
+        default=DEFAULT_TELEGRAM_INGRESS_BASE_URL,
+        validation_alias=AliasChoices(
+            "TELEGRAM_INGRESS_BASE_URL",
+            "telegram_ingress_base_url",
+        ),
+    )
+    telegram_ingress_request_timeout_seconds: float = Field(
+        default=DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS",
+            "telegram_ingress_request_timeout_seconds",
+        ),
+        gt=0,
+    )
+    callback_task_max_retries: int = Field(
+        default=DEFAULT_CALLBACK_TASK_MAX_RETRIES,
+        validation_alias=AliasChoices("CALLBACK_TASK_MAX_RETRIES", "callback_task_max_retries"),
+        ge=0,
+    )
+    callback_task_retry_base_seconds: int = Field(
+        default=DEFAULT_CALLBACK_TASK_RETRY_BASE_SECONDS,
+        validation_alias=AliasChoices("CALLBACK_TASK_RETRY_BASE_SECONDS", "callback_task_retry_base_seconds"),
+        gt=0,
+    )
     whisperx_model: str = Field(default=DEFAULT_WHISPERX_MODEL, validation_alias=AliasChoices("WHISPERX_MODEL", "whisperx_model"), min_length=1)
     whisperx_request_timeout_seconds: float = Field(default=DEFAULT_WHISPERX_REQUEST_TIMEOUT_SECONDS, validation_alias=AliasChoices("WHISPERX_REQUEST_TIMEOUT_SECONDS", "whisperx_request_timeout_seconds"), gt=0)
 
