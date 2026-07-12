@@ -72,3 +72,11 @@ RUN uv sync --extra whisperx --extra apps --no-dev --frozen --no-install-project
 COPY src ./src
 
 RUN uv sync --extra whisperx --extra apps --no-dev --frozen
+
+FROM base AS agent-runtime
+
+RUN uv sync --extra agent-runtime --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra agent-runtime --extra apps --no-dev --frozen

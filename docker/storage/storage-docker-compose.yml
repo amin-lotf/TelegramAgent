@@ -1,4 +1,23 @@
 services:
+  agent-runtime-migrate:
+    build:
+      context: ../..
+      dockerfile: docker/storage/Dockerfile
+    container_name: agent_runtime_migrate
+    env_file:
+      - .env.storage.docker
+    environment:
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@agent_runtime_postgress:5432/telegram_agent
+    command: alembic -n agent_runtime upgrade head
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    depends_on:
+      agent_runtime_postgress:
+        condition: service_healthy
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+    restart: "no"
   content-processing-migrate:
     build:
       context: ../..
@@ -112,6 +131,23 @@ services:
       - POSTGRES_DB=telegram_agent
     volumes:
       - content_processing_postgres_data:/var/lib/postgresql/data
+    networks:
+      - fatol-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U telegram -d telegram_agent" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  agent_runtime_postgress:
+    image: postgres:16
+    container_name: agent-runtime-postgress
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=telegram
+      - POSTGRES_PASSWORD=Telegram2026
+      - POSTGRES_DB=telegram_agent
+    volumes:
+      - agent_runtime_postgres_data:/var/lib/postgresql/data
     networks:
       - fatol-net
     healthcheck:

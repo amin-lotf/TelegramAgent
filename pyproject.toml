@@ -32,6 +32,10 @@ dev = [
     "mypy>=1.10",
 ]
 
+agent-runtime = [
+
+]
+
 telegram-auth = [
 ]
 

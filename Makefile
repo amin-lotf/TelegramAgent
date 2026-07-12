@@ -33,10 +33,10 @@ logs:
 	$(COMPOSE) logs -f --tail=100
 
 logs-storage:
-	$(COMPOSE) logs -f --tail=100 telegram-ingress-migrate  telegram-auth-migrate n8n_postgres telegram_auth_postgres telegram_ingress_postgres  redis
+	$(COMPOSE) logs -f --tail=100 telegram-ingress-migrate  telegram-auth-migrate n8n_postgres telegram_auth_postgres telegram_ingress_postgres  agent_runtime_postgres redis
 
 logs-app:
-	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing
+	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime
 
 logs-celery:
 	$(COMPOSE) logs -f --tail=100   content-processing-worker content-processing-beat

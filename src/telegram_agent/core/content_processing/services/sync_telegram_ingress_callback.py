@@ -15,7 +15,6 @@ from telegram_agent.core.content_processing.clients.telegram_ingress_client impo
 from telegram_agent.core.content_processing.common.commands import (
     NotifyAttachmentProcessingResultCommand,
 )
-from telegram_agent.core.content_processing.common.settings import Settings, settings
 from telegram_agent.core.content_processing.common.types import JobStatus
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
     SyncSqlAlchemyContentProcessingUnitOfWork,
@@ -53,7 +52,7 @@ class SyncTelegramIngressCallbackService:
 
         return cls(
             uow_factory=sync_content_processing_uow_factory,
-            client=TelegramIngressClient(settings),
+            client=TelegramIngressClient(),
         )
 
     def execute(self, job_id: UUID) -> None:

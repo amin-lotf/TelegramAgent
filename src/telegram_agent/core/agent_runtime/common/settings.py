@@ -5,8 +5,8 @@ from typing import Any,  get_args
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.telegram_ingress.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS, \
-    DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_CONTENT_PROCESSING_BASE_URL
+from telegram_agent.core.agent_runtime.common.const import DEFAULT_TELEGRAM_INGRESS_BASE_URL, \
+    DEFAULT_CONTENT_PROCESSING_BASE_URL, DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -25,24 +25,11 @@ class Settings(BaseSettings):
         env_parse_none_str="None",
         extra="ignore",
     )
-    auth_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("AUTH_SERVICE_TOKEN", "auth_service_token"),
-        description="API token for accessing the authentication service API.",
-    )
 
-    telegram_ingress_service_token: str = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "TELEGRAM_INGRESS_SERVICE_TOKEN",
-            "telegram_ingress_service_token",
-        ),
-    )
-
-    telegram_auth_base_url: str = Field(
-        default=DEFAULT_TELEGRAM_AUTH_BASE_URL,
-        validation_alias=AliasChoices("TELEGRAM_AUTH_BASE_URL", "telegram_auth_base_url"),
-        description="Base URL for the Telegram authentication service API.",
+    telegram_ingress_base_url: str = Field(
+        default=DEFAULT_TELEGRAM_INGRESS_BASE_URL,
+        validation_alias=AliasChoices("TELEGRAM_INGRESS_BASE_URL", "telegram_ingress_base_url"),
+        description="Base URL for the Telegram ingress service API.",
     )
 
     content_processing_base_url: str = Field(
@@ -54,6 +41,21 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("CONTENT_PROCESSING_SERVICE_TOKEN", "content_processing_service_token"),
         description="API token for accessing the authentication service API.",
+    )
+    telegram_ingress_service_token: str = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "TELEGRAM_INGRESS_SERVICE_TOKEN",
+            "telegram_ingress_service_token",
+        ),
+    )
+
+    agent_runtime_service_token: str = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AGENT_RUNTIME_SERVICE_TOKEN",
+            "agent_runtime_service_token",
+        ),
     )
 
     sqlalchemy_database_url: str = Field(

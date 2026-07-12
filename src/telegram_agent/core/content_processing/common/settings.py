@@ -89,6 +89,13 @@ class Settings(BaseSettings):
             "telegram_ingress_base_url",
         ),
     )
+    telegram_ingress_service_token: str = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "TELEGRAM_INGRESS_SERVICE_TOKEN",
+            "telegram_ingress_service_token",
+        ),
+    )
     telegram_ingress_request_timeout_seconds: float = Field(
         default=DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
         validation_alias=AliasChoices(

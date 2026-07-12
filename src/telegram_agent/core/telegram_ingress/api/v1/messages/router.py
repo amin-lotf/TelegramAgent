@@ -72,7 +72,7 @@ async def receive_telegram_message(
 @router.post(
     "/attachments/{attachment_id}/processing-result",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(VerifyApiToken(settings.content_processing_service_token))],
+    dependencies=[Depends(VerifyApiToken(settings.telegram_ingress_service_token))],
 )
 async def receive_attachment_processing_result(
     attachment_id: UUID,

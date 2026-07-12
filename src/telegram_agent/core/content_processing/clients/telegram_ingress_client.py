@@ -9,13 +9,13 @@ from telegram_agent.core.common.exceptions import (
 from telegram_agent.core.content_processing.common.commands import (
     NotifyAttachmentProcessingResultCommand,
 )
-from telegram_agent.core.content_processing.common.settings import Settings
+from telegram_agent.core.content_processing.common.settings import settings
 
 
 class TelegramIngressClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self) -> None:
         self._base_url = settings.telegram_ingress_base_url.rstrip("/")
-        self._token = settings.content_processing_service_token
+        self._token = settings.telegram_ingress_service_token
         self._timeout = httpx.Timeout(settings.telegram_ingress_request_timeout_seconds)
 
     def notify_processing_result(
