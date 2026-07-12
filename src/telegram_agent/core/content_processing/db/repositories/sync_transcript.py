@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
+import  logging
 from telegram_agent.core.content_processing.common.commands import RecordTranscriptCommand
 from telegram_agent.core.content_processing.db.models.content_processing import Transcript, TranscriptSegment
 
+logger = logging.getLogger(__name__)
 
 class SyncSqlAlchemyTranscriptRepository:
     def __init__(self, session: Session) -> None:
