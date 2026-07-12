@@ -73,8 +73,8 @@ def upgrade() -> None:
         "outbox_events",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("event_type", sa.String(length=128), nullable=False),
-        sa.Column("aggregate_type", sa.String(length=128), nullable=False),
-        sa.Column("aggregate_id", sa.UUID(), nullable=False),
+        sa.Column("job_id", sa.UUID(), nullable=False),
+        sa.Column("idempotency_key", sa.String(length=255), nullable=False),
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
         sa.Column("attempt_count", sa.Integer(), server_default=sa.text("0"), nullable=False),
@@ -85,11 +85,11 @@ def upgrade() -> None:
         sa.Column("locked_by", sa.String(length=255), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.CheckConstraint("attempt_count >= 0", name="ck_outbox_events_attempt_count_non_negative"),
-        sa.ForeignKeyConstraint(["aggregate_id"], ["jobs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("event_type", "aggregate_type", "aggregate_id", name="uq_outbox_events_initial_dispatch"),
+        sa.UniqueConstraint("idempotency_key", name="uq_outbox_events_idempotency_key"),
     )
-    op.create_index("ix_outbox_events_aggregate", "outbox_events", ["aggregate_type", "aggregate_id"], unique=False)
+    op.create_index(op.f("ix_outbox_events_job_id"), "outbox_events", ["job_id"], unique=False)
     op.create_index(
         "ix_outbox_events_pending_available",
         "outbox_events",
@@ -115,6 +115,7 @@ def upgrade() -> None:
         sa.Column("duration_ms", sa.Integer(), nullable=True),
         sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("job_id", name="uq_transcripts_job_id"),
     )
     op.create_index(op.f("ix_transcripts_job_id"), "transcripts", ["job_id"], unique=False)
 
@@ -160,7 +161,7 @@ def downgrade() -> None:
 
     op.drop_index("ix_outbox_events_processing_lease", table_name="outbox_events")
     op.drop_index("ix_outbox_events_pending_available", table_name="outbox_events")
-    op.drop_index("ix_outbox_events_aggregate", table_name="outbox_events")
+    op.drop_index(op.f("ix_outbox_events_job_id"), table_name="outbox_events")
     op.drop_table("outbox_events")
 
     op.drop_index(op.f("ix_media_assets_job_id"), table_name="media_assets")

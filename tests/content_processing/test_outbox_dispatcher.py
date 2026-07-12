@@ -7,8 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from telegram_agent.core.common.utils import utcnow
-from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_source_task
-from telegram_agent.core.content_processing.common.const import CONTENT_PROCESSING_JOB_AGGREGATE_TYPE
+from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
 from telegram_agent.core.content_processing.common.types import (
     JobKind,
     JobStatus,
@@ -30,7 +29,7 @@ def test_successful_celery_publication_marks_event_published(
     def fake_apply_async(*, args, **kwargs) -> None:
         published_args.append(args)
 
-    monkeypatch.setattr(download_telegram_source_task, "apply_async", fake_apply_async)
+    monkeypatch.setattr(download_telegram_media_task, "apply_async", fake_apply_async)
 
     result = _dispatcher(content_sync_uow_factory).dispatch_once()
 
@@ -56,7 +55,7 @@ def test_celery_publication_failure_leaves_event_retryable(
     def failing_apply_async(*, args, **kwargs) -> None:
         raise RuntimeError("redis unavailable")
 
-    monkeypatch.setattr(download_telegram_source_task, "apply_async", failing_apply_async)
+    monkeypatch.setattr(download_telegram_media_task, "apply_async", failing_apply_async)
 
     result = _dispatcher(content_sync_uow_factory).dispatch_once()
 
@@ -84,7 +83,7 @@ def test_unsupported_event_type_is_marked_failed_without_publishing(
         nonlocal published
         published = True
 
-    monkeypatch.setattr(download_telegram_source_task, "apply_async", fake_apply_async)
+    monkeypatch.setattr(download_telegram_media_task, "apply_async", fake_apply_async)
 
     result = _dispatcher(content_sync_uow_factory).dispatch_once()
 
@@ -127,12 +126,38 @@ def _seed_job_and_event(
         session.flush()
         event = OutboxEvent(
             event_type=event_type,
-            aggregate_type=CONTENT_PROCESSING_JOB_AGGREGATE_TYPE,
-            aggregate_id=job.id,
-            payload={"job_id": str(job.id)},
+            job_id=job.id,
+            idempotency_key=f"{event_type}:{job.id}",
+            payload={},
             status=OutboxEventStatus.PENDING,
             available_at=utcnow() - timedelta(seconds=1),
         )
         session.add(event)
         session.commit()
         return job.id, event.id
+
+
+def test_transcription_event_is_published_to_generic_transcription_task(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
+
+    job_id, event_id = _seed_job_and_event(
+        content_sync_sessionmaker,
+        event_type=OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value,
+    )
+    published_args: list[tuple[str]] = []
+
+    def fake_apply_async(*, args, **kwargs) -> None:
+        published_args.append(args)
+
+    monkeypatch.setattr(transcribe_media_task, "apply_async", fake_apply_async)
+    result = _dispatcher(content_sync_uow_factory).dispatch_once()
+
+    with content_sync_sessionmaker() as session:
+        event = session.get(OutboxEvent, event_id)
+    assert result.published == 1
+    assert published_args == [(str(job_id),)]
+    assert event is not None and event.status == OutboxEventStatus.PUBLISHED

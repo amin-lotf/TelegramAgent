@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
-from telegram_agent.core.content_processing.common.const import CONTENT_PROCESSING_JOB_AGGREGATE_TYPE
 from telegram_agent.core.content_processing.common.types import JobStatus, OutboxEventStatus, OutboxEventType
 from telegram_agent.core.content_processing.db.models.content_processing import Job, MediaAsset, OutboxEvent, TelegramSource
 from telegram_agent.core.content_processing.db.uow.async_content_processing import (
@@ -40,7 +39,7 @@ async def test_create_job_persists_job_related_records_and_outbox_atomically(
             await session.execute(select(MediaAsset).where(MediaAsset.job_id == result.job_id))
         ).scalar_one_or_none()
         event = (
-            await session.execute(select(OutboxEvent).where(OutboxEvent.aggregate_id == result.job_id))
+            await session.execute(select(OutboxEvent).where(OutboxEvent.job_id == result.job_id))
         ).scalar_one_or_none()
 
     assert job is not None
@@ -52,8 +51,11 @@ async def test_create_job_persists_job_related_records_and_outbox_atomically(
     assert asset.media_type == TelegramAttachmentType.VOICE.value
     assert event is not None
     assert event.event_type == OutboxEventType.CONTENT_PROCESSING_JOB_READY
-    assert event.aggregate_type == CONTENT_PROCESSING_JOB_AGGREGATE_TYPE
-    assert event.payload == {"job_id": str(result.job_id)}
+    assert event.job_id == result.job_id
+    assert event.idempotency_key == (
+        f"{OutboxEventType.CONTENT_PROCESSING_JOB_READY.value}:{result.job_id}"
+    )
+    assert event.payload == {}
     assert event.status == OutboxEventStatus.PENDING
 
 
@@ -108,7 +110,7 @@ async def test_duplicate_idempotency_key_returns_existing_job_without_duplicate_
 
     async with content_sessionmaker() as session:
         event_count = await session.scalar(
-            select(func.count()).select_from(OutboxEvent).where(OutboxEvent.aggregate_id == first.job_id)
+            select(func.count()).select_from(OutboxEvent).where(OutboxEvent.job_id == first.job_id)
         )
 
     assert event_count == 1

@@ -27,6 +27,15 @@ class SyncSqlAlchemyOutboxRepository:
         result = self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    def get_by_idempotency_key(
+        self,
+        idempotency_key: str,
+    ) -> OutboxEvent | None:
+        statement = select(OutboxEvent).where(
+            OutboxEvent.idempotency_key == idempotency_key,
+        )
+        return self._session.scalar(statement)
+
     def claim_available(
         self,
         *,

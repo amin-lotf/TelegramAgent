@@ -12,7 +12,7 @@ services:
     # -Q video_transcript --concurrency=1 --prefetch-multiplier=1 --loglevel=info
     command: >
       python -m celery -A telegram_agent.core.content_processing.celery.celery_app.celery_app worker
-      -Q telegram_download,outbox_dispatch
+      -Q telegram_download,media_transcription,outbox_dispatch
       --loglevel=info
 
     volumes:

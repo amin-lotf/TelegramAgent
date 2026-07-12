@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from telegram_agent.core.common.utils import utcnow
-from telegram_agent.core.content_processing.common.const import CONTENT_PROCESSING_JOB_AGGREGATE_TYPE
 from telegram_agent.core.content_processing.common.types import OutboxEventStatus, OutboxEventType
 from telegram_agent.core.content_processing.db.models.content_processing import OutboxEvent
 from telegram_agent.core.content_processing.db.repositories.async_outbox import AsyncSqlAlchemyOutboxRepository
@@ -151,6 +151,49 @@ async def test_expired_processing_leases_can_be_reclaimed(content_session, conte
     assert claimed[0].locked_by == "dispatcher-2"
 
 
+async def test_job_can_have_multiple_outbox_events(
+    content_session,
+    content_job_factory,
+) -> None:
+    job = await content_job_factory()
+    repository = AsyncSqlAlchemyOutboxRepository(content_session)
+    first = await repository.add(_outbox_event(job.id))
+    second_event_type = OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION
+    second = await repository.add(
+        OutboxEvent(
+            event_type=second_event_type,
+            job_id=job.id,
+            idempotency_key=f"{second_event_type.value}:{job.id}",
+            payload={},
+        )
+    )
+    await content_session.commit()
+
+    assert first.job_id == second.job_id == job.id
+    assert first.idempotency_key != second.idempotency_key
+
+
+async def test_duplicate_outbox_idempotency_key_is_rejected(
+    content_session,
+    content_job_factory,
+) -> None:
+    job = await content_job_factory()
+    repository = AsyncSqlAlchemyOutboxRepository(content_session)
+    first = _outbox_event(job.id)
+    await repository.add(first)
+    await content_session.commit()
+
+    duplicate = OutboxEvent(
+        event_type=OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION,
+        job_id=job.id,
+        idempotency_key=first.idempotency_key,
+        payload={},
+    )
+    with pytest.raises(IntegrityError):
+        await repository.add(duplicate)
+    await content_session.rollback()
+
+
 def _outbox_event(
     job_id,
     *,
@@ -160,9 +203,9 @@ def _outbox_event(
 ) -> OutboxEvent:
     return OutboxEvent(
         event_type=OutboxEventType.CONTENT_PROCESSING_JOB_READY,
-        aggregate_type=CONTENT_PROCESSING_JOB_AGGREGATE_TYPE,
-        aggregate_id=job_id,
-        payload={"job_id": str(job_id)},
+        job_id=job_id,
+        idempotency_key=f"{OutboxEventType.CONTENT_PROCESSING_JOB_READY.value}:{job_id}",
+        payload={},
         status=status,
         available_at=utcnow() - timedelta(seconds=1),
         locked_by=locked_by,

@@ -191,14 +191,15 @@ class OutboxEvent(Base):
         nullable=False,
     )
 
-    aggregate_type: Mapped[str] = mapped_column(
-        String(128),
-        nullable=False,
-    )
-
-    aggregate_id: Mapped[UUID] = mapped_column(
+    job_id: Mapped[UUID] = mapped_column(
         SA_UUID(as_uuid=True),
         ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
         nullable=False,
     )
 
@@ -262,10 +263,8 @@ class OutboxEvent(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "event_type",
-            "aggregate_type",
-            "aggregate_id",
-            name="uq_outbox_events_initial_dispatch",
+            "idempotency_key",
+            name="uq_outbox_events_idempotency_key",
         ),
         CheckConstraint(
             "attempt_count >= 0",
@@ -281,11 +280,6 @@ class OutboxEvent(Base):
             "ix_outbox_events_processing_lease",
             "locked_at",
             postgresql_where=sa.text("status = 'processing'"),
-        ),
-        Index(
-            "ix_outbox_events_aggregate",
-            "aggregate_type",
-            "aggregate_id",
         ),
     )
 
@@ -303,6 +297,7 @@ class Transcript(Base):
         SA_UUID(as_uuid=True),
         ForeignKey("jobs.id", ondelete="RESTRICT"),
         nullable=False,
+        unique=True,
         index=True,
     )
 

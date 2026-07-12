@@ -7,7 +7,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, \
     DEFAULT_ALLOWED_ORIGINS, \
-    DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_REDIS_URL
+    DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_REDIS_URL, DEFAULT_MEDIA_STORAGE_ROOT, \
+    DEFAULT_TELEGRAM_API_BASE_URL, DEFAULT_WHISPERX_BASE_URL, DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, \
+    DEFAULT_MEDIA_DOWNLOAD_CHUNK_SIZE, DEFAULT_MEDIA_HTTP_CONNECT_TIMEOUT_SECONDS, \
+    DEFAULT_MEDIA_HTTP_READ_TIMEOUT_SECONDS, DEFAULT_MEDIA_HTTP_WRITE_TIMEOUT_SECONDS, \
+    DEFAULT_MEDIA_HTTP_POOL_TIMEOUT_SECONDS, DEFAULT_MEDIA_PROCESSING_LEASE_SECONDS, \
+    DEFAULT_MEDIA_TASK_MAX_RETRIES, DEFAULT_MEDIA_TASK_RETRY_BASE_SECONDS, DEFAULT_WHISPERX_MODEL, \
+    DEFAULT_WHISPERX_REQUEST_TIMEOUT_SECONDS, DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE, \
+    DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS, DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS, \
+    DEFAULT_OUTBOX_RETRY_BASE_SECONDS, DEFAULT_OUTBOX_RETRY_MAX_SECONDS, DEFAULT_LOG_LEVEL
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -44,7 +52,7 @@ class Settings(BaseSettings):
         description="Base URL for the Telegram authentication service API.",
     )
 
-    telegram_bot_token: str = Field(
+    telegram_bot_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
         description="API token for accessing the Telegram bot API.",
@@ -55,6 +63,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("WHISPERX_SERVICE_TOKEN", "whisperx_service_token"),
         description="API token for accessing the whisperx service API.",
     )
+
+    telegram_api_base_url: str = Field(default=DEFAULT_TELEGRAM_API_BASE_URL, validation_alias=AliasChoices("TELEGRAM_API_BASE_URL", "telegram_api_base_url"))
+    media_storage_root: str = Field(default=DEFAULT_MEDIA_STORAGE_ROOT, validation_alias=AliasChoices("MEDIA_STORAGE_ROOT", "media_storage_root"))
+    media_download_max_bytes: int = Field(default=DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, validation_alias=AliasChoices("MEDIA_DOWNLOAD_MAX_BYTES", "media_download_max_bytes"), gt=0)
+    media_download_chunk_size: int = Field(default=DEFAULT_MEDIA_DOWNLOAD_CHUNK_SIZE, validation_alias=AliasChoices("MEDIA_DOWNLOAD_CHUNK_SIZE", "media_download_chunk_size"), gt=0)
+    media_http_connect_timeout_seconds: float = Field(default=DEFAULT_MEDIA_HTTP_CONNECT_TIMEOUT_SECONDS, validation_alias=AliasChoices("MEDIA_HTTP_CONNECT_TIMEOUT_SECONDS", "media_http_connect_timeout_seconds"), gt=0)
+    media_http_read_timeout_seconds: float = Field(default=DEFAULT_MEDIA_HTTP_READ_TIMEOUT_SECONDS, validation_alias=AliasChoices("MEDIA_HTTP_READ_TIMEOUT_SECONDS", "media_http_read_timeout_seconds"), gt=0)
+    media_http_write_timeout_seconds: float = Field(default=DEFAULT_MEDIA_HTTP_WRITE_TIMEOUT_SECONDS, validation_alias=AliasChoices("MEDIA_HTTP_WRITE_TIMEOUT_SECONDS", "media_http_write_timeout_seconds"), gt=0)
+    media_http_pool_timeout_seconds: float = Field(default=DEFAULT_MEDIA_HTTP_POOL_TIMEOUT_SECONDS, validation_alias=AliasChoices("MEDIA_HTTP_POOL_TIMEOUT_SECONDS", "media_http_pool_timeout_seconds"), gt=0)
+    media_processing_lease_seconds: int = Field(default=DEFAULT_MEDIA_PROCESSING_LEASE_SECONDS, validation_alias=AliasChoices("MEDIA_PROCESSING_LEASE_SECONDS", "media_processing_lease_seconds"), gt=0)
+    media_task_max_retries: int = Field(default=DEFAULT_MEDIA_TASK_MAX_RETRIES, validation_alias=AliasChoices("MEDIA_TASK_MAX_RETRIES", "media_task_max_retries"), ge=0)
+    media_task_retry_base_seconds: int = Field(default=DEFAULT_MEDIA_TASK_RETRY_BASE_SECONDS, validation_alias=AliasChoices("MEDIA_TASK_RETRY_BASE_SECONDS", "media_task_retry_base_seconds"), gt=0)
+    whisperx_base_url: str = Field(default=DEFAULT_WHISPERX_BASE_URL, validation_alias=AliasChoices("WHISPERX_BASE_URL", "whisperx_base_url"))
+    whisperx_model: str = Field(default=DEFAULT_WHISPERX_MODEL, validation_alias=AliasChoices("WHISPERX_MODEL", "whisperx_model"), min_length=1)
+    whisperx_request_timeout_seconds: float = Field(default=DEFAULT_WHISPERX_REQUEST_TIMEOUT_SECONDS, validation_alias=AliasChoices("WHISPERX_REQUEST_TIMEOUT_SECONDS", "whisperx_request_timeout_seconds"), gt=0)
 
 
     sqlalchemy_database_url: str = Field(
@@ -81,13 +104,13 @@ class Settings(BaseSettings):
     )
 
     outbox_dispatch_batch_size: int = Field(
-        default=50,
+        default=DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
         validation_alias=AliasChoices("OUTBOX_DISPATCH_BATCH_SIZE", "outbox_dispatch_batch_size"),
         description="Maximum number of outbox events a dispatcher claims per poll.",
     )
 
     outbox_dispatch_poll_interval_seconds: float = Field(
-        default=5.0,
+        default=DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
         validation_alias=AliasChoices(
             "OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS",
             "outbox_dispatch_poll_interval_seconds",
@@ -96,26 +119,27 @@ class Settings(BaseSettings):
     )
 
     outbox_dispatch_lease_seconds: int = Field(
-        default=60,
+        default=DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
         validation_alias=AliasChoices("OUTBOX_DISPATCH_LEASE_SECONDS", "outbox_dispatch_lease_seconds"),
         description="Seconds before an in-flight outbox dispatch lease can be reclaimed.",
     )
 
     outbox_retry_base_seconds: int = Field(
-        default=5,
+        default=DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
         validation_alias=AliasChoices("OUTBOX_RETRY_BASE_SECONDS", "outbox_retry_base_seconds"),
         description="Base delay for outbox exponential retry backoff.",
     )
 
     outbox_retry_max_seconds: int = Field(
-        default=300,
+        default=DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
         validation_alias=AliasChoices("OUTBOX_RETRY_MAX_SECONDS", "outbox_retry_max_seconds"),
         description="Maximum delay for outbox exponential retry backoff.",
     )
 
 
     LOG_LEVEL: str = Field(
-        default="DEBUG",
+        default=DEFAULT_LOG_LEVEL,
+        validation_alias=AliasChoices("LOG_LEVEL", "log_level"),
         description="Logging level for the application.",
     )
 

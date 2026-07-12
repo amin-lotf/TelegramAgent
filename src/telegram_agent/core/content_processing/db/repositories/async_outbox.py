@@ -27,19 +27,14 @@ class AsyncSqlAlchemyOutboxRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_for_aggregate(
+    async def get_by_idempotency_key(
         self,
-        *,
-        event_type: str,
-        aggregate_type: str,
-        aggregate_id: UUID,
+        idempotency_key: str,
     ) -> OutboxEvent | None:
-        stmt = select(OutboxEvent).where(
-            OutboxEvent.event_type == event_type,
-            OutboxEvent.aggregate_type == aggregate_type,
-            OutboxEvent.aggregate_id == aggregate_id,
+        statement = select(OutboxEvent).where(
+            OutboxEvent.idempotency_key == idempotency_key,
         )
-        result = await self._session.execute(stmt)
+        result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 
     async def claim_available(

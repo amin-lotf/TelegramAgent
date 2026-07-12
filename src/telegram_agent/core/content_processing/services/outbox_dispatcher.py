@@ -7,16 +7,15 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import timedelta
-from uuid import UUID
 
 from celery import Task
 
 from telegram_agent.core.common.utils import utcnow
-from telegram_agent.core.content_processing.common.const import CONTENT_PROCESSING_JOB_AGGREGATE_TYPE
 from telegram_agent.core.content_processing.common.results import OutboxDispatchResult
 from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import OutboxEventType
-from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_source_task
+from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
+from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
 from telegram_agent.core.content_processing.db.models.content_processing import OutboxEvent
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
     SyncSqlAlchemyContentProcessingUnitOfWork,
@@ -46,7 +45,8 @@ class OutboxDispatcher:
         self._retry_max_delay = retry_max_delay
         self._lease_owner = lease_owner or self._default_lease_owner()
         self._task_by_event_type: dict[str, Task] = {
-            OutboxEventType.CONTENT_PROCESSING_JOB_READY.value: download_telegram_source_task,
+            OutboxEventType.CONTENT_PROCESSING_JOB_READY.value: download_telegram_media_task,
+            OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value: transcribe_media_task,
         }
 
     @classmethod
@@ -90,14 +90,7 @@ class OutboxDispatcher:
                 )
                 continue
 
-            job_id = self._extract_job_id(event)
-            if job_id is None:
-                permanent_failures += 1
-                self._mark_permanent_failure(
-                    event=event,
-                    error_message="Outbox event payload does not contain a valid job_id",
-                )
-                continue
+            job_id = event.job_id
 
             try:
                 logger.info(
@@ -195,25 +188,6 @@ class OutboxDispatcher:
         multiplier = 2 ** max(attempt_count, 0)
         delay = self._retry_base_delay * multiplier
         return min(delay, self._retry_max_delay)
-
-    @staticmethod
-    def _extract_job_id(event: OutboxEvent) -> UUID | None:
-        if event.aggregate_type != CONTENT_PROCESSING_JOB_AGGREGATE_TYPE:
-            return None
-
-        payload_job_id = event.payload.get("job_id")
-        if not isinstance(payload_job_id, str):
-            return None
-
-        try:
-            job_id = UUID(payload_job_id)
-        except ValueError:
-            return None
-
-        if job_id != event.aggregate_id:
-            return None
-
-        return job_id
 
     @staticmethod
     def _default_lease_owner() -> str:

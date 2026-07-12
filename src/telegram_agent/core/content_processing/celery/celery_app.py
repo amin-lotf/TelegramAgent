@@ -11,6 +11,7 @@ def create_celery_app() -> Celery:
         backend=settings.redis_url,
         include=[
             "telegram_agent.core.content_processing.celery.tasks.media_download",
+            "telegram_agent.core.content_processing.celery.tasks.transcription",
             "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
         ],
     )
@@ -38,6 +39,11 @@ def create_celery_app() -> Celery:
                 routing_key="telegram.download",
             ),
             Queue(
+                "media_transcription",
+                Exchange("content_processing", type="direct"),
+                routing_key="media.transcribe",
+            ),
+            Queue(
                 "outbox_dispatch",
                 Exchange("content_processing", type="direct"),
                 routing_key="outbox.dispatch",
@@ -52,6 +58,10 @@ def create_celery_app() -> Celery:
             "telegram.download": {
                 "queue": "telegram_download",
                 "routing_key": "telegram.download",
+            },
+            "media.transcribe": {
+                "queue": "media_transcription",
+                "routing_key": "media.transcribe",
             },
         },
 

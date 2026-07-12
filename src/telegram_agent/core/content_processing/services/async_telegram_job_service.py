@@ -5,7 +5,6 @@ from sqlalchemy.exc import IntegrityError
 
 from telegram_agent.core.common.exceptions import JobCreationError
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
-from telegram_agent.core.content_processing.common.const import CONTENT_PROCESSING_JOB_AGGREGATE_TYPE
 from telegram_agent.core.content_processing.common.results import CreateTelegramJobResult
 from telegram_agent.core.content_processing.common.types import JobKind, JobStatus, OutboxEventType
 from telegram_agent.core.content_processing.db.models.content_processing import Job, MediaAsset, OutboxEvent, TelegramSource
@@ -72,11 +71,12 @@ class AsyncTelegramJobService:
 
                 await uow.media_assets.add(media_asset)
 
+                event_type = OutboxEventType.CONTENT_PROCESSING_JOB_READY
                 outbox_event = OutboxEvent(
-                    event_type=OutboxEventType.CONTENT_PROCESSING_JOB_READY,
-                    aggregate_type=CONTENT_PROCESSING_JOB_AGGREGATE_TYPE,
-                    aggregate_id=job.id,
-                    payload={"job_id": str(job.id)},
+                    event_type=event_type,
+                    job_id=job.id,
+                    idempotency_key=f"{event_type.value}:{job.id}",
+                    payload={},
                 )
 
                 await uow.outbox_events.add(outbox_event)

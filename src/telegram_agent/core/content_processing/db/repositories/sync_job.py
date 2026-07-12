@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
+from telegram_agent.core.common.utils import clean_error_message, utcnow
 from telegram_agent.core.content_processing.common.types import JobStatus
 from telegram_agent.core.content_processing.db.models.content_processing import Job
 
@@ -14,23 +16,89 @@ class SyncSqlAlchemyJobRepository:
         self._session = session
 
     def get_by_id(self, job_id: UUID) -> Job | None:
-        stmt = select(Job).where(Job.id == job_id)
-        result = self._session.execute(stmt)
-        return result.scalar_one_or_none()
+        return self._session.scalar(select(Job).where(Job.id == job_id))
 
     def claim_for_download(self, job_id: UUID) -> Job | None:
-        stmt = (
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.QUEUED)
+            .values(status=JobStatus.RUNNING, error_message=None, updated_at=func.now())
+            .returning(Job)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
+    def claim_download(self, *, job_id: UUID, lease_timeout: timedelta) -> bool:
+        stale_before = utcnow() - lease_timeout
+        statement = (
             update(Job)
             .where(
                 Job.id == job_id,
-                Job.status == JobStatus.QUEUED,
+                or_(
+                    Job.status == JobStatus.QUEUED,
+                    (Job.status == JobStatus.RUNNING) & (Job.updated_at < stale_before),
+                ),
             )
-            .values(
-                status=JobStatus.RUNNING,
-                updated_at=func.now(),
+            .values(status=JobStatus.RUNNING, error_message=None, updated_at=func.now())
+            .returning(Job.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def claim_transcription(self, *, job_id: UUID, lease_timeout: timedelta) -> bool:
+        stale_before = utcnow() - lease_timeout
+        statement = (
+            update(Job)
+            .where(
+                Job.id == job_id,
+                or_(
+                    Job.status == JobStatus.DOWNLOADED,
+                    (Job.status == JobStatus.TRANSCRIBING) & (Job.updated_at < stale_before),
+                ),
             )
-            .returning(Job)
+            .values(status=JobStatus.TRANSCRIBING, error_message=None, updated_at=func.now())
+            .returning(Job.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def complete_download(self, *, job_id: UUID, requires_transcription: bool) -> bool:
+        next_status = JobStatus.DOWNLOADED if requires_transcription else JobStatus.COMPLETED
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
+            .values(status=next_status, error_message=None, updated_at=func.now())
+            .returning(Job.id)
+        )
+        if self._session.execute(statement).scalar_one_or_none() is not None:
+            return True
+        current_status = self._session.scalar(select(Job.status).where(Job.id == job_id))
+        return current_status in (JobStatus.DOWNLOADED, JobStatus.TRANSCRIBING, JobStatus.COMPLETED)
+
+    def complete_transcription(self, *, job_id: UUID) -> bool:
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.TRANSCRIBING)
+            .values(status=JobStatus.COMPLETED, error_message=None, updated_at=func.now())
+            .returning(Job.id)
+        )
+        if self._session.execute(statement).scalar_one_or_none() is not None:
+            return True
+        return self._session.scalar(select(Job.status).where(Job.id == job_id)) == JobStatus.COMPLETED
+
+    def mark_download_retryable(self, *, job_id: UUID, error_message: str) -> None:
+        self._mark_retryable(job_id=job_id, from_status=JobStatus.RUNNING, to_status=JobStatus.QUEUED, error_message=error_message)
+
+    def mark_transcription_retryable(self, *, job_id: UUID, error_message: str) -> None:
+        self._mark_retryable(job_id=job_id, from_status=JobStatus.TRANSCRIBING, to_status=JobStatus.DOWNLOADED, error_message=error_message)
+
+    def mark_failed(self, *, job_id: UUID, error_message: str) -> None:
+        self._session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.status.not_in((JobStatus.COMPLETED, JobStatus.FAILED)))
+            .values(status=JobStatus.FAILED, error_message=clean_error_message(error_message, max_length=2000), updated_at=func.now())
         )
 
-        result = self._session.execute(stmt)
-        return result.scalar_one_or_none()
+    def _mark_retryable(self, *, job_id: UUID, from_status: JobStatus, to_status: JobStatus, error_message: str) -> None:
+        self._session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.status == from_status)
+            .values(status=to_status, error_message=clean_error_message(error_message, max_length=2000), updated_at=func.now())
+        )
