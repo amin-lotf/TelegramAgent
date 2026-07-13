@@ -167,5 +167,6 @@ volumes:
   telegram_auth_postgres_data:
   telegram_ingress_postgres_data:
   content_processing_postgres_data:
+  agent_runtime_postgres_data:
 networks:
   fatol-net:
