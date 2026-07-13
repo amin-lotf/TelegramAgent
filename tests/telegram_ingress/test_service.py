@@ -18,6 +18,14 @@ pytestmark = pytest.mark.asyncio
 
 
 
+class StubConversationCoordinator:
+    def __init__(self) -> None:
+        self.chat_ids = []
+
+    async def coordinate(self, chat_id: int) -> None:
+        self.chat_ids.append(chat_id)
+
+
 class StubContentProcessingClient:
     def __init__(self) -> None:
         self.commands = []
@@ -30,6 +38,7 @@ def _service(uow_factory) -> AsyncUserMessageService:
     return AsyncUserMessageService(
         uow_factory=uow_factory,
         content_processing_client=StubContentProcessingClient(),
+        conversation_coordinator=StubConversationCoordinator(),
     )
 
 

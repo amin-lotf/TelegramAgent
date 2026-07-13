@@ -36,5 +36,38 @@ services:
     networks:
       - fatol-net
 
+  telegram-ingress-worker:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: telegram-ingress
+    container_name: telegram_ingress_worker
+    env_file:
+      - .env.telegram_ingress.docker
+    command: >
+      python -m celery -A telegram_agent.core.telegram_ingress.celery.celery_app.celery_app worker
+      -Q telegram_ingress_outbox
+      --loglevel=info
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+
+  telegram-ingress-beat:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: telegram-ingress
+    container_name: telegram_ingress_beat
+    env_file:
+      - .env.telegram_ingress.docker
+    command: >
+      python -m celery -A telegram_agent.core.telegram_ingress.celery.celery_app.celery_app beat
+      --loglevel=info
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+
 networks:
   fatol-net:

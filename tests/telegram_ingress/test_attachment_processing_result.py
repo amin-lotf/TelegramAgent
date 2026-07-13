@@ -26,6 +26,21 @@ from telegram_agent.core.telegram_ingress.services.async_attachment_processing_r
 pytestmark = pytest.mark.asyncio
 
 
+class StubConversationCoordinator:
+    def __init__(self) -> None:
+        self.chat_ids: list[int] = []
+
+    async def coordinate(self, chat_id: int) -> None:
+        self.chat_ids.append(chat_id)
+
+
+def _service(uow_factory) -> AsyncAttachmentProcessingResultService:
+    return AsyncAttachmentProcessingResultService(
+        uow_factory,
+        conversation_coordinator=StubConversationCoordinator(),
+    )
+
+
 async def test_completed_voice_updates_attachment_and_message_text(
     ingress_uow_factory,
     ingress_sessionmaker,
@@ -37,9 +52,7 @@ async def test_completed_voice_updates_attachment_and_message_text(
     )
     attachment_id = await _get_attachment_id(ingress_sessionmaker, message.id)
 
-    result = await AsyncAttachmentProcessingResultService(
-        ingress_uow_factory
-    ).apply(
+    result = await _service(ingress_uow_factory).apply(
         ApplyAttachmentProcessingResultCommand(
             ingress_message_id=message.id,
             ingress_attachment_id=attachment_id,
@@ -72,7 +85,7 @@ async def test_completed_document_does_not_replace_message_text(
     )
     attachment_id = await _get_attachment_id(ingress_sessionmaker, message.id)
 
-    await AsyncAttachmentProcessingResultService(ingress_uow_factory).apply(
+    await _service(ingress_uow_factory).apply(
         ApplyAttachmentProcessingResultCommand(
             ingress_message_id=message.id,
             ingress_attachment_id=attachment_id,
@@ -103,7 +116,7 @@ async def test_failed_processing_marks_attachment_failed(
     )
     attachment_id = await _get_attachment_id(ingress_sessionmaker, message.id)
 
-    await AsyncAttachmentProcessingResultService(ingress_uow_factory).apply(
+    await _service(ingress_uow_factory).apply(
         ApplyAttachmentProcessingResultCommand(
             ingress_message_id=message.id,
             ingress_attachment_id=attachment_id,

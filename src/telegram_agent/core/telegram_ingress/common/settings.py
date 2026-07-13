@@ -7,6 +7,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from telegram_agent.core.telegram_ingress.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS, \
     DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_CONTENT_PROCESSING_BASE_URL
+from telegram_agent.core.telegram_ingress.common.const import (
+    DEFAULT_AGENT_RUNTIME_BASE_URL,
+    DEFAULT_AGENT_RUNTIME_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
+    DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
+    DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
+    DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
+    DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
+    DEFAULT_REDIS_URL,
+)
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -31,7 +41,7 @@ class Settings(BaseSettings):
         description="API token for accessing the authentication service API.",
     )
 
-    telegram_ingress_service_token: str = Field(
+    telegram_ingress_service_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
             "TELEGRAM_INGRESS_SERVICE_TOKEN",
@@ -56,6 +66,22 @@ class Settings(BaseSettings):
         description="API token for accessing the authentication service API.",
     )
 
+    agent_runtime_base_url: str = Field(
+        default=DEFAULT_AGENT_RUNTIME_BASE_URL,
+        validation_alias=AliasChoices("AGENT_RUNTIME_BASE_URL", "agent_runtime_base_url"),
+        description="Base URL for the agent runtime API.",
+    )
+    agent_runtime_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AGENT_RUNTIME_SERVICE_TOKEN", "agent_runtime_service_token"),
+        description="API token for submitting batches to the agent runtime.",
+    )
+    agent_runtime_request_timeout_seconds: float = Field(
+        default=DEFAULT_AGENT_RUNTIME_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices("AGENT_RUNTIME_REQUEST_TIMEOUT_SECONDS", "agent_runtime_request_timeout_seconds"),
+        gt=0,
+    )
+
     sqlalchemy_database_url: str = Field(
         default=DEFAULT_SQLALCHEMY_DATABASE_URL,
         validation_alias=AliasChoices("SQLALCHEMY_DATABASE_URL", "sqlalchemy_database_url"),
@@ -63,6 +89,35 @@ class Settings(BaseSettings):
     )
 
 
+    redis_url: str = Field(
+        default=DEFAULT_REDIS_URL,
+        validation_alias=AliasChoices("REDIS_URL", "redis_url"),
+    )
+    outbox_dispatch_batch_size: int = Field(
+        default=DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
+        validation_alias=AliasChoices("OUTBOX_DISPATCH_BATCH_SIZE", "outbox_dispatch_batch_size"),
+        gt=0,
+    )
+    outbox_dispatch_poll_interval_seconds: float = Field(
+        default=DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
+        validation_alias=AliasChoices("OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS", "outbox_dispatch_poll_interval_seconds"),
+        gt=0,
+    )
+    outbox_dispatch_lease_seconds: int = Field(
+        default=DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
+        validation_alias=AliasChoices("OUTBOX_DISPATCH_LEASE_SECONDS", "outbox_dispatch_lease_seconds"),
+        gt=0,
+    )
+    outbox_retry_base_seconds: int = Field(
+        default=DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
+        validation_alias=AliasChoices("OUTBOX_RETRY_BASE_SECONDS", "outbox_retry_base_seconds"),
+        gt=0,
+    )
+    outbox_retry_max_seconds: int = Field(
+        default=DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
+        validation_alias=AliasChoices("OUTBOX_RETRY_MAX_SECONDS", "outbox_retry_max_seconds"),
+        gt=0,
+    )
 
     allowed_origins: str = Field(
         default=DEFAULT_ALLOWED_ORIGINS,

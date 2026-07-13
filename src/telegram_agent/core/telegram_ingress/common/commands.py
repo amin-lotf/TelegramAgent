@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from telegram_agent.core.common.types import (
     AttachmentProcessingResultStatus,
     TelegramAttachmentType,
 )
+from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
 
 
 class ProcessAttachmentCommand(BaseModel):
@@ -86,3 +87,31 @@ class ApplyAttachmentProcessingResultCommand(BaseModel):
     ingress_attachment_id: UUID
     status: AttachmentProcessingResultStatus
     transcribed_text: str | None = None
+
+
+class RuntimeAttachmentPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ingress_attachment_id: UUID
+    type: TelegramAttachmentType
+    status: AttachmentStatus
+    file_id: str
+    file_unique_id: str | None = None
+
+
+class RuntimeMessagePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ingress_message_id: UUID
+    telegram_user_id: int
+    message_id: int
+    reply_message_id: int | None = None
+    text: str | None = None
+    attachment: RuntimeAttachmentPayload | None = None
+
+
+class RuntimeMessageBatchPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: int
+    messages: tuple[RuntimeMessagePayload, ...] = Field(min_length=1)

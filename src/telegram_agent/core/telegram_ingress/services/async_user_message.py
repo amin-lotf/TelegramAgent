@@ -19,6 +19,9 @@ from telegram_agent.core.telegram_ingress.db.models.user_message import (
 from telegram_agent.core.telegram_ingress.db.uow.async_telegram_ingress import (
     AsyncSqlAlchemyTelegramIngressUnitOfWork,
 )
+from telegram_agent.core.telegram_ingress.services.conversation_coordinator import (
+    ConversationCoordinator,
+)
 
 
 
@@ -31,9 +34,11 @@ class AsyncUserMessageService:
             AbstractAsyncContextManager[AsyncSqlAlchemyTelegramIngressUnitOfWork],
         ],
         content_processing_client: ContentProcessingClient,
+        conversation_coordinator: ConversationCoordinator,
     ) -> None:
         self._uow_factory = uow_factory
         self._content_processing_client = content_processing_client
+        self._conversation_coordinator = conversation_coordinator
 
     async def create_user_message(
         self,
@@ -41,14 +46,13 @@ class AsyncUserMessageService:
     ) -> CreateUserMessageResult:
         result = await self._save_user_message(command)
 
-        if result.process_attachment_command is None:
-            return result
-
         if not result.was_created:
             return result
 
-        await self._dispatch_attachment(result)
+        if result.process_attachment_command is not None:
+            await self._dispatch_attachment(result)
 
+        await self._conversation_coordinator.coordinate(result.chat_id)
         return result
 
     async def _save_user_message(
@@ -65,6 +69,7 @@ class AsyncUserMessageService:
             if existing is not None:
                 return CreateUserMessageResult(
                     user_message_id=existing.id,
+                    chat_id=existing.chat_id,
                     attachment_id=None,
                     process_attachment_command=None,
                     was_created=False,
@@ -109,6 +114,7 @@ class AsyncUserMessageService:
 
             return CreateUserMessageResult(
                 user_message_id=user_message.id,
+                chat_id=user_message.chat_id,
                 attachment_id=attachment_id,
                 process_attachment_command=process_attachment_command,
                 was_created=True,

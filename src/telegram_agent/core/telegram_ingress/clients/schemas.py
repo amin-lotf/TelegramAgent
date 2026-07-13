@@ -7,3 +7,9 @@ class ProcessAttachmentResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["accepted"]
+
+
+class AgentRuntimeAcceptedResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["accepted"]

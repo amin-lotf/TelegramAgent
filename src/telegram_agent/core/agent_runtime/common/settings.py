@@ -42,7 +42,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CONTENT_PROCESSING_SERVICE_TOKEN", "content_processing_service_token"),
         description="API token for accessing the authentication service API.",
     )
-    telegram_ingress_service_token: str = Field(
+    telegram_ingress_service_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
             "TELEGRAM_INGRESS_SERVICE_TOKEN",
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
         ),
     )
 
-    agent_runtime_service_token: str = Field(
+    agent_runtime_service_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
             "AGENT_RUNTIME_SERVICE_TOKEN",

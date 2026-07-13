@@ -7,11 +7,11 @@ services:
     env_file:
       - .env.storage.docker
     environment:
-      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@agent_runtime_postgress:5432/telegram_agent
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@agent_runtime_postgres:5432/telegram_agent
     command: alembic -n agent_runtime upgrade head
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     depends_on:
-      agent_runtime_postgress:
+      agent_runtime_postgres:
         condition: service_healthy
     volumes:
       - ../..:/app
@@ -26,11 +26,11 @@ services:
     env_file:
       - .env.storage.docker
     environment:
-      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@content_processing_postgress:5432/telegram_agent
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@content_processing_postgres:5432/telegram_agent
     command: alembic -n content_processing upgrade head
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     depends_on:
-      content_processing_postgress:
+      content_processing_postgres:
         condition: service_healthy
     volumes:
       - ../..:/app
@@ -45,11 +45,11 @@ services:
     env_file:
       - .env.storage.docker
     environment:
-      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@telegram_ingress_postgress:5432/telegram_agent
+      SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@telegram_ingress_postgres:5432/telegram_agent
     command: alembic -n telegram_ingress upgrade head
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     depends_on:
-      telegram_ingress_postgress:
+      telegram_ingress_postgres:
         condition: service_healthy
     volumes:
       - ../..:/app
@@ -104,9 +104,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  telegram_ingress_postgress:
+  telegram_ingress_postgres:
     image: postgres:16
-    container_name: telegram-ingress-postgress
+    container_name: telegram-ingress-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_USER=telegram
@@ -121,9 +121,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  content_processing_postgress:
+  content_processing_postgres:
     image: postgres:16
-    container_name: content-processing-postgress
+    container_name: content-processing-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_USER=telegram
@@ -138,9 +138,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  agent_runtime_postgress:
+  agent_runtime_postgres:
     image: postgres:16
-    container_name: agent-runtime-postgress
+    container_name: agent-runtime-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_USER=telegram

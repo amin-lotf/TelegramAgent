@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 
 class VerifyApiToken:
-    def __init__(self, expected_token: str) -> None:
+    def __init__(self, expected_token: str | None) -> None:
         self.expected_token = expected_token
     def __call__(
         self,

@@ -46,6 +46,9 @@ from telegram_agent.core.telegram_ingress.db.models.user_message import (  # noq
 from telegram_agent.core.telegram_ingress.db.uow.async_telegram_ingress import (  # noqa: E402
     AsyncSqlAlchemyTelegramIngressUnitOfWork,
 )
+from telegram_agent.core.telegram_ingress.db.uow.sync_telegram_ingress import (  # noqa: E402
+    SyncSqlAlchemyTelegramIngressUnitOfWork,
+)
 from telegram_agent.core.content_processing.db.models.content_processing import Job  # noqa: E402
 from telegram_agent.core.content_processing.db.uow.async_content_processing import (  # noqa: E402
     AsyncSqlAlchemyContentProcessingUnitOfWork,
@@ -56,7 +59,11 @@ from telegram_agent.core.content_processing.db.uow.sync_content_processing impor
 
 
 AUTH_TABLES = ("telegram_users",)
-INGRESS_TABLES = ("attachments", "user_messages")
+INGRESS_TABLES = (
+    "attachments",
+    "user_messages",
+    "conversation_outbox_events",
+)
 CONTENT_PROCESSING_TABLES = (
     "outbox_events",
     "transcript_segments",
@@ -229,6 +236,7 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
         yield {
             "auth": normalize_async_db_url(auth_url),
             "ingress": normalize_async_db_url(ingress_url),
+            "ingress_sync": normalize_sync_db_url(ingress_url),
             "content": normalize_async_db_url(content_url),
             "content_sync": normalize_sync_db_url(content_url),
         }
@@ -355,6 +363,38 @@ def content_uow_factory(content_sessionmaker: async_sessionmaker[AsyncSession]):
     async def _factory() -> Any:
         async with content_sessionmaker() as session:
             async with AsyncSqlAlchemyContentProcessingUnitOfWork(session) as uow:
+                yield uow
+
+    return _factory
+
+
+@pytest.fixture
+def ingress_sync_sessionmaker(
+    database_urls: dict[str, str],
+) -> sessionmaker[Session]:
+    factory = create_sync_session_factory(database_urls["ingress_sync"])
+    table_names = ", ".join(INGRESS_TABLES)
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+    yield factory
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+
+
+@pytest.fixture
+def ingress_sync_uow_factory(
+    ingress_sync_sessionmaker: sessionmaker[Session],
+):
+    @contextmanager
+    def _factory() -> Any:
+        with ingress_sync_sessionmaker() as session:
+            with SyncSqlAlchemyTelegramIngressUnitOfWork(session) as uow:
                 yield uow
 
     return _factory

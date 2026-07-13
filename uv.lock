@@ -3535,6 +3535,8 @@ migration = [
     { name = "psycopg2-binary" },
 ]
 telegram-ingress = [
+    { name = "celery", extra = ["redis"] },
+    { name = "psycopg2-binary" },
     { name = "redis" },
 ]
 whisperx = [
@@ -3549,6 +3551,7 @@ requires-dist = [
     { name = "alembic", marker = "extra == 'migration'", specifier = ">=1.18.4" },
     { name = "asyncpg", marker = "extra == 'apps'", specifier = ">=0.31.0" },
     { name = "celery", extras = ["redis"], marker = "extra == 'content-processing'", specifier = ">=5.3.1" },
+    { name = "celery", extras = ["redis"], marker = "extra == 'telegram-ingress'", specifier = ">=5.3.1" },
     { name = "colorlog", marker = "extra == 'apps'", specifier = ">=6.10.1" },
     { name = "fastapi", marker = "extra == 'apps'", specifier = ">=0.136.1" },
     { name = "httpx", marker = "extra == 'apps'", specifier = ">=0.28.1" },
@@ -3556,6 +3559,7 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'content-processing'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'dev'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'migration'", specifier = ">=2.9.12" },
+    { name = "psycopg2-binary", marker = "extra == 'telegram-ingress'", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },

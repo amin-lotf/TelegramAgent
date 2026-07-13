@@ -15,6 +15,9 @@ from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
 from telegram_agent.core.telegram_ingress.db.uow.async_telegram_ingress import (
     AsyncSqlAlchemyTelegramIngressUnitOfWork,
 )
+from telegram_agent.core.telegram_ingress.services.conversation_coordinator import (
+    ConversationCoordinator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +36,13 @@ class AsyncAttachmentProcessingResultService:
             [],
             AbstractAsyncContextManager[AsyncSqlAlchemyTelegramIngressUnitOfWork],
         ],
+        conversation_coordinator: ConversationCoordinator,
     ) -> None:
         self._uow_factory = uow_factory
+        self._conversation_coordinator = conversation_coordinator
 
     async def apply(self, command: ApplyAttachmentProcessingResultCommand) -> ApplyAttachmentProcessingResultResult:
+        chat_id: int | None = None
         async with self._uow_factory() as uow:
             message = await uow.user_messages.get_by_id(command.ingress_message_id)
             if message is None or message.attachment is None:
@@ -44,6 +50,7 @@ class AsyncAttachmentProcessingResultService:
             if message.attachment.id != command.ingress_attachment_id:
                 return ApplyAttachmentProcessingResultResult(applied=False)
 
+            chat_id = message.chat_id
             message.attachment.status = (
                 AttachmentStatus.READY
                 if command.status == AttachmentProcessingResultStatus.COMPLETED
@@ -57,4 +64,7 @@ class AsyncAttachmentProcessingResultService:
                 message.text = command.transcribed_text
 
             await uow.flush()
-            return ApplyAttachmentProcessingResultResult(applied=True)
+
+        if chat_id is not None:
+            await self._conversation_coordinator.coordinate(chat_id)
+        return ApplyAttachmentProcessingResultResult(applied=True)

@@ -7,7 +7,7 @@ services:
     container_name: telegram_auth_app
     env_file:
       - .env.telegram_auth.docker
-    command: python -m uvicorn telegram_agent.core.telegram_auth.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn telegram_agent.core.telegram_auth.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
     volumes:
       - ../..:/app
     networks:
@@ -20,7 +20,7 @@ services:
     container_name: telegram_ingress_app
     env_file:
       - .env.telegram_ingress.docker
-    command: python -m uvicorn telegram_agent.core.telegram_ingress.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn telegram_agent.core.telegram_ingress.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
     volumes:
       - ../..:/app
     networks:
@@ -33,7 +33,7 @@ services:
     container_name: content_processing_app
     env_file:
       - .env.content_processing.docker
-    command: python -m uvicorn telegram_agent.core.content_processing.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn telegram_agent.core.content_processing.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
     volumes:
       - ../..:/app
     networks:
@@ -46,7 +46,7 @@ services:
     container_name: agent_runtime_app
     env_file:
       - .env.agent_runtime.docker
-    command: python -m uvicorn telegram_agent.core.agent_runtime.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn telegram_agent.core.agent_runtime.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
     volumes:
       - ../..:/app
     networks:

@@ -25,6 +25,14 @@ class TelegramIngressBadResponseError(Exception):
     pass
 
 
+class AgentRuntimeUnavailableError(Exception):
+    pass
+
+
+class AgentRuntimeBadResponseError(Exception):
+    pass
+
+
 class JobCreationError(RuntimeError):
     """Raised when a content-processing job cannot be persisted."""
     pass

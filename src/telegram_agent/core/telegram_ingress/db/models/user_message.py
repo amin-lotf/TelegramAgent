@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from telegram_agent.core.common.db.base import Base
@@ -68,6 +68,13 @@ class UserMessage(Base):
         server_default=ConversationStatus.PENDING.value,
     )
 
+    dispatch_event_id: Mapped[UUID | None] = mapped_column(
+        sa.UUID(as_uuid=True),
+        ForeignKey("conversation_outbox_events.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -89,6 +96,12 @@ class UserMessage(Base):
         UniqueConstraint(
             "update_id",
             name="uq_user_messages_update_id",
+        ),
+        Index(
+            "ix_user_messages_chat_pending_order",
+            "chat_id",
+            "message_id",
+            postgresql_where=sa.text("conversation_status = 'pending'"),
         ),
     )
 

@@ -1,11 +1,12 @@
+from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import logging
 
-from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus
+from telegram_agent.core.telegram_ingress.common.types import AttachmentStatus, ConversationStatus
 from telegram_agent.core.telegram_ingress.db.models.user_message import UserMessage, Attachment
 
 logger = logging.getLogger(__name__)
@@ -80,5 +81,47 @@ class AsyncSqlAlchemyUserMessageRepository:
             update(Attachment)
             .where(Attachment.id == attachment_id)
             .values(status=status)
+        )
+        await self._session.execute(stmt)
+    async def acquire_chat_lock(self, chat_id: int) -> None:
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:chat_id)"),
+            {"chat_id": chat_id},
+        )
+
+    async def get_pending_for_chat(self, chat_id: int) -> list[UserMessage]:
+        stmt = (
+            select(UserMessage)
+            .where(
+                UserMessage.chat_id == chat_id,
+                UserMessage.conversation_status == ConversationStatus.PENDING,
+            )
+            .order_by(UserMessage.message_id, UserMessage.created_at, UserMessage.id)
+            .options(selectinload(UserMessage.attachment))
+            .with_for_update()
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_enqueued(
+        self,
+        *,
+        messages: Sequence[UserMessage],
+        dispatch_event_id: UUID,
+    ) -> None:
+        if not messages:
+            return
+
+        message_ids = [message.id for message in messages]
+        stmt = (
+            update(UserMessage)
+            .where(
+                UserMessage.id.in_(message_ids),
+                UserMessage.conversation_status == ConversationStatus.PENDING,
+            )
+            .values(
+                conversation_status=ConversationStatus.ENQUEUED,
+                dispatch_event_id=dispatch_event_id,
+            )
         )
         await self._session.execute(stmt)
