@@ -184,7 +184,7 @@ class RuntimeMessage(Base):
         ForeignKeyConstraint(
             ["group_id", "chat_id"],
             ["conversation_groups.id", "conversation_groups.chat_id"],
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name="fk_runtime_messages_group_id_chat_id",
         ),
         UniqueConstraint(

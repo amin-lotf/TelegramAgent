@@ -10,7 +10,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import get_enum_values
-from telegram_agent.core.content_processing.common.types import JobStatus, JobKind, OutboxEventStatus
+from telegram_agent.core.content_processing.common.types import (
+    JobStatus,
+    JobKind,
+    MediaAssetRole,
+    OutboxEventStatus,
+)
 
 
 class Job(Base):
@@ -150,6 +155,25 @@ class MediaAsset(Base):
 
     job: Mapped[Job] = relationship()
 
+    role: Mapped[MediaAssetRole] = mapped_column(
+        sa.Enum(
+            MediaAssetRole,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=MediaAssetRole.SOURCE,
+        server_default=MediaAssetRole.SOURCE.value,
+    )
+
+    parent_asset_id: Mapped[UUID | None] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     local_path: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
@@ -159,7 +183,7 @@ class MediaAsset(Base):
         String(32),
         nullable=False,
     )
-    # audio, video, document, image
+    # attachment/content kind: voice, video, video_note, audio, document, photo
 
     mime_type: Mapped[str | None] = mapped_column(
         String(128),
@@ -174,6 +198,14 @@ class MediaAsset(Base):
     size_bytes: Mapped[int | None] = mapped_column(
         BigInteger,
         nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "role",
+            name="uq_media_assets_job_id_role",
+        ),
     )
 
 

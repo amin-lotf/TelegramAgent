@@ -12,7 +12,8 @@ from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHE
     DEFAULT_MEDIA_DOWNLOAD_CHUNK_SIZE, DEFAULT_MEDIA_HTTP_CONNECT_TIMEOUT_SECONDS, \
     DEFAULT_MEDIA_HTTP_READ_TIMEOUT_SECONDS, DEFAULT_MEDIA_HTTP_WRITE_TIMEOUT_SECONDS, \
     DEFAULT_MEDIA_HTTP_POOL_TIMEOUT_SECONDS, DEFAULT_MEDIA_PROCESSING_LEASE_SECONDS, \
-    DEFAULT_MEDIA_TASK_MAX_RETRIES, DEFAULT_MEDIA_TASK_RETRY_BASE_SECONDS, DEFAULT_WHISPERX_MODEL, \
+    DEFAULT_MEDIA_TASK_MAX_RETRIES, DEFAULT_MEDIA_TASK_RETRY_BASE_SECONDS, DEFAULT_FFMPEG_BINARY, \
+    DEFAULT_FFMPEG_TIMEOUT_SECONDS, DEFAULT_WHISPERX_MODEL, \
     DEFAULT_WHISPERX_REQUEST_TIMEOUT_SECONDS, DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE, \
     DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS, DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS, \
     DEFAULT_OUTBOX_RETRY_BASE_SECONDS, DEFAULT_OUTBOX_RETRY_MAX_SECONDS, DEFAULT_LOG_LEVEL
@@ -81,6 +82,16 @@ class Settings(BaseSettings):
     media_processing_lease_seconds: int = Field(default=DEFAULT_MEDIA_PROCESSING_LEASE_SECONDS, validation_alias=AliasChoices("MEDIA_PROCESSING_LEASE_SECONDS", "media_processing_lease_seconds"), gt=0)
     media_task_max_retries: int = Field(default=DEFAULT_MEDIA_TASK_MAX_RETRIES, validation_alias=AliasChoices("MEDIA_TASK_MAX_RETRIES", "media_task_max_retries"), ge=0)
     media_task_retry_base_seconds: int = Field(default=DEFAULT_MEDIA_TASK_RETRY_BASE_SECONDS, validation_alias=AliasChoices("MEDIA_TASK_RETRY_BASE_SECONDS", "media_task_retry_base_seconds"), gt=0)
+    ffmpeg_binary: str = Field(
+        default=DEFAULT_FFMPEG_BINARY,
+        validation_alias=AliasChoices("FFMPEG_BINARY", "ffmpeg_binary"),
+        min_length=1,
+    )
+    ffmpeg_timeout_seconds: float = Field(
+        default=DEFAULT_FFMPEG_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices("FFMPEG_TIMEOUT_SECONDS", "ffmpeg_timeout_seconds"),
+        gt=0,
+    )
     whisperx_base_url: str = Field(default=DEFAULT_WHISPERX_BASE_URL, validation_alias=AliasChoices("WHISPERX_BASE_URL", "whisperx_base_url"))
     telegram_ingress_base_url: str = Field(
         default=DEFAULT_TELEGRAM_INGRESS_BASE_URL,
@@ -89,7 +100,7 @@ class Settings(BaseSettings):
             "telegram_ingress_base_url",
         ),
     )
-    telegram_ingress_service_token: str = Field(
+    telegram_ingress_service_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
             "TELEGRAM_INGRESS_SERVICE_TOKEN",

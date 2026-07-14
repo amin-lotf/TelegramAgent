@@ -6,7 +6,12 @@ from sqlalchemy.exc import IntegrityError
 from telegram_agent.core.common.exceptions import JobCreationError
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
 from telegram_agent.core.content_processing.common.results import CreateTelegramJobResult
-from telegram_agent.core.content_processing.common.types import JobKind, JobStatus, OutboxEventType
+from telegram_agent.core.content_processing.common.types import (
+    JobKind,
+    JobStatus,
+    MediaAssetRole,
+    OutboxEventType,
+)
 from telegram_agent.core.content_processing.db.models.content_processing import Job, MediaAsset, OutboxEvent, TelegramSource
 from telegram_agent.core.content_processing.db.uow.async_content_processing import \
     AsyncSqlAlchemyContentProcessingUnitOfWork
@@ -62,6 +67,8 @@ class AsyncTelegramJobService:
 
                 media_asset = MediaAsset(
                     job_id=job.id,
+                    role=MediaAssetRole.SOURCE,
+                    parent_asset_id=None,
                     local_path=None,
                     media_type=command.attachment_type.value,
                     mime_type=None,

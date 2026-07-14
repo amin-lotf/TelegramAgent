@@ -40,15 +40,30 @@ def upgrade() -> None:
         "media_assets",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("job_id", sa.UUID(), nullable=False),
+        sa.Column("role", sa.String(length=32), server_default="source", nullable=False),
+        sa.Column("parent_asset_id", sa.UUID(), nullable=True),
         sa.Column("local_path", sa.Text(), nullable=True),
         sa.Column("media_type", sa.String(length=32), nullable=False),
         sa.Column("mime_type", sa.String(length=128), nullable=True),
         sa.Column("duration_ms", sa.Integer(), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=True),
         sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["parent_asset_id"],
+            ["media_assets.id"],
+            ondelete="SET NULL",
+            name="fk_media_assets_parent_asset_id",
+        ),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("job_id", "role", name="uq_media_assets_job_id_role"),
     )
     op.create_index(op.f("ix_media_assets_job_id"), "media_assets", ["job_id"], unique=False)
+    op.create_index(
+        op.f("ix_media_assets_parent_asset_id"),
+        "media_assets",
+        ["parent_asset_id"],
+        unique=False,
+    )
 
     op.create_table(
         "telegram_sources",
@@ -164,6 +179,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_outbox_events_job_id"), table_name="outbox_events")
     op.drop_table("outbox_events")
 
+    op.drop_index(op.f("ix_media_assets_parent_asset_id"), table_name="media_assets")
     op.drop_index(op.f("ix_media_assets_job_id"), table_name="media_assets")
     op.drop_table("media_assets")
 

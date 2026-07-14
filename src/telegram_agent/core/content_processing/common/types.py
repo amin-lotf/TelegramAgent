@@ -15,6 +15,12 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class MediaAssetRole(StrEnum):
+    SOURCE = "source"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
 class OutboxEventType(StrEnum):
     CONTENT_PROCESSING_JOB_READY = "content_processing.job.ready"
     MEDIA_READY_FOR_TRANSCRIPTION = "content_processing.media.ready_for_transcription"

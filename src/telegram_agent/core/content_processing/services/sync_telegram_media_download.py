@@ -12,14 +12,20 @@ from telegram_agent.core.common.exceptions import (
     RetryableContentProcessingError,
 )
 from telegram_agent.core.common.types import TelegramAttachmentType
-from telegram_agent.core.content_processing.common.commands import RecordMediaDownloadCommand
+from telegram_agent.core.content_processing.common.commands import (
+    RecordMediaDownloadCommand,
+    UpsertDerivedMediaAssetCommand,
+)
 from telegram_agent.core.content_processing.common.results import (
+    MediaDemuxResult,
+    MediaDownloadResult,
     StageExecutionResult,
     TelegramDownloadContext,
 )
 from telegram_agent.core.content_processing.common.settings import Settings, settings
 from telegram_agent.core.content_processing.common.types import (
     JobStatus,
+    MediaAssetRole,
     OutboxEventType,
 )
 from telegram_agent.core.content_processing.db.models.content_processing import (
@@ -30,6 +36,7 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
     SyncSqlAlchemyContentProcessingUnitOfWork,
 )
+from telegram_agent.core.content_processing.downloaders.media_demuxer import MediaDemuxer
 from telegram_agent.core.content_processing.downloaders.telegram_media import (
     TelegramMediaDownloader,
 )
@@ -41,6 +48,13 @@ _TRANSCRIBABLE_ATTACHMENT_TYPES = frozenset(
         TelegramAttachmentType.VIDEO.value,
         TelegramAttachmentType.VIDEO_NOTE.value,
         TelegramAttachmentType.VOICE.value,
+    }
+)
+
+_DEMUX_ATTACHMENT_TYPES = frozenset(
+    {
+        TelegramAttachmentType.VIDEO.value,
+        TelegramAttachmentType.VIDEO_NOTE.value,
     }
 )
 
@@ -78,7 +92,18 @@ class SyncTelegramMediaDownloadService:
                 download_result = TelegramMediaDownloader.from_settings(
                     self._settings
                 ).download(context)
-                self._record_success(context=context, result=download_result)
+                demux_result: MediaDemuxResult | None = None
+                if context.media_type in _DEMUX_ATTACHMENT_TYPES:
+                    demux_result = MediaDemuxer.from_settings(self._settings).demux(
+                        job_id=context.job_id,
+                        source_asset_id=context.media_asset_id,
+                        source_path=download_result.local_path,
+                    )
+                self._record_success(
+                    context=context,
+                    download_result=download_result,
+                    demux_result=demux_result,
+                )
                 result = StageExecutionResult()
         except PermanentContentProcessingError as exc:
             self._mark_failed(job_id, str(exc))
@@ -117,7 +142,7 @@ class SyncTelegramMediaDownloadService:
             ):
                 return None
 
-            asset = uow.media_assets.get_single_by_job_id(job_id)
+            asset = uow.media_assets.get_source_by_job_id(job_id)
             sources = uow.telegram_sources.list_by_job_id(job_id)
             error_message = self._source_error(asset=asset, sources=sources)
             if error_message:
@@ -141,7 +166,7 @@ class SyncTelegramMediaDownloadService:
         sources: list[TelegramSource],
     ) -> str | None:
         if asset is None:
-            return "Job must have exactly one media asset"
+            return "Job must have exactly one source media asset"
         if not sources:
             return "No supported source record exists for job"
         if len(sources) != 1:
@@ -153,21 +178,52 @@ class SyncTelegramMediaDownloadService:
             return "Telegram source has no file identifier"
         return None
 
-    def _record_success(self, *, context: TelegramDownloadContext, result) -> None:
+    def _record_success(
+        self,
+        *,
+        context: TelegramDownloadContext,
+        download_result: MediaDownloadResult,
+        demux_result: MediaDemuxResult | None,
+    ) -> None:
         requires_transcription = context.media_type in _TRANSCRIBABLE_ATTACHMENT_TYPES
         with self._uow_factory() as uow:
             if not uow.media_assets.record_download(
                 RecordMediaDownloadCommand(
                     job_id=context.job_id,
                     media_asset_id=context.media_asset_id,
-                    local_path=result.local_path,
-                    size_bytes=result.size_bytes,
-                    mime_type=result.mime_type,
+                    local_path=download_result.local_path,
+                    size_bytes=download_result.size_bytes,
+                    mime_type=download_result.mime_type,
                 )
             ):
                 raise RetryableContentProcessingError(
                     "Media asset no longer belongs to job"
                 )
+
+            if demux_result is not None:
+                uow.media_assets.upsert_derived_asset(
+                    UpsertDerivedMediaAssetCommand(
+                        job_id=context.job_id,
+                        role=MediaAssetRole.AUDIO.value,
+                        media_type=context.media_type,
+                        parent_asset_id=context.media_asset_id,
+                        local_path=demux_result.audio_path,
+                        size_bytes=demux_result.audio_size_bytes,
+                        mime_type=demux_result.audio_mime_type,
+                    )
+                )
+                uow.media_assets.upsert_derived_asset(
+                    UpsertDerivedMediaAssetCommand(
+                        job_id=context.job_id,
+                        role=MediaAssetRole.VIDEO.value,
+                        media_type=context.media_type,
+                        parent_asset_id=context.media_asset_id,
+                        local_path=demux_result.video_path,
+                        size_bytes=demux_result.video_size_bytes,
+                        mime_type=demux_result.video_mime_type,
+                    )
+                )
+
             if not uow.jobs.complete_download(
                 job_id=context.job_id,
                 requires_transcription=requires_transcription,

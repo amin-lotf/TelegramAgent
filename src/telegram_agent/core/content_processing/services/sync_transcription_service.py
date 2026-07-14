@@ -121,7 +121,7 @@ class SyncTranscriptionService:
             ):
                 return None
 
-            asset = uow.media_assets.get_single_by_job_id(job_id)
+            asset = uow.media_assets.get_transcription_asset(job_id)
             if asset is None or asset.media_type not in _TRANSCRIBABLE_ATTACHMENT_TYPES:
                 uow.jobs.mark_failed(
                     job_id=job_id,

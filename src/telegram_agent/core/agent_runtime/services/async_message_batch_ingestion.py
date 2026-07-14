@@ -25,7 +25,9 @@ from telegram_agent.core.agent_runtime.db.uow.async_agent_runtime import (
     AsyncSqlAlchemyAgentRuntimeUnitOfWork,
 )
 from telegram_agent.core.common.exceptions import AgentRuntimeBatchConflictError
+import logging
 
+logger = logging.getLogger(__name__)
 
 class AsyncMessageBatchIngestionService:
     """Persist ordered runtime batches transactionally.

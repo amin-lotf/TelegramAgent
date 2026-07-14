@@ -101,6 +101,14 @@ class InvalidDownloadedMediaError(PermanentContentProcessingError):
     pass
 
 
+class MediaDemuxError(RetryableContentProcessingError):
+    """A transient failure while demuxing media with ffmpeg."""
+
+
+class MediaDemuxPermanentError(PermanentContentProcessingError):
+    """A permanent demux failure (missing binary, no audio stream, invalid media)."""
+
+
 class WhisperXServiceError(RetryableContentProcessingError):
     pass
 

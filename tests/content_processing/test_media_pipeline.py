@@ -8,12 +8,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.content_processing.common.results import (
+    MediaDemuxResult,
     MediaDownloadResult,
     TranscriptionResult,
     TranscriptionSegmentResult,
 )
 from telegram_agent.core.content_processing.common.settings import settings
-from telegram_agent.core.content_processing.common.types import JobKind, JobStatus, OutboxEventType
+from telegram_agent.core.content_processing.common.types import (
+    JobKind,
+    JobStatus,
+    MediaAssetRole,
+    OutboxEventType,
+)
 from telegram_agent.core.content_processing.db.models.content_processing import (
     Job,
     MediaAsset,
@@ -23,8 +29,12 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
 )
 from telegram_agent.core.content_processing.services import sync_transcription_service
 from telegram_agent.core.content_processing.services import sync_telegram_media_download
-from telegram_agent.core.content_processing.services.sync_telegram_media_download import SyncTelegramMediaDownloadService
-from telegram_agent.core.content_processing.services.sync_transcription_service import SyncTranscriptionService
+from telegram_agent.core.content_processing.services.sync_telegram_media_download import (
+    SyncTelegramMediaDownloadService,
+)
+from telegram_agent.core.content_processing.services.sync_transcription_service import (
+    SyncTranscriptionService,
+)
 
 
 @pytest.mark.parametrize(
@@ -44,6 +54,7 @@ def test_download_service_creates_one_transcription_event(
 ) -> None:
     job_id, asset_id = _seed_job(content_sync_sessionmaker, attachment_type)
     _stub_telegram_downloader(monkeypatch, asset_id)
+    _stub_media_demuxer(monkeypatch, asset_id)
 
     result = SyncTelegramMediaDownloadService(
         uow_factory=content_sync_uow_factory,
@@ -53,44 +64,84 @@ def test_download_service_creates_one_transcription_event(
     with content_sync_sessionmaker() as session:
         job = session.get(Job, job_id)
         asset = session.get(MediaAsset, asset_id)
-        events = list(session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id)))
+        assets = list(
+            session.scalars(select(MediaAsset).where(MediaAsset.job_id == job_id))
+        )
+        events = list(
+            session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id))
+        )
     assert result.retryable is False
     assert job is not None and job.status == JobStatus.DOWNLOADED
     assert asset is not None and asset.size_bytes == 17
-    assert [event.event_type for event in events] == [OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value]
+    assert asset.role == MediaAssetRole.SOURCE
+    assert [event.event_type for event in events] == [
+        OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value
+    ]
     assert events[0].idempotency_key == (
         f"{OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value}:{job_id}"
     )
     assert events[0].payload == {}
 
+    if attachment_type in (
+        TelegramAttachmentType.VIDEO,
+        TelegramAttachmentType.VIDEO_NOTE,
+    ):
+        roles = {item.role for item in assets}
+        assert roles == {
+            MediaAssetRole.SOURCE,
+            MediaAssetRole.AUDIO,
+            MediaAssetRole.VIDEO,
+        }
+        audio = next(item for item in assets if item.role == MediaAssetRole.AUDIO)
+        video = next(item for item in assets if item.role == MediaAssetRole.VIDEO)
+        assert audio.parent_asset_id == asset_id
+        assert video.parent_asset_id == asset_id
+        assert audio.local_path is not None
+        assert video.local_path is not None
+    else:
+        assert len(assets) == 1
+
 
 def test_non_transcribable_download_creates_completion_event(
-    content_sync_sessionmaker: sessionmaker[Session], content_sync_uow_factory, monkeypatch
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
 ) -> None:
-    job_id, asset_id = _seed_job(content_sync_sessionmaker, TelegramAttachmentType.DOCUMENT)
+    job_id, asset_id = _seed_job(
+        content_sync_sessionmaker, TelegramAttachmentType.DOCUMENT
+    )
     _stub_telegram_downloader(monkeypatch, asset_id)
 
-    SyncTelegramMediaDownloadService(uow_factory=content_sync_uow_factory, settings=settings).execute(
+    SyncTelegramMediaDownloadService(
+        uow_factory=content_sync_uow_factory, settings=settings
+    ).execute(
         job_id=job_id,
         retry_count=0,
     )
 
     with content_sync_sessionmaker() as session:
         job = session.get(Job, job_id)
-        events = list(session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id)))
+        events = list(
+            session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id))
+        )
     assert job is not None and job.status == JobStatus.COMPLETED
-    assert [event.event_type for event in events] == [OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value]
+    assert [event.event_type for event in events] == [
+        OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
+    ]
     assert events[0].payload == {}
 
 
 def test_download_service_claims_once_and_returns_detached_source_context(
-    content_sync_sessionmaker: sessionmaker[Session], content_sync_uow_factory, monkeypatch
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
 ) -> None:
-    job_id, asset_id = _seed_job(content_sync_sessionmaker, TelegramAttachmentType.VOICE)
+    job_id, asset_id = _seed_job(
+        content_sync_sessionmaker, TelegramAttachmentType.VOICE
+    )
     contexts = []
 
     class FakeTelegramMediaDownloader:
-        
         @classmethod
         def from_settings(cls, _settings):
             return cls()
@@ -99,8 +150,14 @@ def test_download_service_claims_once_and_returns_detached_source_context(
             contexts.append(context)
             return MediaDownloadResult(f"/tmp/{asset_id}.ogg", 17, "audio/ogg")
 
-    monkeypatch.setattr(sync_telegram_media_download, "TelegramMediaDownloader", FakeTelegramMediaDownloader)
-    service = SyncTelegramMediaDownloadService(uow_factory=content_sync_uow_factory, settings=settings)
+    monkeypatch.setattr(
+        sync_telegram_media_download,
+        "TelegramMediaDownloader",
+        FakeTelegramMediaDownloader,
+    )
+    service = SyncTelegramMediaDownloadService(
+        uow_factory=content_sync_uow_factory, settings=settings
+    )
     service.execute(job_id=job_id, retry_count=0)
     service.execute(job_id=job_id, retry_count=0)
 
@@ -110,7 +167,9 @@ def test_download_service_claims_once_and_returns_detached_source_context(
 
 
 def test_transcription_service_persists_complete_supported_result(
-    content_sync_sessionmaker: sessionmaker[Session], content_sync_uow_factory, monkeypatch
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
 ) -> None:
     job_id, asset_id = _seed_job(
         content_sync_sessionmaker,
@@ -130,24 +189,33 @@ def test_transcription_service_persists_complete_supported_result(
                 language_probability=0.9,
                 duration_ms=1500,
                 segments=(
-                    TranscriptionSegmentResult(0, 1500, "hello world", "en", 0.9, None, None),
+                    TranscriptionSegmentResult(
+                        0, 1500, "hello world", "en", 0.9, None, None
+                    ),
                 ),
             )
 
     monkeypatch.setattr(sync_transcription_service, "WhisperXClient", FakeWhisperXClient)
-    result = SyncTranscriptionService(uow_factory=content_sync_uow_factory, settings=settings).execute(
+    result = SyncTranscriptionService(
+        uow_factory=content_sync_uow_factory, settings=settings
+    ).execute(
         job_id=job_id,
         retry_count=0,
     )
 
     with content_sync_sessionmaker() as session:
         job = session.get(Job, job_id)
-        transcript = session.scalar(select(Transcript).where(Transcript.job_id == job_id))
+        transcript = session.scalar(
+            select(Transcript).where(Transcript.job_id == job_id)
+        )
         events = list(
             session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id))
         )
         segment_count = session.scalar(
-            select(func.count()).select_from(Transcript).join(Transcript.segments).where(Transcript.job_id == job_id)
+            select(func.count())
+            .select_from(Transcript)
+            .join(Transcript.segments)
+            .where(Transcript.job_id == job_id)
         )
     assert result.retryable is False
     assert job is not None and job.status == JobStatus.COMPLETED
@@ -158,9 +226,63 @@ def test_transcription_service_persists_complete_supported_result(
     ]
 
 
+def test_transcription_service_prefers_audio_role_for_video(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    job_id, source_id = _seed_job(
+        content_sync_sessionmaker,
+        TelegramAttachmentType.VIDEO,
+        status=JobStatus.DOWNLOADED,
+        local_path="/tmp/source.mp4",
+    )
+    with content_sync_sessionmaker() as session:
+        session.add(
+            MediaAsset(
+                job_id=job_id,
+                role=MediaAssetRole.AUDIO,
+                parent_asset_id=source_id,
+                media_type=TelegramAttachmentType.VIDEO.value,
+                local_path="/tmp/source.audio.ogg",
+                mime_type="audio/ogg",
+                duration_ms=None,
+                size_bytes=11,
+            )
+        )
+        session.commit()
+
+    transcribed_paths: list[str] = []
+
+    class FakeWhisperXClient:
+        def __init__(self, _settings) -> None:
+            pass
+
+        def transcribe(self, *, path, mime_type, request_id):
+            transcribed_paths.append(str(path))
+            return TranscriptionResult(
+                text="from audio track",
+                language="en",
+                language_probability=0.9,
+                duration_ms=1000,
+                segments=(
+                    TranscriptionSegmentResult(
+                        0, 1000, "from audio track", "en", 0.9, None, None
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(sync_transcription_service, "WhisperXClient", FakeWhisperXClient)
+    result = SyncTranscriptionService(
+        uow_factory=content_sync_uow_factory, settings=settings
+    ).execute(job_id=job_id, retry_count=0)
+
+    assert result.retryable is False
+    assert transcribed_paths == ["/tmp/source.audio.ogg"]
+
+
 def _stub_telegram_downloader(monkeypatch, asset_id: UUID) -> None:
     class FakeTelegramMediaDownloader:
-        
         @classmethod
         def from_settings(cls, _settings):
             return cls()
@@ -168,7 +290,30 @@ def _stub_telegram_downloader(monkeypatch, asset_id: UUID) -> None:
         def download(self, _context):
             return MediaDownloadResult(f"/tmp/{asset_id}.ogg", 17, "audio/ogg")
 
-    monkeypatch.setattr(sync_telegram_media_download, "TelegramMediaDownloader", FakeTelegramMediaDownloader)
+    monkeypatch.setattr(
+        sync_telegram_media_download,
+        "TelegramMediaDownloader",
+        FakeTelegramMediaDownloader,
+    )
+
+
+def _stub_media_demuxer(monkeypatch, asset_id: UUID) -> None:
+    class FakeMediaDemuxer:
+        @classmethod
+        def from_settings(cls, _settings):
+            return cls()
+
+        def demux(self, **_kwargs):
+            return MediaDemuxResult(
+                audio_path=f"/tmp/{asset_id}.audio.ogg",
+                audio_size_bytes=11,
+                audio_mime_type="audio/ogg",
+                video_path=f"/tmp/{asset_id}.video.mp4",
+                video_size_bytes=13,
+                video_mime_type="video/mp4",
+            )
+
+    monkeypatch.setattr(sync_telegram_media_download, "MediaDemuxer", FakeMediaDemuxer)
 
 
 def _seed_job(
@@ -179,11 +324,18 @@ def _seed_job(
     local_path: str | None = None,
 ) -> tuple[UUID, UUID]:
     with sessionmaker_() as session:
-        job = Job(kind=JobKind.TELEGRAM_ATTACHMENT, status=status, idempotency_key=str(uuid4()), callback_required=True)
+        job = Job(
+            kind=JobKind.TELEGRAM_ATTACHMENT,
+            status=status,
+            idempotency_key=str(uuid4()),
+            callback_required=True,
+        )
         session.add(job)
         session.flush()
         asset = MediaAsset(
             job_id=job.id,
+            role=MediaAssetRole.SOURCE,
+            parent_asset_id=None,
             media_type=attachment_type.value,
             local_path=local_path,
             mime_type=None,

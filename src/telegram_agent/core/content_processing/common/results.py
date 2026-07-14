@@ -40,6 +40,16 @@ class MediaDownloadResult:
 
 
 @dataclass(frozen=True)
+class MediaDemuxResult:
+    audio_path: str
+    audio_size_bytes: int
+    audio_mime_type: str | None
+    video_path: str
+    video_size_bytes: int
+    video_mime_type: str | None
+
+
+@dataclass(frozen=True)
 class TranscriptionContext:
     job_id: UUID
     media_asset_id: UUID

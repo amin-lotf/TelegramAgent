@@ -8,7 +8,12 @@ from sqlalchemy import func, select
 
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
-from telegram_agent.core.content_processing.common.types import JobStatus, OutboxEventStatus, OutboxEventType
+from telegram_agent.core.content_processing.common.types import (
+    JobStatus,
+    MediaAssetRole,
+    OutboxEventStatus,
+    OutboxEventType,
+)
 from telegram_agent.core.content_processing.db.models.content_processing import Job, MediaAsset, OutboxEvent, TelegramSource
 from telegram_agent.core.content_processing.db.uow.async_content_processing import (
     AsyncSqlAlchemyContentProcessingUnitOfWork,
@@ -48,6 +53,7 @@ async def test_create_job_persists_job_related_records_and_outbox_atomically(
     assert source.telegram_file_id == command.telegram_file_id
     assert asset is not None
     assert asset.local_path is None
+    assert asset.role == MediaAssetRole.SOURCE
     assert asset.media_type == TelegramAttachmentType.VOICE.value
     assert event is not None
     assert event.event_type == OutboxEventType.CONTENT_PROCESSING_JOB_READY

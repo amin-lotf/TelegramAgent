@@ -32,6 +32,17 @@ class RecordMediaDownloadCommand:
 
 
 @dataclass(frozen=True)
+class UpsertDerivedMediaAssetCommand:
+    job_id: UUID
+    role: str
+    media_type: str
+    parent_asset_id: UUID
+    local_path: str
+    size_bytes: int
+    mime_type: str | None
+
+
+@dataclass(frozen=True)
 class RecordTranscriptSegmentCommand:
     segment_index: int
     start_ms: int
