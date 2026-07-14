@@ -33,6 +33,22 @@ class AgentRuntimeBadResponseError(Exception):
     pass
 
 
+class AgentRuntimeBatchConflictError(Exception):
+    """Raised when a batch idempotency key conflicts with an existing batch."""
+
+
+class AgentRuntimeCoordinationError(RuntimeError):
+    """Base class for agent-runtime coordination failures."""
+
+
+class RetryableAgentRuntimeCoordinationError(AgentRuntimeCoordinationError):
+    """A coordination failure that can safely be retried."""
+
+
+class PermanentAgentRuntimeCoordinationError(AgentRuntimeCoordinationError):
+    """A coordination failure that must not be retried for the same message."""
+
+
 class JobCreationError(RuntimeError):
     """Raised when a content-processing job cannot be persisted."""
     pass

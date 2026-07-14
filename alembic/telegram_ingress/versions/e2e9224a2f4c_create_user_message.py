@@ -74,11 +74,6 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "chat_id",
-            "first_message_id",
-            name="uq_conversation_outbox_events_chat_first_message",
-        ),
-        sa.UniqueConstraint(
             "idempotency_key",
             name="uq_conversation_outbox_events_idempotency_key",
         ),

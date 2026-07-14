@@ -69,5 +69,38 @@ services:
     networks:
       - fatol-net
 
+  agent-runtime-worker:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: agent-runtime
+    container_name: agent_runtime_worker
+    env_file:
+      - .env.agent_runtime.docker
+    command: >
+      python -m celery -A telegram_agent.core.agent_runtime.celery.celery_app.celery_app worker
+      -Q agent_runtime_outbox,agent_runtime_coordination
+      --loglevel=info
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+
+  agent-runtime-beat:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: agent-runtime
+    container_name: agent_runtime_beat
+    env_file:
+      - .env.agent_runtime.docker
+    command: >
+      python -m celery -A telegram_agent.core.agent_runtime.celery.celery_app.celery_app beat
+      --loglevel=info
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+
 networks:
   fatol-net:

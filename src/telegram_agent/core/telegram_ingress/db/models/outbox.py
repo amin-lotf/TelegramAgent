@@ -60,11 +60,6 @@ class ConversationOutboxEvent(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "chat_id",
-            "first_message_id",
-            name="uq_conversation_outbox_events_chat_first_message",
-        ),
-        UniqueConstraint(
             "idempotency_key",
             name="uq_conversation_outbox_events_idempotency_key",
         ),

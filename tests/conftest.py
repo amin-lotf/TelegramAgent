@@ -56,6 +56,12 @@ from telegram_agent.core.content_processing.db.uow.async_content_processing impo
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (  # noqa: E402
     SyncSqlAlchemyContentProcessingUnitOfWork,
 )
+from telegram_agent.core.agent_runtime.db.uow.async_agent_runtime import (  # noqa: E402
+    AsyncSqlAlchemyAgentRuntimeUnitOfWork,
+)
+from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (  # noqa: E402
+    SyncSqlAlchemyAgentRuntimeUnitOfWork,
+)
 
 
 AUTH_TABLES = ("telegram_users",)
@@ -71,6 +77,13 @@ CONTENT_PROCESSING_TABLES = (
     "media_assets",
     "telegram_sources",
     "jobs",
+)
+AGENT_RUNTIME_TABLES = (
+    "coordination_outbox_events",
+    "runtime_messages",
+    "conversation_groups",
+    "runtime_batches",
+    "conversation_claims",
 )
 
 
@@ -215,10 +228,12 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
     auth_database = f"telegram_auth_test_{uuid4().hex[:8]}"
     ingress_database = f"telegram_ingress_test_{uuid4().hex[:8]}"
     content_database = f"content_processing_test_{uuid4().hex[:8]}"
+    agent_runtime_database = f"agent_runtime_test_{uuid4().hex[:8]}"
     database_names = {
         "auth": auth_database,
         "ingress": ingress_database,
         "content": content_database,
+        "agent_runtime": agent_runtime_database,
     }
 
     try:
@@ -228,10 +243,14 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
         auth_url = postgres_admin_url.rsplit("/", 1)[0] + f"/{auth_database}"
         ingress_url = postgres_admin_url.rsplit("/", 1)[0] + f"/{ingress_database}"
         content_url = postgres_admin_url.rsplit("/", 1)[0] + f"/{content_database}"
+        agent_runtime_url = (
+            postgres_admin_url.rsplit("/", 1)[0] + f"/{agent_runtime_database}"
+        )
 
         _run_migrations("telegram_auth", auth_url)
         _run_migrations("telegram_ingress", ingress_url)
         _run_migrations("content_processing", content_url)
+        _run_migrations("agent_runtime", agent_runtime_url)
 
         yield {
             "auth": normalize_async_db_url(auth_url),
@@ -239,6 +258,8 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
             "ingress_sync": normalize_sync_db_url(ingress_url),
             "content": normalize_async_db_url(content_url),
             "content_sync": normalize_sync_db_url(content_url),
+            "agent_runtime": normalize_async_db_url(agent_runtime_url),
+            "agent_runtime_sync": normalize_sync_db_url(agent_runtime_url),
         }
     finally:
         for database_name in reversed(tuple(database_names.values())):
@@ -266,6 +287,15 @@ async def ingress_engine(database_urls: dict[str, str]) -> AsyncEngine:
 @pytest_asyncio.fixture
 async def content_engine(database_urls: dict[str, str]) -> AsyncEngine:
     engine = create_async_engine(database_urls["content"], future=True)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def agent_runtime_engine(database_urls: dict[str, str]) -> AsyncEngine:
+    engine = create_async_engine(database_urls["agent_runtime"], future=True)
     try:
         yield engine
     finally:
@@ -309,6 +339,19 @@ async def content_sessionmaker(
         class_=AsyncSession,
     )
     await _truncate_tables(content_engine, CONTENT_PROCESSING_TABLES)
+
+
+@pytest_asyncio.fixture
+async def agent_runtime_sessionmaker(
+    agent_runtime_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    await _truncate_tables(agent_runtime_engine, AGENT_RUNTIME_TABLES)
+    yield async_sessionmaker(
+        agent_runtime_engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+    await _truncate_tables(agent_runtime_engine, AGENT_RUNTIME_TABLES)
 
 
 @pytest_asyncio.fixture
@@ -369,6 +412,19 @@ def content_uow_factory(content_sessionmaker: async_sessionmaker[AsyncSession]):
 
 
 @pytest.fixture
+def agent_runtime_uow_factory(
+    agent_runtime_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    @asynccontextmanager
+    async def _factory() -> Any:
+        async with agent_runtime_sessionmaker() as session:
+            async with AsyncSqlAlchemyAgentRuntimeUnitOfWork(session) as uow:
+                yield uow
+
+    return _factory
+
+
+@pytest.fixture
 def ingress_sync_sessionmaker(
     database_urls: dict[str, str],
 ) -> sessionmaker[Session]:
@@ -422,6 +478,38 @@ def content_sync_uow_factory(content_sync_sessionmaker: sessionmaker[Session]):
     def _factory() -> Any:
         with content_sync_sessionmaker() as session:
             with SyncSqlAlchemyContentProcessingUnitOfWork(session) as uow:
+                yield uow
+
+    return _factory
+
+
+@pytest.fixture
+def agent_runtime_sync_sessionmaker(
+    database_urls: dict[str, str],
+) -> sessionmaker[Session]:
+    factory = create_sync_session_factory(database_urls["agent_runtime_sync"])
+    table_names = ", ".join(AGENT_RUNTIME_TABLES)
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+    yield factory
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+
+
+@pytest.fixture
+def agent_runtime_sync_uow_factory(
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+):
+    @contextmanager
+    def _factory() -> Any:
+        with agent_runtime_sync_sessionmaker() as session:
+            with SyncSqlAlchemyAgentRuntimeUnitOfWork(session) as uow:
                 yield uow
 
     return _factory

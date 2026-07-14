@@ -1,12 +1,25 @@
 """Runtime configuration loaded from environment variables and .env."""
 import sys
-from typing import Any,  get_args
+from typing import Any, get_args
 
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.agent_runtime.common.const import DEFAULT_TELEGRAM_INGRESS_BASE_URL, \
-    DEFAULT_CONTENT_PROCESSING_BASE_URL, DEFAULT_SQLALCHEMY_DATABASE_URL, DEFAULT_ALLOWED_ORIGINS
+from telegram_agent.core.agent_runtime.common.const import (
+    DEFAULT_ALLOWED_ORIGINS,
+    DEFAULT_CONTENT_PROCESSING_BASE_URL,
+    DEFAULT_COORDINATION_CLAIM_LEASE_SECONDS,
+    DEFAULT_COORDINATION_MESSAGE_BATCH_SIZE,
+    DEFAULT_COORDINATION_RECENT_WINDOW_SIZE,
+    DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
+    DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
+    DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
+    DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
+    DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
+    DEFAULT_REDIS_URL,
+    DEFAULT_SQLALCHEMY_DATABASE_URL,
+    DEFAULT_TELEGRAM_INGRESS_BASE_URL,
+)
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -39,8 +52,11 @@ class Settings(BaseSettings):
     )
     content_processing_service_token: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("CONTENT_PROCESSING_SERVICE_TOKEN", "content_processing_service_token"),
-        description="API token for accessing the authentication service API.",
+        validation_alias=AliasChoices(
+            "CONTENT_PROCESSING_SERVICE_TOKEN",
+            "content_processing_service_token",
+        ),
+        description="API token for accessing the content processing service API.",
     )
     telegram_ingress_service_token: str | None = Field(
         default=None,
@@ -64,7 +80,69 @@ class Settings(BaseSettings):
         description="Database URL for the application.",
     )
 
-
+    redis_url: str = Field(
+        default=DEFAULT_REDIS_URL,
+        validation_alias=AliasChoices("REDIS_URL", "redis_url"),
+    )
+    outbox_dispatch_batch_size: int = Field(
+        default=DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
+        validation_alias=AliasChoices("OUTBOX_DISPATCH_BATCH_SIZE", "outbox_dispatch_batch_size"),
+        gt=0,
+    )
+    outbox_dispatch_poll_interval_seconds: float = Field(
+        default=DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
+        validation_alias=AliasChoices(
+            "OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS",
+            "outbox_dispatch_poll_interval_seconds",
+        ),
+        gt=0,
+    )
+    outbox_dispatch_lease_seconds: int = Field(
+        default=DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
+        validation_alias=AliasChoices(
+            "OUTBOX_DISPATCH_LEASE_SECONDS",
+            "outbox_dispatch_lease_seconds",
+        ),
+        gt=0,
+    )
+    outbox_retry_base_seconds: int = Field(
+        default=DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
+        validation_alias=AliasChoices("OUTBOX_RETRY_BASE_SECONDS", "outbox_retry_base_seconds"),
+        gt=0,
+    )
+    outbox_retry_max_seconds: int = Field(
+        default=DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
+        validation_alias=AliasChoices("OUTBOX_RETRY_MAX_SECONDS", "outbox_retry_max_seconds"),
+        gt=0,
+    )
+    coordination_message_batch_size: int = Field(
+        default=DEFAULT_COORDINATION_MESSAGE_BATCH_SIZE,
+        validation_alias=AliasChoices(
+            "COORDINATION_MESSAGE_BATCH_SIZE",
+            "coordination_message_batch_size",
+        ),
+        gt=0,
+    )
+    coordination_recent_window_size: int = Field(
+        default=DEFAULT_COORDINATION_RECENT_WINDOW_SIZE,
+        validation_alias=AliasChoices(
+            "COORDINATION_RECENT_WINDOW_SIZE",
+            "coordination_recent_window_size",
+        ),
+        gt=0,
+    )
+    coordination_claim_lease_seconds: int = Field(
+        default=DEFAULT_COORDINATION_CLAIM_LEASE_SECONDS,
+        validation_alias=AliasChoices(
+            "COORDINATION_CLAIM_LEASE_SECONDS",
+            "coordination_claim_lease_seconds",
+        ),
+        gt=0,
+        description=(
+            "Lease duration for an exclusive conversation claim while a worker "
+            "coordinates a bounded batch of messages."
+        ),
+    )
 
     allowed_origins: str = Field(
         default=DEFAULT_ALLOWED_ORIGINS,
@@ -72,17 +150,13 @@ class Settings(BaseSettings):
             "ALLOWED_ORIGINS",
             "allowed_origins",
         ),
-        description="List of allowed origins (for CORS)"
+        description="List of allowed origins (for CORS)",
     )
-
 
     LOG_LEVEL: str = Field(
         default="DEBUG",
         description="Logging level for the application.",
     )
-
-
-
 
     @model_validator(mode="before")
     @classmethod
@@ -99,6 +173,7 @@ class Settings(BaseSettings):
             if isinstance(value, str) and not value.strip():
                 normalized[field_name] = None
         return normalized
+
 
 def load_settings_or_die() -> Settings:
     try:

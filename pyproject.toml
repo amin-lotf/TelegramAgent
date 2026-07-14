@@ -33,7 +33,9 @@ dev = [
 ]
 
 agent-runtime = [
-
+    "celery[redis]>=5.3.1",
+    "psycopg2-binary>=2.9.12",
+    "redis>=8.0.0",
 ]
 
 telegram-auth = [

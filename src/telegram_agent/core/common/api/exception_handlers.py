@@ -5,9 +5,15 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from telegram_agent.core.common.exceptions import TelegramUserUnauthorizedError, \
-    TelegramAuthUnavailableError, TelegramAuthBadResponseError, JobCreationError, WhisperXBackendBusyError, \
-    WhisperXBackendUnavailableError
+from telegram_agent.core.common.exceptions import (
+    AgentRuntimeBatchConflictError,
+    JobCreationError,
+    TelegramAuthBadResponseError,
+    TelegramAuthUnavailableError,
+    TelegramUserUnauthorizedError,
+    WhisperXBackendBusyError,
+    WhisperXBackendUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,4 +91,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "WhisperX backend is unavailable"},
+        )
+
+    @app.exception_handler(AgentRuntimeBatchConflictError)
+    async def agent_runtime_batch_conflict_handler(
+        _: Request,
+        exc: AgentRuntimeBatchConflictError,
+    ) -> JSONResponse:
+        logger.warning("Agent runtime batch conflict: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
         )

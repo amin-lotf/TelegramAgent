@@ -1,19 +1,38 @@
 from uuid import uuid4
 
+from telegram_agent.core.agent_runtime.api.v1.fastapi_app import create_app
+from telegram_agent.core.agent_runtime.api.v1.messages.dependencies import (
+    get_message_batch_ingestion_service,
+)
+from telegram_agent.core.agent_runtime.common.results import IngestMessageBatchResult
 from telegram_agent.core.telegram_ingress.clients.agent_runtime import AgentRuntimeClient
 from telegram_agent.core.telegram_ingress.common.commands import (
     RuntimeMessageBatchPayload,
     RuntimeMessagePayload,
 )
-
-from telegram_agent.core.agent_runtime.api.v1.fastapi_app import create_app
 from tests.support.fastapi import set_expected_api_token
 from tests.support.live_server import LiveServer
 
 
+class StubIngestionService:
+    def __init__(self) -> None:
+        self.commands = []
+
+    async def ingest(self, command):
+        self.commands.append(command)
+        return IngestMessageBatchResult(
+            batch_id=command.batch_id,
+            chat_id=command.chat_id,
+            created=True,
+            message_count=len(command.messages),
+        )
+
+
 def test_accepts_valid_ordered_message_batch() -> None:
+    service = StubIngestionService()
     app = create_app()
     set_expected_api_token(app, "runtime-token")
+    app.dependency_overrides[get_message_batch_ingestion_service] = lambda: service
     payload = _payload()
 
     with LiveServer(app) as server:
@@ -29,11 +48,17 @@ def test_accepts_valid_ordered_message_batch() -> None:
 
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
+    assert len(service.commands) == 1
+    assert service.commands[0].idempotency_key == "conversation-batch-1"
+    assert service.commands[0].chat_id == 900100
+    assert len(service.commands[0].messages) == 2
 
 
 def test_rejects_messages_that_are_not_in_strict_order() -> None:
+    service = StubIngestionService()
     app = create_app()
     set_expected_api_token(app, "runtime-token")
+    app.dependency_overrides[get_message_batch_ingestion_service] = lambda: service
     payload = _payload()
     payload["messages"].reverse()
 
@@ -49,11 +74,14 @@ def test_rejects_messages_that_are_not_in_strict_order() -> None:
         )
 
     assert response.status_code == 422
+    assert service.commands == []
 
 
 def test_requires_idempotency_key() -> None:
+    service = StubIngestionService()
     app = create_app()
     set_expected_api_token(app, "runtime-token")
+    app.dependency_overrides[get_message_batch_ingestion_service] = lambda: service
 
     with LiveServer(app) as server:
         response = server.request(
@@ -64,6 +92,7 @@ def test_requires_idempotency_key() -> None:
         )
 
     assert response.status_code == 422
+    assert service.commands == []
 
 
 def _payload() -> dict:
@@ -98,8 +127,10 @@ def _payload() -> dict:
 
 
 def test_ingress_client_submits_to_runtime_messages_endpoint() -> None:
+    service = StubIngestionService()
     app = create_app()
     set_expected_api_token(app, "runtime-token")
+    app.dependency_overrides[get_message_batch_ingestion_service] = lambda: service
     payload = RuntimeMessageBatchPayload(
         chat_id=900100,
         messages=(
@@ -122,3 +153,6 @@ def test_ingress_client_submits_to_runtime_messages_endpoint() -> None:
             idempotency_key="client-integration-batch",
             payload=payload,
         )
+
+    assert len(service.commands) == 1
+    assert service.commands[0].idempotency_key == "client-integration-batch"

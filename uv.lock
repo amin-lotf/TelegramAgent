@@ -3511,6 +3511,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+agent-runtime = [
+    { name = "celery", extra = ["redis"] },
+    { name = "psycopg2-binary" },
+    { name = "redis" },
+]
 apps = [
     { name = "asyncpg" },
     { name = "colorlog" },
@@ -3550,12 +3555,14 @@ requires-dist = [
     { name = "alembic", marker = "extra == 'dev'", specifier = ">=1.18.4" },
     { name = "alembic", marker = "extra == 'migration'", specifier = ">=1.18.4" },
     { name = "asyncpg", marker = "extra == 'apps'", specifier = ">=0.31.0" },
+    { name = "celery", extras = ["redis"], marker = "extra == 'agent-runtime'", specifier = ">=5.3.1" },
     { name = "celery", extras = ["redis"], marker = "extra == 'content-processing'", specifier = ">=5.3.1" },
     { name = "celery", extras = ["redis"], marker = "extra == 'telegram-ingress'", specifier = ">=5.3.1" },
     { name = "colorlog", marker = "extra == 'apps'", specifier = ">=6.10.1" },
     { name = "fastapi", marker = "extra == 'apps'", specifier = ">=0.136.1" },
     { name = "httpx", marker = "extra == 'apps'", specifier = ">=0.28.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "psycopg2-binary", marker = "extra == 'agent-runtime'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'content-processing'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'dev'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'migration'", specifier = ">=2.9.12" },
@@ -3566,6 +3573,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "python-dotenv", marker = "extra == 'whisperx'", specifier = ">=1.2.2" },
     { name = "python-multipart", marker = "extra == 'whisperx'", specifier = ">=0.0.32" },
+    { name = "redis", marker = "extra == 'agent-runtime'", specifier = ">=8.0.0" },
     { name = "redis", marker = "extra == 'telegram-ingress'", specifier = ">=8.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.50" },
     { name = "tenacity", marker = "extra == 'apps'", specifier = ">=9.1.4" },

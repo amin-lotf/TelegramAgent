@@ -1,10 +1,12 @@
 from celery import Celery
 from kombu import Exchange, Queue
 
+from telegram_agent.core.common.logging import setup_logging
 from telegram_agent.core.telegram_ingress.common.settings import settings
 
 
 def create_celery_app() -> Celery:
+    setup_logging(settings.LOG_LEVEL)
     celery_app = Celery(
         "telegram_ingress",
         broker=settings.redis_url,

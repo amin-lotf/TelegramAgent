@@ -6,9 +6,9 @@ COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 .PHONY: up up-build down down-v restart ps logs \
         logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx \
         shell-celery \
-        migrate-telegram-auth migrate-telegram-ingress migrate-content_processing \
+        migrate-telegram-auth migrate-telegram-ingress migrate-content_processing migrate-agent-runtime \
         heads-telegram-ingress \
-        revision-telegram-auth revision-telegram-ingress revision-content-processing
+        revision-telegram-auth revision-telegram-ingress revision-content-processing revision-agent-runtime
 
 up:
 	$(COMPOSE) up -d
@@ -39,7 +39,7 @@ logs-app:
 	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime
 
 logs-celery:
-	$(COMPOSE) logs -f --tail=100   content-processing-worker content-processing-beat telegram-ingress-worker telegram-ingress-beat
+	$(COMPOSE) logs -f --tail=100   content-processing-worker content-processing-beat telegram-ingress-worker telegram-ingress-beat agent-runtime-worker agent-runtime-beat
 
 logs-n8n:
 	$(COMPOSE) logs -f --tail=100 n8n
@@ -64,6 +64,9 @@ migrate-telegram-ingress:
 migrate-content_processing:
 	$(COMPOSE) run --rm content-processing-migrate alembic -n content_processing upgrade head
 
+migrate-agent-runtime:
+	$(COMPOSE) run --rm agent-runtime-migrate alembic -n agent_runtime upgrade head
+
 heads-telegram-ingress:
 	$(COMPOSE) run --rm telegram-ingress-migrate alembic -n telegram_ingress heads
 
@@ -77,3 +80,6 @@ revision-telegram-ingress:
 
 revision-content-processing:
 	$(COMPOSE) run --rm content-processing-migrate alembic -n content_processing  revision --autogenerate -m "$(msg)"
+
+revision-agent-runtime:
+	$(COMPOSE) run --rm agent-runtime-migrate alembic -n agent_runtime revision --autogenerate -m "$(msg)"
