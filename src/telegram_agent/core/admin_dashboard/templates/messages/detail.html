@@ -243,54 +243,134 @@
             </p>
           {% else %}
             {% set rt = trace.agent_runtime %}
-            <h3>Runtime message</h3>
-            <table class="kv">
-              <tr><th>id</th><td><code>{{ rt.message.id }}</code></td></tr>
-              <tr><th>batch_id</th><td><code>{{ rt.message.batch_id }}</code></td></tr>
-              <tr><th>coordination_status</th><td>{{ rt.message.coordination_status }}</td></tr>
-              <tr><th>coordinated_at</th><td>{{ rt.message.coordinated_at or '—' }}</td></tr>
-              <tr><th>created_at</th><td>{{ rt.message.created_at }}</td></tr>
-              <tr><th>attachment_status (snapshot)</th><td>{{ rt.message.attachment_status or '—' }}</td></tr>
-              <tr><th>text</th><td class="pre">{{ rt.message.text or '—' }}</td></tr>
-            </table>
+            <div class="subtabs" data-tabs>
+              <div class="tab-list subtab-list" role="tablist">
+                <button type="button" class="tab active" data-tab="runtime-overview">Overview</button>
+                <button type="button" class="tab" data-tab="runtime-group">
+                  Group messages
+                  {% if rt.group_messages %}
+                    <span class="badge">{{ rt.group_messages|length }}</span>
+                  {% endif %}
+                </button>
+              </div>
 
-            {% if rt.batch %}
-              <h3>Batch</h3>
-              <table class="kv">
-                <tr><th>id</th><td><code>{{ rt.batch.id }}</code></td></tr>
-                <tr><th>idempotency_key</th><td><code>{{ rt.batch.idempotency_key }}</code></td></tr>
-                <tr><th>created_at</th><td>{{ rt.batch.created_at }}</td></tr>
-              </table>
-            {% endif %}
+              <div class="tab-panel active" data-panel="runtime-overview">
+                <h3>Runtime message</h3>
+                <table class="kv">
+                  <tr><th>id</th><td><code>{{ rt.message.id }}</code></td></tr>
+                  <tr><th>batch_id</th><td><code>{{ rt.message.batch_id }}</code></td></tr>
+                  <tr><th>coordination_status</th><td>{{ rt.message.coordination_status }}</td></tr>
+                  <tr><th>coordinated_at</th><td>{{ rt.message.coordinated_at or '—' }}</td></tr>
+                  <tr><th>created_at</th><td>{{ rt.message.created_at }}</td></tr>
+                  <tr><th>attachment_status (snapshot)</th><td>{{ rt.message.attachment_status or '—' }}</td></tr>
+                  <tr><th>text</th><td class="pre">{{ rt.message.text or '—' }}</td></tr>
+                </table>
 
-            {% if rt.group %}
-              <h3>Conversation group</h3>
-              <table class="kv">
-                <tr><th>id</th><td><code>{{ rt.group.id }}</code></td></tr>
-                <tr><th>group_number</th><td>{{ rt.group.group_number }}</td></tr>
-                <tr><th>created_at</th><td>{{ rt.group.created_at }}</td></tr>
-              </table>
-            {% endif %}
+                {% if rt.batch %}
+                  <h3>Batch</h3>
+                  <table class="kv">
+                    <tr><th>id</th><td><code>{{ rt.batch.id }}</code></td></tr>
+                    <tr><th>idempotency_key</th><td><code>{{ rt.batch.idempotency_key }}</code></td></tr>
+                    <tr><th>created_at</th><td>{{ rt.batch.created_at }}</td></tr>
+                  </table>
+                {% endif %}
 
-            {% if rt.outbox %}
-              <h3>Coordination outbox</h3>
-              <table class="kv">
-                <tr><th>status</th><td>{{ rt.outbox.status }}</td></tr>
-                <tr><th>attempt_count</th><td>{{ rt.outbox.attempt_count }}</td></tr>
-                <tr><th>event_type</th><td>{{ rt.outbox.event_type }}</td></tr>
-                <tr><th>last_error</th><td>{{ rt.outbox.last_error or '—' }}</td></tr>
-                <tr><th>published_at</th><td>{{ rt.outbox.published_at or '—' }}</td></tr>
-              </table>
-            {% endif %}
+                {% if rt.group %}
+                  <h3>Conversation group</h3>
+                  <table class="kv">
+                    <tr><th>id</th><td><code>{{ rt.group.id }}</code></td></tr>
+                    <tr><th>group_number</th><td>{{ rt.group.group_number }}</td></tr>
+                    <tr><th>created_at</th><td>{{ rt.group.created_at }}</td></tr>
+                    <tr><th>messages in group</th><td>{{ rt.group_messages|length }}</td></tr>
+                  </table>
+                {% endif %}
 
-            {% if rt.claim %}
-              <h3>Chat claim (shared per chat)</h3>
-              <table class="kv">
-                <tr><th>status</th><td>{{ rt.claim.status }}</td></tr>
-                <tr><th>locked_by</th><td>{{ rt.claim.locked_by or '—' }}</td></tr>
-                <tr><th>updated_at</th><td>{{ rt.claim.updated_at }}</td></tr>
-              </table>
-            {% endif %}
+                {% if rt.outbox %}
+                  <h3>Coordination outbox</h3>
+                  <table class="kv">
+                    <tr><th>status</th><td>{{ rt.outbox.status }}</td></tr>
+                    <tr><th>attempt_count</th><td>{{ rt.outbox.attempt_count }}</td></tr>
+                    <tr><th>event_type</th><td>{{ rt.outbox.event_type }}</td></tr>
+                    <tr><th>last_error</th><td>{{ rt.outbox.last_error or '—' }}</td></tr>
+                    <tr><th>published_at</th><td>{{ rt.outbox.published_at or '—' }}</td></tr>
+                  </table>
+                {% endif %}
+
+                {% if rt.claim %}
+                  <h3>Chat claim (shared per chat)</h3>
+                  <table class="kv">
+                    <tr><th>status</th><td>{{ rt.claim.status }}</td></tr>
+                    <tr><th>locked_by</th><td>{{ rt.claim.locked_by or '—' }}</td></tr>
+                    <tr><th>updated_at</th><td>{{ rt.claim.updated_at }}</td></tr>
+                  </table>
+                {% endif %}
+              </div>
+
+              <div class="tab-panel" data-panel="runtime-group">
+                {% if not rt.group or not rt.message.group_id %}
+                  <p class="muted">
+                    This message is not assigned to a conversation group
+                    {% if rt.message.coordination_status == 'vague' %}
+                      (status is <strong>vague</strong>).
+                    {% elif rt.message.coordination_status == 'pending' %}
+                      (still <strong>pending</strong> coordination).
+                    {% else %}
+                      .
+                    {% endif %}
+                  </p>
+                {% elif not rt.group_messages %}
+                  <p class="muted">Group exists but no messages were returned.</p>
+                {% else %}
+                  <p class="meta">
+                    Group #{{ rt.group.group_number }}
+                    · <code>{{ rt.group.id }}</code>
+                    · {{ rt.group_messages|length }} message{{ 's' if rt.group_messages|length != 1 else '' }}
+                    (Telegram message_id order)
+                  </p>
+                  <table class="data group-messages">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>msg #</th>
+                        <th>status</th>
+                        <th>attachment</th>
+                        <th>text</th>
+                        <th>ingress id</th>
+                        <th>coordinated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for gm in rt.group_messages %}
+                        <tr class="{% if gm.id == rt.message.id %}is-current{% endif %}">
+                          <td>
+                            {% if gm.id == rt.message.id %}
+                              <span class="badge stage-completed">current</span>
+                            {% endif %}
+                          </td>
+                          <td>{{ gm.message_id }}</td>
+                          <td>{{ gm.coordination_status }}</td>
+                          <td>
+                            {% if gm.attachment_type %}
+                              {{ gm.attachment_type }}
+                              {% if gm.attachment_status %}({{ gm.attachment_status }}){% endif %}
+                            {% else %}
+                              —
+                            {% endif %}
+                          </td>
+                          <td class="pre">{{ gm.text or '—' }}</td>
+                          <td>
+                            <a href="/messages/{{ gm.ingress_message_id }}">
+                              <code>{{ gm.ingress_message_id }}</code>
+                            </a>
+                          </td>
+                          <td>{{ gm.coordinated_at or '—' }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                {% endif %}
+              </div>
+            </div>
           {% endif %}
         </div>
       </div>

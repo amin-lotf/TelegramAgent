@@ -26,6 +26,7 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     MediaAssetRow,
     MessageTrace,
     OutboxRow,
+    RuntimeMessageRow,
     UserMessageRow,
 )
 
@@ -296,6 +297,7 @@ class MessageTraceService:
                             group=None,
                             outbox=None,
                             claim=None,
+                            group_messages=(),
                         )
                     batch = await reader.get_batch(message.batch_id)
                     group = (
@@ -303,6 +305,11 @@ class MessageTraceService:
                         if message.group_id is not None
                         else None
                     )
+                    group_messages: tuple[RuntimeMessageRow, ...] = ()
+                    if message.group_id is not None:
+                        group_messages = tuple(
+                            await reader.list_messages_by_group_id(message.group_id)
+                        )
                     outbox = await reader.get_outbox_for_message(message.id)
                     claim = await reader.get_claim(chat_id)
                     return AgentRuntimeView(
@@ -311,6 +318,7 @@ class MessageTraceService:
                         group=group,
                         outbox=outbox,
                         claim=claim,
+                        group_messages=group_messages,
                     )
 
                 view = await asyncio.wait_for(

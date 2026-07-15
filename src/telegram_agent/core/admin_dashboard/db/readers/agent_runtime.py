@@ -20,6 +20,28 @@ class AgentRuntimeReader:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def _to_message(row: object) -> RuntimeMessageRow:
+        return RuntimeMessageRow(
+            id=row.id,  # type: ignore[attr-defined]
+            batch_id=row.batch_id,  # type: ignore[attr-defined]
+            ingress_message_id=row.ingress_message_id,  # type: ignore[attr-defined]
+            chat_id=row.chat_id,  # type: ignore[attr-defined]
+            telegram_user_id=row.telegram_user_id,  # type: ignore[attr-defined]
+            message_id=row.message_id,  # type: ignore[attr-defined]
+            reply_message_id=row.reply_message_id,  # type: ignore[attr-defined]
+            text=row.text,  # type: ignore[attr-defined]
+            attachment_ingress_id=row.attachment_ingress_id,  # type: ignore[attr-defined]
+            attachment_type=row.attachment_type,  # type: ignore[attr-defined]
+            attachment_status=row.attachment_status,  # type: ignore[attr-defined]
+            attachment_file_id=row.attachment_file_id,  # type: ignore[attr-defined]
+            attachment_file_unique_id=row.attachment_file_unique_id,  # type: ignore[attr-defined]
+            group_id=row.group_id,  # type: ignore[attr-defined]
+            coordination_status=row.coordination_status,  # type: ignore[attr-defined]
+            coordinated_at=row.coordinated_at,  # type: ignore[attr-defined]
+            created_at=row.created_at,  # type: ignore[attr-defined]
+        )
+
     async def get_message_by_ingress_id(
         self,
         ingress_message_id: UUID,
@@ -31,25 +53,20 @@ class AgentRuntimeReader:
         row = result.one_or_none()
         if row is None:
             return None
-        return RuntimeMessageRow(
-            id=row.id,
-            batch_id=row.batch_id,
-            ingress_message_id=row.ingress_message_id,
-            chat_id=row.chat_id,
-            telegram_user_id=row.telegram_user_id,
-            message_id=row.message_id,
-            reply_message_id=row.reply_message_id,
-            text=row.text,
-            attachment_ingress_id=row.attachment_ingress_id,
-            attachment_type=row.attachment_type,
-            attachment_status=row.attachment_status,
-            attachment_file_id=row.attachment_file_id,
-            attachment_file_unique_id=row.attachment_file_unique_id,
-            group_id=row.group_id,
-            coordination_status=row.coordination_status,
-            coordinated_at=row.coordinated_at,
-            created_at=row.created_at,
+        return self._to_message(row)
+
+    async def list_messages_by_group_id(
+        self,
+        group_id: UUID,
+    ) -> list[RuntimeMessageRow]:
+        """All runtime messages assigned to a conversation group, in Telegram order."""
+        tbl = tables.runtime_messages
+        result = await self._session.execute(
+            select(tbl)
+            .where(tbl.c.group_id == group_id)
+            .order_by(tbl.c.message_id.asc(), tbl.c.created_at.asc(), tbl.c.id.asc())
         )
+        return [self._to_message(row) for row in result]
 
     async def get_batch(self, batch_id: UUID) -> RuntimeBatchRow | None:
         tbl = tables.runtime_batches

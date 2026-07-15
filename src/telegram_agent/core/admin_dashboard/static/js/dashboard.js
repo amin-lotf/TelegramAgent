@@ -1,7 +1,12 @@
 (function () {
   function initTabs(root) {
-    const buttons = root.querySelectorAll(".tab");
-    const panels = root.querySelectorAll(".tab-panel");
+    // Scope to direct structure so nested [data-tabs] do not steal parent clicks.
+    const list = root.querySelector(":scope > .tab-list");
+    if (!list) {
+      return;
+    }
+    const buttons = list.querySelectorAll(":scope > .tab");
+    const panels = root.querySelectorAll(":scope > .tab-panel");
     buttons.forEach((button) => {
       button.addEventListener("click", () => {
         const name = button.getAttribute("data-tab");

@@ -219,6 +219,8 @@ class AgentRuntimeView:
     group: ConversationGroupRow | None
     outbox: OutboxRow | None
     claim: ConversationClaimRow | None
+    # Other messages sharing conversation_groups.id (empty if ungrouped/vague).
+    group_messages: tuple[RuntimeMessageRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
