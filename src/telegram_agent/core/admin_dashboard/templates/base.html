@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Admin Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Telegram Agent · Admin</div>
+    <div class="topbar-actions">
+      {% if admin_user %}
+        <span class="muted">{{ admin_user }}</span>
+        <form method="post" action="/logout" class="inline">
+          <button type="submit" class="btn btn-ghost">Logout</button>
+        </form>
+      {% endif %}
+    </div>
+  </header>
+  <main class="{% block main_class %}layout{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

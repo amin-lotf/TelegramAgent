@@ -80,3 +80,13 @@ RUN uv sync --extra agent-runtime --extra apps --no-dev --frozen --no-install-pr
 COPY src ./src
 
 RUN uv sync --extra agent-runtime --extra apps --no-dev --frozen
+
+
+
+FROM base AS admin-dashboard
+
+RUN uv sync --extra admin-dashboard --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra admin-dashboard --extra apps --no-dev --frozen

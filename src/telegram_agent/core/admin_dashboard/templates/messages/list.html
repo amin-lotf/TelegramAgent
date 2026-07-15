@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Messages · Admin Dashboard{% endblock %}
+{% block content %}
+  {% include "partials/sidebar.html" %}
+  <section class="detail empty-detail">
+    <h1>Select a message</h1>
+    <p class="muted">Choose a message from the sidebar to inspect its lifecycle across ingress, content-processing, and agent-runtime.</p>
+  </section>
+{% endblock %}

@@ -38,6 +38,9 @@ logs-storage:
 logs-app:
 	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime
 
+logs-admin-dashboard:
+	$(COMPOSE) logs -f --tail=100 admin-dashboard
+
 logs-celery:
 	$(COMPOSE) logs -f --tail=100   content-processing-worker content-processing-beat telegram-ingress-worker telegram-ingress-beat agent-runtime-worker agent-runtime-beat
 

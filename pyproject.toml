@@ -58,6 +58,11 @@ whisperx =[
     "whisperx>=3.8.6",
 ]
 
+admin-dashboard = [
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.32",
+    "itsdangerous>=2.0.0",
+]
 
 migration = [
     "alembic>=1.18.4",

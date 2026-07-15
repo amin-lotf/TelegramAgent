@@ -1,0 +1,91 @@
+<aside class="sidebar">
+  <form method="get" action="{% if selected_id %}/messages/{{ selected_id }}{% else %}/messages{% endif %}" class="filters stack">
+    <h2>Filters</h2>
+    <label>Ingress message ID
+      <input type="text" name="filter_ingress_message_id" value="{{ query.filter_ingress_message_id or '' }}">
+    </label>
+    <label>Telegram message ID
+      <input type="number" name="message_id" value="{{ query.message_id if query.message_id is not none else '' }}">
+    </label>
+    <label>Chat ID
+      <input type="number" name="chat_id" value="{{ query.chat_id if query.chat_id is not none else '' }}">
+    </label>
+    <label>User ID
+      <input type="number" name="telegram_user_id" value="{{ query.telegram_user_id if query.telegram_user_id is not none else '' }}">
+    </label>
+    <label>Conversation status
+      <select name="conversation_status">
+        <option value="">Any</option>
+        {% for s in ['pending','enqueued','dispatched','failed'] %}
+          <option value="{{ s }}" {% if query.conversation_status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Attachment status
+      <select name="attachment_status">
+        <option value="">Any</option>
+        {% for s in ['pending','processing','ready','failed'] %}
+          <option value="{{ s }}" {% if query.attachment_status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Has attachment
+      <select name="has_attachment">
+        <option value="">Any</option>
+        <option value="true" {% if query.has_attachment is sameas true %}selected{% endif %}>Yes</option>
+        <option value="false" {% if query.has_attachment is sameas false %}selected{% endif %}>No</option>
+      </select>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="failed_only" value="true" {% if query.failed_only %}checked{% endif %}>
+      Failed only
+    </label>
+    <label>Text contains
+      <input type="text" name="q" value="{{ query.q or '' }}">
+    </label>
+    <label>Created from
+      <input type="datetime-local" name="created_from" value="">
+    </label>
+    <label>Created to
+      <input type="datetime-local" name="created_to" value="">
+    </label>
+    <button type="submit" class="btn btn-primary">Apply</button>
+  </form>
+
+  {% if result.ingress_availability.value != 'ok' %}
+    <div class="banner banner-error">Ingress DB: {{ result.ingress_availability.value }}</div>
+  {% endif %}
+
+  <div class="message-list">
+    {% if not result.items %}
+      <p class="muted empty">No messages found.</p>
+    {% endif %}
+    {% for item in result.items %}
+      <a class="message-item {% if selected_id == item.id %}active{% endif %}"
+         href="/messages/{{ item.id }}?page={{ result.page }}">
+        <div class="row">
+          <time>{{ item.created_at }}</time>
+          <span class="badge state-{{ item.overall_state.value }}">{{ item.overall_state_label }}</span>
+        </div>
+        <div class="meta">chat {{ item.chat_id }} · msg {{ item.message_id }} · user {{ item.telegram_user_id }}</div>
+        <div class="preview">{{ item.text_preview or '—' }}</div>
+        <div class="meta">
+          conv: {{ item.conversation_status }}
+          {% if item.has_attachment %}
+            · 📎 {{ item.attachment_type }} ({{ item.attachment_status }})
+          {% endif %}
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+
+  <div class="pagination">
+    {% if result.page > 1 %}
+      <a class="btn btn-ghost" href="?page={{ result.page - 1 }}">Prev</a>
+    {% endif %}
+    <span class="muted">Page {{ result.page }} / {{ total_pages }} ({{ result.total }})</span>
+    {% if result.page < total_pages %}
+      <a class="btn btn-ghost" href="?page={{ result.page + 1 }}">Next</a>
+    {% endif %}
+  </div>
+</aside>

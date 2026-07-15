@@ -1,0 +1,33 @@
+services:
+  admin-dashboard:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: admin-dashboard
+    container_name: admin_dashboard_app
+    env_file:
+      - .env.admin_dashboard.docker
+    command: >
+      python -m uvicorn
+      telegram_agent.core.admin_dashboard.api.v1.fastapi_app:fastapi_app
+      --host 0.0.0.0 --port 8000
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+    ports:
+      - "127.0.0.1:8010:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  fatol-net:
