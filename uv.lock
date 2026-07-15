@@ -3525,6 +3525,9 @@ admin-dashboard = [
     { name = "jinja2" },
     { name = "python-multipart" },
 ]
+admin-dashboard-v2 = [
+    { name = "jinja2" },
+]
 agent-runtime = [
     { name = "celery", extra = ["redis"] },
     { name = "psycopg2-binary" },
@@ -3577,6 +3580,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'apps'", specifier = ">=0.28.1" },
     { name = "itsdangerous", marker = "extra == 'admin-dashboard'", specifier = ">=2.0.0" },
     { name = "jinja2", marker = "extra == 'admin-dashboard'", specifier = ">=3.1.0" },
+    { name = "jinja2", marker = "extra == 'admin-dashboard-v2'", specifier = ">=3.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "psycopg2-binary", marker = "extra == 'agent-runtime'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'content-processing'", specifier = ">=2.9.12" },
@@ -3597,7 +3601,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'apps'", specifier = ">=0.50.1" },
     { name = "whisperx", marker = "extra == 'whisperx'", specifier = ">=3.8.6" },
 ]
-provides-extras = ["apps", "dev", "agent-runtime", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "admin-dashboard", "migration"]
+provides-extras = ["apps", "dev", "agent-runtime", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "admin-dashboard", "admin-dashboard-v2", "migration"]
 
 [[package]]
 name = "tenacity"

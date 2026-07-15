@@ -64,6 +64,10 @@ admin-dashboard = [
     "itsdangerous>=2.0.0",
 ]
 
+admin-dashboard-v2 = [
+    "jinja2>=3.1.0",
+]
+
 migration = [
     "alembic>=1.18.4",
     "psycopg2-binary>=2.9.12",

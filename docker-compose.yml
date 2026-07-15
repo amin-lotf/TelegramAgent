@@ -8,3 +8,4 @@ include:
   - path: ./docker/app/celery-docker-compose.yml
   - path: ./docker/app/whisperx-docker-compose.yml
   - path: ./docker/admin_dashboard/admin-dashboard-docker-compose.yml
+  - path: ./docker/admin_dashboard_v2/admin-dashboard-v2-docker-compose.yml

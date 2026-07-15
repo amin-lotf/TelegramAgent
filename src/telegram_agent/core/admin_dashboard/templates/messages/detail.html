@@ -14,7 +14,8 @@
 
       <header class="detail-header">
         <div>
-          <h1>Message {{ trace.ingress_message_id }}</h1>
+          <p class="detail-kicker">Ingress message</p>
+          <h1>{{ trace.ingress_message_id }}</h1>
           <p class="meta">
             chat {{ trace.ingress.chat_id }} · telegram msg {{ trace.ingress.message_id }} · user {{ trace.ingress.telegram_user_id }}
             {% if trace.auth_user and trace.auth_user.username %}
@@ -26,8 +27,10 @@
       </header>
 
       {% if trace.failures %}
-        <div class="failures">
-          <h2>Failures</h2>
+        <div class="section-card failures">
+          <div class="section-title">
+            <h2>Failures</h2>
+          </div>
           <ul>
             {% for f in trace.failures %}
               <li><strong>{{ f.source }}</strong>{% if f.status %} [{{ f.status }}]{% endif %}: {{ f.message }}</li>
@@ -36,27 +39,36 @@
         </div>
       {% endif %}
 
-      <section class="timeline">
-        <h2>Lifecycle</h2>
+      <section class="section-card timeline">
+        <div class="section-title">
+          <h2>Lifecycle</h2>
+          <span class="muted">Persisted evidence only</span>
+        </div>
         <ol class="timeline-list">
           {% for event in trace.timeline %}
             <li class="timeline-item status-{{ event.status.value }}">
               <span class="dot"></span>
-              <div>
-                <div class="row">
-                  <strong>{{ event.label }}</strong>
+              <div class="timeline-body">
+                <div class="timeline-top">
+                  <strong class="timeline-label">{{ event.label }}</strong>
                   <span class="badge stage-{{ event.status.value }}">{{ event.status.value }}</span>
                 </div>
-                <div class="meta">
-                  {% if event.timestamp %}{{ event.timestamp }}{% else %}—{% endif %}
-                  {% if event.detail %} · {{ event.detail }}{% endif %}
-                  {% if event.source_db %} · {{ event.source_db.value }}{% endif %}
+                <div class="timeline-meta">
+                  <span class="timeline-meta-row dt">
+                    {% if event.timestamp %}{{ event.timestamp|dt }}{% else %}No timestamp{% endif %}
+                  </span>
+                  {% if event.detail %}
+                    <span class="timeline-meta-row">{{ event.detail }}</span>
+                  {% endif %}
+                  {% if event.source_db %}
+                    <span class="timeline-meta-row timeline-source">{{ event.source_db.value }}</span>
+                  {% endif %}
                 </div>
               </div>
             </li>
           {% endfor %}
         </ol>
-        <p class="muted small">Pipeline ends at agent-runtime message coordination. No outbound Telegram reply is stored in this system yet.</p>
+        <p class="muted small" style="margin: 0.85rem 0 0;">Pipeline ends at agent-runtime message coordination. No outbound Telegram reply is stored in this system yet.</p>
       </section>
 
       <div class="tabs" data-tabs>
@@ -67,60 +79,63 @@
         </div>
 
         <div class="tab-panel active" data-panel="ingress">
-          <h3>User message</h3>
-          <table class="kv">
-            <tr><th>id</th><td><code>{{ trace.ingress.id }}</code></td></tr>
-            <tr><th>conversation_status</th><td>{{ trace.ingress.conversation_status }}</td></tr>
-            <tr><th>chat_id</th><td>{{ trace.ingress.chat_id }}</td></tr>
-            <tr><th>message_id</th><td>{{ trace.ingress.message_id }}</td></tr>
-            <tr><th>update_id</th><td>{{ trace.ingress.update_id or '—' }}</td></tr>
-            <tr><th>reply_message_id</th><td>{{ trace.ingress.reply_message_id or '—' }}</td></tr>
-            <tr><th>dispatch_event_id</th><td><code>{{ trace.ingress.dispatch_event_id or '—' }}</code></td></tr>
-            <tr><th>created_at</th><td>{{ trace.ingress.created_at }}</td></tr>
-            <tr><th>text</th><td class="pre">{{ trace.ingress.text or '—' }}</td></tr>
-          </table>
-
-          <h3>Attachment</h3>
-          {% if trace.ingress.attachment %}
+          <div class="section-card">
+            <h3 style="margin-top:0">User message</h3>
             <table class="kv">
-              <tr><th>id</th><td><code>{{ trace.ingress.attachment.id }}</code></td></tr>
-              <tr><th>type</th><td>{{ trace.ingress.attachment.type }}</td></tr>
-              <tr><th>status</th><td>{{ trace.ingress.attachment.status }}</td></tr>
-              <tr><th>file_id</th><td><code>{{ trace.ingress.attachment.file_id }}</code></td></tr>
-              <tr><th>file_unique_id</th><td>{{ trace.ingress.attachment.file_unique_id or '—' }}</td></tr>
-              <tr><th>created_at</th><td>{{ trace.ingress.attachment.created_at }}</td></tr>
+              <tr><th>ID</th><td><code>{{ trace.ingress.id }}</code></td></tr>
+              <tr><th>Conversation status</th><td>{{ trace.ingress.conversation_status }}</td></tr>
+              <tr><th>Chat ID</th><td>{{ trace.ingress.chat_id }}</td></tr>
+              <tr><th>Message ID</th><td>{{ trace.ingress.message_id }}</td></tr>
+              <tr><th>Update ID</th><td>{{ trace.ingress.update_id or '—' }}</td></tr>
+              <tr><th>Reply message ID</th><td>{{ trace.ingress.reply_message_id or '—' }}</td></tr>
+              <tr><th>Dispatch event ID</th><td><code>{{ trace.ingress.dispatch_event_id or '—' }}</code></td></tr>
+              <tr><th>Created at</th><td class="dt">{{ trace.ingress.created_at|dt }}</td></tr>
+              <tr><th>Text</th><td class="pre">{{ trace.ingress.text or '—' }}</td></tr>
             </table>
-          {% else %}
-            <p class="muted">No attachment on this message.</p>
-          {% endif %}
 
-          <h3>Conversation outbox</h3>
-          {% if trace.ingress_outbox %}
-            <table class="kv">
-              <tr><th>id / batch_id</th><td><code>{{ trace.ingress_outbox.id }}</code></td></tr>
-              <tr><th>event_type</th><td>{{ trace.ingress_outbox.event_type }}</td></tr>
-              <tr><th>status</th><td>{{ trace.ingress_outbox.status }}</td></tr>
-              <tr><th>attempt_count</th><td>{{ trace.ingress_outbox.attempt_count }}</td></tr>
-              <tr><th>created_at</th><td>{{ trace.ingress_outbox.created_at }}</td></tr>
-              <tr><th>published_at</th><td>{{ trace.ingress_outbox.published_at or '—' }}</td></tr>
-              <tr><th>last_error</th><td>{{ trace.ingress_outbox.last_error or '—' }}</td></tr>
-            </table>
-            {% if raw_payload %}
-              <details>
-                <summary>Raw payload (JSON)</summary>
-                <pre class="code">{{ raw_payload }}</pre>
-              </details>
+            <h3>Attachment</h3>
+            {% if trace.ingress.attachment %}
+              <table class="kv">
+                <tr><th>ID</th><td><code>{{ trace.ingress.attachment.id }}</code></td></tr>
+                <tr><th>Type</th><td>{{ trace.ingress.attachment.type }}</td></tr>
+                <tr><th>Status</th><td>{{ trace.ingress.attachment.status }}</td></tr>
+                <tr><th>File ID</th><td><code>{{ trace.ingress.attachment.file_id }}</code></td></tr>
+                <tr><th>File unique ID</th><td>{{ trace.ingress.attachment.file_unique_id or '—' }}</td></tr>
+                <tr><th>Created at</th><td class="dt">{{ trace.ingress.attachment.created_at|dt }}</td></tr>
+              </table>
+            {% else %}
+              <p class="muted">No attachment on this message.</p>
             {% endif %}
-          {% else %}
-            <p class="muted">No conversation outbox event linked yet.</p>
-          {% endif %}
+
+            <h3>Conversation outbox</h3>
+            {% if trace.ingress_outbox %}
+              <table class="kv">
+                <tr><th>ID / batch ID</th><td><code>{{ trace.ingress_outbox.id }}</code></td></tr>
+                <tr><th>Event type</th><td>{{ trace.ingress_outbox.event_type }}</td></tr>
+                <tr><th>Status</th><td>{{ trace.ingress_outbox.status }}</td></tr>
+                <tr><th>Attempt count</th><td>{{ trace.ingress_outbox.attempt_count }}</td></tr>
+                <tr><th>Created at</th><td class="dt">{{ trace.ingress_outbox.created_at|dt }}</td></tr>
+                <tr><th>Published at</th><td class="dt">{{ trace.ingress_outbox.published_at|dt }}</td></tr>
+                <tr><th>Last error</th><td>{{ trace.ingress_outbox.last_error or '—' }}</td></tr>
+              </table>
+              {% if raw_payload %}
+                <details>
+                  <summary>Raw payload (JSON)</summary>
+                  <pre class="code">{{ raw_payload }}</pre>
+                </details>
+              {% endif %}
+            {% else %}
+              <p class="muted">No conversation outbox event linked yet.</p>
+            {% endif %}
+          </div>
         </div>
 
         <div class="tab-panel" data-panel="cp">
+          <div class="section-card">
           {% if trace.content_processing and trace.content_processing.not_applicable %}
-            <p class="muted">Not applicable — message has no attachment.</p>
+            <p class="muted" style="margin:0">Not applicable — message has no attachment.</p>
           {% elif not trace.content_processing or not trace.content_processing.job %}
-            <p class="muted">
+            <p class="muted" style="margin:0">
               {% if db_status.content_processing in ['error','timeout'] %}
                 Content-processing database unavailable.
               {% else %}
@@ -134,68 +149,72 @@
             </p>
           {% else %}
             {% set cp = trace.content_processing %}
-            <h3>Job</h3>
+            <h3 style="margin-top:0">Job</h3>
             <table class="kv">
-              <tr><th>id</th><td><code>{{ cp.job.id }}</code></td></tr>
-              <tr><th>kind</th><td>{{ cp.job.kind }}</td></tr>
-              <tr><th>status</th><td>{{ cp.job.status }}</td></tr>
-              <tr><th>idempotency_key</th><td><code>{{ cp.job.idempotency_key }}</code></td></tr>
-              <tr><th>error_message</th><td>{{ cp.job.error_message or '—' }}</td></tr>
-              <tr><th>created_at</th><td>{{ cp.job.created_at }}</td></tr>
-              <tr><th>updated_at</th><td>{{ cp.job.updated_at }}</td></tr>
+              <tr><th>ID</th><td><code>{{ cp.job.id }}</code></td></tr>
+              <tr><th>Kind</th><td>{{ cp.job.kind }}</td></tr>
+              <tr><th>Status</th><td>{{ cp.job.status }}</td></tr>
+              <tr><th>Idempotency key</th><td><code>{{ cp.job.idempotency_key }}</code></td></tr>
+              <tr><th>Error message</th><td>{{ cp.job.error_message or '—' }}</td></tr>
+              <tr><th>Created at</th><td class="dt">{{ cp.job.created_at|dt }}</td></tr>
+              <tr><th>Updated at</th><td class="dt">{{ cp.job.updated_at|dt }}</td></tr>
             </table>
 
             {% if cp.source %}
               <h3>Telegram source</h3>
               <table class="kv">
-                <tr><th>ingress_message_id</th><td><code>{{ cp.source.ingress_message_id }}</code></td></tr>
-                <tr><th>ingress_attachment_id</th><td><code>{{ cp.source.ingress_attachment_id }}</code></td></tr>
-                <tr><th>attachment_type</th><td>{{ cp.source.attachment_type }}</td></tr>
-                <tr><th>telegram_file_id</th><td><code>{{ cp.source.telegram_file_id }}</code></td></tr>
+                <tr><th>Ingress message ID</th><td><code>{{ cp.source.ingress_message_id }}</code></td></tr>
+                <tr><th>Ingress attachment ID</th><td><code>{{ cp.source.ingress_attachment_id }}</code></td></tr>
+                <tr><th>Attachment type</th><td>{{ cp.source.attachment_type }}</td></tr>
+                <tr><th>Telegram file ID</th><td><code>{{ cp.source.telegram_file_id }}</code></td></tr>
               </table>
             {% endif %}
 
             <h3>Media assets</h3>
             {% if cp.assets %}
-              <table class="data">
-                <thead>
-                  <tr><th>role</th><th>media_type</th><th>mime</th><th>size</th><th>path</th></tr>
-                </thead>
-                <tbody>
-                  {% for a in cp.assets %}
-                    <tr>
-                      <td>{{ a.role }}</td>
-                      <td>{{ a.media_type }}</td>
-                      <td>{{ a.mime_type or '—' }}</td>
-                      <td>{{ a.size_bytes or '—' }}</td>
-                      <td><code>{{ a.local_path or '—' }}</code></td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              <div class="table-wrap">
+                <table class="data">
+                  <thead>
+                    <tr><th>Role</th><th>Media type</th><th>MIME</th><th>Size</th><th>Path</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for a in cp.assets %}
+                      <tr>
+                        <td>{{ a.role }}</td>
+                        <td>{{ a.media_type }}</td>
+                        <td>{{ a.mime_type or '—' }}</td>
+                        <td>{{ a.size_bytes or '—' }}</td>
+                        <td><code>{{ a.local_path or '—' }}</code></td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% else %}
               <p class="muted">No assets.</p>
             {% endif %}
 
             <h3>Outbox events</h3>
             {% if cp.outbox_events %}
-              <table class="data">
-                <thead>
-                  <tr><th>type</th><th>status</th><th>attempts</th><th>created</th><th>published</th><th>error</th></tr>
-                </thead>
-                <tbody>
-                  {% for e in cp.outbox_events %}
-                    <tr>
-                      <td>{{ e.event_type }}</td>
-                      <td>{{ e.status }}</td>
-                      <td>{{ e.attempt_count }}</td>
-                      <td>{{ e.created_at }}</td>
-                      <td>{{ e.published_at or '—' }}</td>
-                      <td>{{ e.last_error or '—' }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              <div class="table-wrap">
+                <table class="data">
+                  <thead>
+                    <tr><th>Type</th><th>Status</th><th>Attempts</th><th>Created</th><th>Published</th><th>Error</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for e in cp.outbox_events %}
+                      <tr>
+                        <td>{{ e.event_type }}</td>
+                        <td>{{ e.status }}</td>
+                        <td>{{ e.attempt_count }}</td>
+                        <td class="dt">{{ e.created_at|dt }}</td>
+                        <td class="dt">{{ e.published_at|dt }}</td>
+                        <td>{{ e.last_error or '—' }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% else %}
               <p class="muted">No outbox events.</p>
             {% endif %}
@@ -203,38 +222,42 @@
             <h3>Transcript</h3>
             {% if cp.transcript %}
               <table class="kv">
-                <tr><th>language</th><td>{{ cp.transcript.language or '—' }}</td></tr>
-                <tr><th>duration_ms</th><td>{{ cp.transcript.duration_ms or '—' }}</td></tr>
-                <tr><th>text</th><td class="pre">{{ cp.transcript.text }}</td></tr>
+                <tr><th>Language</th><td>{{ cp.transcript.language or '—' }}</td></tr>
+                <tr><th>Duration (ms)</th><td>{{ cp.transcript.duration_ms or '—' }}</td></tr>
+                <tr><th>Text</th><td class="pre">{{ cp.transcript.text }}</td></tr>
               </table>
               {% if cp.transcript.segments %}
                 <details>
                   <summary>{{ cp.transcript.segments|length }} segments</summary>
-                  <table class="data">
-                    <thead><tr><th>#</th><th>start</th><th>end</th><th>speaker</th><th>text</th></tr></thead>
-                    <tbody>
-                      {% for s in cp.transcript.segments %}
-                        <tr>
-                          <td>{{ s.segment_index }}</td>
-                          <td>{{ s.start_ms }}</td>
-                          <td>{{ s.end_ms }}</td>
-                          <td>{{ s.speaker or '—' }}</td>
-                          <td>{{ s.text }}</td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
+                  <div class="table-wrap">
+                    <table class="data">
+                      <thead><tr><th>#</th><th>Start</th><th>End</th><th>Speaker</th><th>Text</th></tr></thead>
+                      <tbody>
+                        {% for s in cp.transcript.segments %}
+                          <tr>
+                            <td>{{ s.segment_index }}</td>
+                            <td>{{ s.start_ms }}</td>
+                            <td>{{ s.end_ms }}</td>
+                            <td>{{ s.speaker or '—' }}</td>
+                            <td>{{ s.text }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
                 </details>
               {% endif %}
             {% else %}
               <p class="muted">No transcript.</p>
             {% endif %}
           {% endif %}
+          </div>
         </div>
 
         <div class="tab-panel" data-panel="runtime">
+          <div class="section-card">
           {% if not trace.agent_runtime or not trace.agent_runtime.message %}
-            <p class="muted">
+            <p class="muted" style="margin:0">
               {% if db_status.agent_runtime in ['error','timeout'] %}
                 Agent-runtime database unavailable.
               {% else %}
@@ -255,53 +278,53 @@
               </div>
 
               <div class="tab-panel active" data-panel="runtime-overview">
-                <h3>Runtime message</h3>
+                <h3 style="margin-top:0">Runtime message</h3>
                 <table class="kv">
-                  <tr><th>id</th><td><code>{{ rt.message.id }}</code></td></tr>
-                  <tr><th>batch_id</th><td><code>{{ rt.message.batch_id }}</code></td></tr>
-                  <tr><th>coordination_status</th><td>{{ rt.message.coordination_status }}</td></tr>
-                  <tr><th>coordinated_at</th><td>{{ rt.message.coordinated_at or '—' }}</td></tr>
-                  <tr><th>created_at</th><td>{{ rt.message.created_at }}</td></tr>
-                  <tr><th>attachment_status (snapshot)</th><td>{{ rt.message.attachment_status or '—' }}</td></tr>
-                  <tr><th>text</th><td class="pre">{{ rt.message.text or '—' }}</td></tr>
+                  <tr><th>ID</th><td><code>{{ rt.message.id }}</code></td></tr>
+                  <tr><th>Batch ID</th><td><code>{{ rt.message.batch_id }}</code></td></tr>
+                  <tr><th>Coordination status</th><td>{{ rt.message.coordination_status }}</td></tr>
+                  <tr><th>Coordinated at</th><td class="dt">{{ rt.message.coordinated_at|dt }}</td></tr>
+                  <tr><th>Created at</th><td class="dt">{{ rt.message.created_at|dt }}</td></tr>
+                  <tr><th>Attachment status</th><td>{{ rt.message.attachment_status or '—' }}</td></tr>
+                  <tr><th>Text</th><td class="pre">{{ rt.message.text or '—' }}</td></tr>
                 </table>
 
                 {% if rt.batch %}
                   <h3>Batch</h3>
                   <table class="kv">
-                    <tr><th>id</th><td><code>{{ rt.batch.id }}</code></td></tr>
-                    <tr><th>idempotency_key</th><td><code>{{ rt.batch.idempotency_key }}</code></td></tr>
-                    <tr><th>created_at</th><td>{{ rt.batch.created_at }}</td></tr>
+                    <tr><th>ID</th><td><code>{{ rt.batch.id }}</code></td></tr>
+                    <tr><th>Idempotency key</th><td><code>{{ rt.batch.idempotency_key }}</code></td></tr>
+                    <tr><th>Created at</th><td class="dt">{{ rt.batch.created_at|dt }}</td></tr>
                   </table>
                 {% endif %}
 
                 {% if rt.group %}
                   <h3>Conversation group</h3>
                   <table class="kv">
-                    <tr><th>id</th><td><code>{{ rt.group.id }}</code></td></tr>
-                    <tr><th>group_number</th><td>{{ rt.group.group_number }}</td></tr>
-                    <tr><th>created_at</th><td>{{ rt.group.created_at }}</td></tr>
-                    <tr><th>messages in group</th><td>{{ rt.group_messages|length }}</td></tr>
+                    <tr><th>ID</th><td><code>{{ rt.group.id }}</code></td></tr>
+                    <tr><th>Group number</th><td>{{ rt.group.group_number }}</td></tr>
+                    <tr><th>Created at</th><td class="dt">{{ rt.group.created_at|dt }}</td></tr>
+                    <tr><th>Messages in group</th><td>{{ rt.group_messages|length }}</td></tr>
                   </table>
                 {% endif %}
 
                 {% if rt.outbox %}
                   <h3>Coordination outbox</h3>
                   <table class="kv">
-                    <tr><th>status</th><td>{{ rt.outbox.status }}</td></tr>
-                    <tr><th>attempt_count</th><td>{{ rt.outbox.attempt_count }}</td></tr>
-                    <tr><th>event_type</th><td>{{ rt.outbox.event_type }}</td></tr>
-                    <tr><th>last_error</th><td>{{ rt.outbox.last_error or '—' }}</td></tr>
-                    <tr><th>published_at</th><td>{{ rt.outbox.published_at or '—' }}</td></tr>
+                    <tr><th>Status</th><td>{{ rt.outbox.status }}</td></tr>
+                    <tr><th>Attempt count</th><td>{{ rt.outbox.attempt_count }}</td></tr>
+                    <tr><th>Event type</th><td>{{ rt.outbox.event_type }}</td></tr>
+                    <tr><th>Last error</th><td>{{ rt.outbox.last_error or '—' }}</td></tr>
+                    <tr><th>Published at</th><td class="dt">{{ rt.outbox.published_at|dt }}</td></tr>
                   </table>
                 {% endif %}
 
                 {% if rt.claim %}
                   <h3>Chat claim (shared per chat)</h3>
                   <table class="kv">
-                    <tr><th>status</th><td>{{ rt.claim.status }}</td></tr>
-                    <tr><th>locked_by</th><td>{{ rt.claim.locked_by or '—' }}</td></tr>
-                    <tr><th>updated_at</th><td>{{ rt.claim.updated_at }}</td></tr>
+                    <tr><th>Status</th><td>{{ rt.claim.status }}</td></tr>
+                    <tr><th>Locked by</th><td>{{ rt.claim.locked_by or '—' }}</td></tr>
+                    <tr><th>Updated at</th><td class="dt">{{ rt.claim.updated_at|dt }}</td></tr>
                   </table>
                 {% endif %}
               </div>
@@ -321,57 +344,60 @@
                 {% elif not rt.group_messages %}
                   <p class="muted">Group exists but no messages were returned.</p>
                 {% else %}
-                  <p class="meta">
+                  <p class="meta" style="margin-bottom: 0.75rem;">
                     Group #{{ rt.group.group_number }}
                     · <code>{{ rt.group.id }}</code>
                     · {{ rt.group_messages|length }} message{{ 's' if rt.group_messages|length != 1 else '' }}
                     (Telegram message_id order)
                   </p>
-                  <table class="data group-messages">
-                    <thead>
-                      <tr>
-                        <th></th>
-                        <th>msg #</th>
-                        <th>status</th>
-                        <th>attachment</th>
-                        <th>text</th>
-                        <th>ingress id</th>
-                        <th>coordinated</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for gm in rt.group_messages %}
-                        <tr class="{% if gm.id == rt.message.id %}is-current{% endif %}">
-                          <td>
-                            {% if gm.id == rt.message.id %}
-                              <span class="badge stage-completed">current</span>
-                            {% endif %}
-                          </td>
-                          <td>{{ gm.message_id }}</td>
-                          <td>{{ gm.coordination_status }}</td>
-                          <td>
-                            {% if gm.attachment_type %}
-                              {{ gm.attachment_type }}
-                              {% if gm.attachment_status %}({{ gm.attachment_status }}){% endif %}
-                            {% else %}
-                              —
-                            {% endif %}
-                          </td>
-                          <td class="pre">{{ gm.text or '—' }}</td>
-                          <td>
-                            <a href="/messages/{{ gm.ingress_message_id }}">
-                              <code>{{ gm.ingress_message_id }}</code>
-                            </a>
-                          </td>
-                          <td>{{ gm.coordinated_at or '—' }}</td>
+                  <div class="table-wrap">
+                    <table class="data group-messages">
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>Msg #</th>
+                          <th>Status</th>
+                          <th>Attachment</th>
+                          <th>Text</th>
+                          <th>Ingress ID</th>
+                          <th>Coordinated</th>
                         </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {% for gm in rt.group_messages %}
+                          <tr class="{% if gm.id == rt.message.id %}is-current{% endif %}">
+                            <td>
+                              {% if gm.id == rt.message.id %}
+                                <span class="badge stage-completed">current</span>
+                              {% endif %}
+                            </td>
+                            <td>{{ gm.message_id }}</td>
+                            <td>{{ gm.coordination_status }}</td>
+                            <td>
+                              {% if gm.attachment_type %}
+                                {{ gm.attachment_type }}
+                                {% if gm.attachment_status %}({{ gm.attachment_status }}){% endif %}
+                              {% else %}
+                                —
+                              {% endif %}
+                            </td>
+                            <td class="pre">{{ gm.text or '—' }}</td>
+                            <td>
+                              <a href="/messages/{{ gm.ingress_message_id }}">
+                                <code>{{ gm.ingress_message_id }}</code>
+                              </a>
+                            </td>
+                            <td class="dt">{{ gm.coordinated_at|dt }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
                 {% endif %}
               </div>
             </div>
           {% endif %}
+          </div>
         </div>
       </div>
     {% endif %}

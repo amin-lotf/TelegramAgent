@@ -103,6 +103,11 @@ class UserMessage(Base):
             "message_id",
             postgresql_where=sa.text("conversation_status = 'pending'"),
         ),
+        Index(
+            "ix_user_messages_recent",
+            created_at.desc(),
+            id.desc(),
+        ),
     )
 
 

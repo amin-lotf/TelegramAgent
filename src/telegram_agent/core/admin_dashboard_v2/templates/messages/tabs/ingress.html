@@ -1,0 +1,16 @@
+{% set data = source.data %}
+<div class="panel-heading"><h3>Telegram ingress</h3><span>Authoritative message and dispatch state</span></div>
+<div class="section-grid">
+    <section class="record-section"><h4>Message</h4><dl class="record-grid">
+        {% for key in ['id','telegram_user_id','chat_id','message_id','update_id','reply_message_id','conversation_status','dispatch_event_id','created_at'] %}<dt>{{ key|replace('_',' ') }}</dt><dd>{{ data.message.get(key)|datetime if key.endswith('_at') else data.message.get(key) or '—' }}</dd>{% endfor %}
+        <dt>text</dt><dd class="long-value">{{ data.message.text or '—' }}</dd>
+    </dl></section>
+    {% if data.attachment %}<section class="record-section"><h4>Attachment</h4><dl class="record-grid">
+        {% for key, value in data.attachment.items() %}<dt>{{ key|replace('_',' ') }}</dt><dd>{{ value|datetime if key.endswith('_at') else value or '—' }}</dd>{% endfor %}
+    </dl></section>{% endif %}
+</div>
+{% if data.outbox %}<section class="record-section"><h4>Conversation outbox</h4><dl class="record-grid">
+    {% for key in ['id','event_type','chat_id','first_message_id','idempotency_key','status','attempt_count','available_at','created_at','published_at','last_error'] %}<dt>{{ key|replace('_',' ') }}</dt><dd class="{% if key == 'last_error' %}long-value{% endif %}">{{ data.outbox.get(key)|datetime if key.endswith('_at') else data.outbox.get(key) or '—' }}</dd>{% endfor %}
+</dl></section>{% endif %}
+{% if data.batch_siblings %}<section class="record-section"><h4>Messages in the same ingress batch</h4><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Ingress ID</th><th>State</th><th>Text</th></tr></thead><tbody>{% for item in data.batch_siblings %}<tr><td>{{ item.message_id }}</td><td><code>{{ item.id }}</code></td><td>{{ item.conversation_status }}</td><td>{{ item.text or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% if data.batch_siblings_truncated %}<p class="truncated">Result truncated by safety limit.</p>{% endif %}</section>{% endif %}
+{% if data.outbox %}<details class="raw"><summary>Sanitized raw outbox payload</summary><pre>{{ data.outbox.payload|prettyjson }}</pre></details>{% endif %}

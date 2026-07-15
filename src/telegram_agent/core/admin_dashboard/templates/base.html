@@ -8,10 +8,13 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">Telegram Agent · Admin</div>
+    <div class="brand">
+      Telegram Agent
+      <span class="brand-mark">Admin</span>
+    </div>
     <div class="topbar-actions">
       {% if admin_user %}
-        <span class="muted">{{ admin_user }}</span>
+        <span class="user-chip">{{ admin_user }}</span>
         <form method="post" action="/logout" class="inline">
           <button type="submit" class="btn btn-ghost">Logout</button>
         </form>

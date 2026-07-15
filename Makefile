@@ -41,6 +41,9 @@ logs-app:
 logs-admin-dashboard:
 	$(COMPOSE) logs -f --tail=100 admin-dashboard
 
+logs-admin-dashboard-v2:
+	$(COMPOSE) logs -f --tail=100 admin-dashboard-v2
+
 logs-celery:
 	$(COMPOSE) logs -f --tail=100   content-processing-worker content-processing-beat telegram-ingress-worker telegram-ingress-beat agent-runtime-worker agent-runtime-beat
 

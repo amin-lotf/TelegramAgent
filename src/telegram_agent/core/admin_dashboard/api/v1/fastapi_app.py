@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -26,13 +28,30 @@ TEMPLATES_DIR = PACKAGE_DIR / "templates"
 STATIC_DIR = PACKAGE_DIR / "static"
 
 
+def _format_datetime(value: Any) -> str:
+    """Render timestamps for the UI without raw ISO noise."""
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.strftime("%Y-%m-%d %H:%M:%S %Z").strip()
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)
+
+
+def _build_templates() -> Jinja2Templates:
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates.env.filters["dt"] = _format_datetime
+    return templates
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         databases = DashboardDatabases(settings)
         databases.start()
         app.state.databases = databases
-        app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+        app.state.templates = _build_templates()
         logger.info("Admin dashboard started")
         try:
             yield

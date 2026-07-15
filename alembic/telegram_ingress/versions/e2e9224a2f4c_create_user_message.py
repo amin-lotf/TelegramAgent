@@ -38,6 +38,12 @@ def upgrade() -> None:
                     )
     op.create_index(op.f('ix_user_messages_chat_id'), 'user_messages', ['chat_id'], unique=False)
     op.create_index(op.f('ix_user_messages_telegram_user_id'), 'user_messages', ['telegram_user_id'], unique=False)
+    op.create_index(
+        "ix_user_messages_recent",
+        "user_messages",
+        [sa.text("created_at DESC"), sa.text("id DESC")],
+        unique=False,
+    )
     op.create_table('attachments',
                     sa.Column('id', sa.UUID(), nullable=False),
                     sa.Column('user_message_id', sa.UUID(), nullable=False),
@@ -133,6 +139,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_attachments_user_message_id'), table_name='attachments')
     op.drop_index(op.f('ix_attachments_file_unique_id'), table_name='attachments')
     op.drop_table('attachments')
+    op.drop_index("ix_user_messages_recent", table_name="user_messages")
     op.drop_index(op.f('ix_user_messages_telegram_user_id'), table_name='user_messages')
     op.drop_index(op.f('ix_user_messages_chat_id'), table_name='user_messages')
     op.drop_table('user_messages')

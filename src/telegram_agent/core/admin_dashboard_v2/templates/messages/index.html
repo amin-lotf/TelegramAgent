@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Message traces · TelegramAgent{% endblock %}
+{% block body %}
+<main class="dashboard-shell">
+    <aside class="sidebar" aria-label="Telegram messages">
+        <form class="filters" method="get" action="/messages">
+            <div class="filters-heading">
+                <h1>Messages</h1>
+                <a href="/messages" class="subtle-link">Reset</a>
+            </div>
+            <details {% if filters.chat_id or filters.message_id or filters.failed_only or filters.content_status or filters.runtime_status %}open{% endif %}>
+                <summary>Search and filters</summary>
+                <div class="filter-grid">
+                    <label>Chat ID<input name="chat_id" inputmode="numeric" value="{{ filters.chat_id or '' }}"></label>
+                    <label>Telegram message ID<input name="message_id" inputmode="numeric" value="{{ filters.message_id or '' }}"></label>
+                    <label>Ingress message UUID<input name="ingress_message_id" value="{{ filters.ingress_message_id or '' }}"></label>
+                    <label>Telegram user ID<input name="telegram_user_id" inputmode="numeric" value="{{ filters.telegram_user_id or '' }}"></label>
+                    <label>Runtime group UUID<input name="runtime_group_id" value="{{ filters.runtime_group_id or '' }}"></label>
+                    <label>Content job UUID<input name="content_job_id" value="{{ filters.content_job_id or '' }}"></label>
+                    <label>From<input name="date_from" type="datetime-local" value="{{ filters.date_from.strftime('%Y-%m-%dT%H:%M') if filters.date_from else '' }}"></label>
+                    <label>To<input name="date_to" type="datetime-local" value="{{ filters.date_to.strftime('%Y-%m-%dT%H:%M') if filters.date_to else '' }}"></label>
+                    <label>Ingress state
+                        <select name="ingress_status">
+                            <option value="">Any</option>
+                            {% for value in ['pending', 'enqueued', 'dispatched', 'failed'] %}<option value="{{ value }}" {% if filters.ingress_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label>Attachment state
+                        <select name="attachment_status">
+                            <option value="">Any</option>
+                            {% for value in ['pending', 'processing', 'ready', 'failed'] %}<option value="{{ value }}" {% if filters.attachment_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label>Attachment type
+                        <select name="attachment_type">
+                            <option value="">Any</option>
+                            {% for value in ['voice', 'video', 'video_note', 'document', 'audio', 'photo'] %}<option value="{{ value }}" {% if filters.attachment_type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label>Content state
+                        <select name="content_status">
+                            <option value="">Any</option>
+                            {% for value in ['queued', 'running', 'downloaded', 'transcribing', 'completed', 'failed', 'cancelled'] %}<option value="{{ value }}" {% if filters.content_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label>Runtime state
+                        <select name="runtime_status">
+                            <option value="">Any</option>
+                            {% for value in ['pending', 'grouped', 'vague'] %}<option value="{{ value }}" {% if filters.runtime_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label>Attachments
+                        <select name="has_attachment">
+                            <option value="">Any</option>
+                            <option value="true" {% if filters.has_attachment is sameas true %}selected{% endif %}>With attachment</option>
+                            <option value="false" {% if filters.has_attachment is sameas false %}selected{% endif %}>Without attachment</option>
+                        </select>
+                    </label>
+                    <label class="checkbox"><input type="checkbox" name="failed_only" value="true" {% if filters.failed_only %}checked{% endif %}> Failed anywhere</label>
+                </div>
+                <button class="primary-button" type="submit">Apply filters</button>
+            </details>
+        </form>
+
+        {% if error %}<div class="banner error" role="alert">{{ error }}</div>{% endif %}
+        {% for state in page.source_states if not state.available %}
+            <div class="banner warning">{{ state.source|replace('_', ' ')|title }}: {{ state.message or state.status.value }}</div>
+        {% endfor %}
+        {% if page.scan_limit_reached %}<div class="banner warning">The filtered search reached its bounded scan limit. More matches may exist.</div>{% endif %}
+
+        <nav class="message-list">
+            {% for item in page.items %}
+            <a class="message-card {% if trace and trace.ingress_message_id == item.ingress_message_id %}selected{% endif %}"
+               href="/messages?selected={{ item.ingress_message_id }}{% if filter_query %}&amp;{{ filter_query }}{% endif %}">
+                <div class="message-card-top">
+                    <time>{{ item.created_at|datetime }}</time>
+                    <span class="badge {{ item.overall_status }}">{{ item.overall_status }}</span>
+                </div>
+                <div class="message-identity">
+                    <strong>{{ item.current_user_label or ('User ' ~ item.telegram_user_id) }}</strong>
+                    <span>chat {{ item.chat_id }} · msg {{ item.message_id }}</span>
+                </div>
+                <p>{{ item.text_preview or '(no text)' }}</p>
+                <div class="message-flags">
+                    {% if item.attachment_type %}<span>📎 {{ item.attachment_type }} · {{ item.attachment_status }}</span>{% endif %}
+                    {% if item.has_failure %}<span class="failure-text">failure</span>{% endif %}
+                    {% if item.has_pending %}<span>pending</span>{% endif %}
+                    {% if item.has_partial_data %}<span>partial data</span>{% endif %}
+                </div>
+            </a>
+            {% else %}
+            <div class="empty-state compact">No messages matched the current filters.</div>
+            {% endfor %}
+        </nav>
+        <div class="pagination">
+            <span>{{ page.items|length }} shown · {{ page.scanned_count }} scanned</span>
+            {% if next_url %}<a class="primary-button" href="{{ next_url }}">Next page</a>{% endif %}
+        </div>
+    </aside>
+
+    <section class="detail-pane">
+        {% if trace %}
+            {% include "messages/trace.html" %}
+        {% else %}
+            <div class="empty-state">
+                <h2>Select a message</h2>
+                <p>Choose a Telegram message to reconstruct its persisted lifecycle across independent service databases.</p>
+            </div>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}
