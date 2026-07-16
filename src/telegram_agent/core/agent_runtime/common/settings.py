@@ -16,6 +16,7 @@ from telegram_agent.core.agent_runtime.common.const import (
     DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
     DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
     DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
+    DEFAULT_OUTBOX_MAX_ATTEMPTS,
     DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
     DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
     DEFAULT_REDIS_URL,
@@ -140,6 +141,17 @@ class Settings(BaseSettings):
         default=DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
         validation_alias=AliasChoices("OUTBOX_RETRY_MAX_SECONDS", "outbox_retry_max_seconds"),
         gt=0,
+    )
+    outbox_max_attempts: int = Field(
+        default=DEFAULT_OUTBOX_MAX_ATTEMPTS,
+        validation_alias=AliasChoices("OUTBOX_MAX_ATTEMPTS", "outbox_max_attempts"),
+        ge=0,
+        description=(
+            "Maximum number of recorded outbox failures before a retryable "
+            "coordination failure is promoted to permanent (message marked vague, "
+            "outbox FAILED). When attempt_count already equals this limit, the next "
+            "failure is permanent. 0 means the first failure is permanent."
+        ),
     )
     coordination_message_batch_size: int = Field(
         default=DEFAULT_COORDINATION_MESSAGE_BATCH_SIZE,

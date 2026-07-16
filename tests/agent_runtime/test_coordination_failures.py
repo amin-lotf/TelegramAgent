@@ -46,6 +46,7 @@ def _settings(**overrides) -> Settings:
         "outbox_dispatch_lease_seconds": 60,
         "outbox_retry_base_seconds": 5,
         "outbox_retry_max_seconds": 40,
+        "outbox_max_attempts": 5,
     }
     values.update(overrides)
     return Settings(**values)
@@ -290,6 +291,91 @@ async def test_retryable_failure_uses_exponential_backoff(
     assert delays[0] == timedelta(seconds=5)
     assert delays[1] == timedelta(seconds=10)
     assert delays[2] == timedelta(seconds=20)
+
+
+@pytest.mark.asyncio
+async def test_retryable_failure_promotes_to_permanent_after_max_attempts(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    """Poison messages must not block a chat forever after max attempts."""
+    chat_id = 9010
+    max_attempts = 2
+    settings = _settings(
+        outbox_retry_base_seconds=5,
+        outbox_retry_max_seconds=40,
+        outbox_max_attempts=max_attempts,
+    )
+    service = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=coordinator_gateway(RetryableCoordinator()),
+        settings=settings,
+    )
+
+    await AsyncMessageBatchIngestionService(agent_runtime_uow_factory).ingest(
+        IngestMessageBatchCommand(
+            batch_id=uuid4(),
+            chat_id=chat_id,
+            idempotency_key="max-attempts",
+            messages=(
+                IngestMessageCommand(
+                    ingress_message_id=uuid4(),
+                    telegram_user_id=1,
+                    message_id=1,
+                    text="poison",
+                ),
+                IngestMessageCommand(
+                    ingress_message_id=uuid4(),
+                    telegram_user_id=1,
+                    message_id=2,
+                    text="next",
+                ),
+            ),
+        )
+    )
+
+    # max_attempts retryable recordings, then permanent on the next failure.
+    for attempt in range(max_attempts + 1):
+        with agent_runtime_sync_uow_factory() as uow:
+            claimed = uow.conversation_claims.claim_available_conversations(
+                batch_size=1,
+                lease_timeout=timedelta(minutes=5),
+                process_owner=f"max-w{attempt}",
+            )
+            assert len(claimed) == 1
+            token = claimed[0].claim_token
+
+        service.process_conversation(chat_id=chat_id, claim_token=token)
+
+        with agent_runtime_sync_sessionmaker() as session:
+            events = list(
+                session.scalars(
+                    select(OutboxEvent).order_by(OutboxEvent.message_id)
+                ).all()
+            )
+            head = events[0]
+            if attempt < max_attempts:
+                assert head.status == OutboxEventStatus.PENDING
+                assert head.attempt_count == attempt + 1
+                head.available_at = utcnow() - timedelta(seconds=1)
+                session.commit()
+            else:
+                message = session.scalars(
+                    select(RuntimeMessage).where(RuntimeMessage.message_id == 1)
+                ).one()
+                assert head.status == OutboxEventStatus.FAILED
+                assert message.coordination_status == CoordinationStatus.VAGUE
+                assert "Retry limit exhausted" in (head.last_error or "")
+
+    # Head is no longer unresolved; remaining work can be claimed again.
+    with agent_runtime_sync_uow_factory() as uow:
+        claimed = uow.conversation_claims.claim_available_conversations(
+            batch_size=1,
+            lease_timeout=timedelta(minutes=5),
+            process_owner="after-permanent",
+        )
+        assert len(claimed) == 1
 
 
 @pytest.mark.asyncio

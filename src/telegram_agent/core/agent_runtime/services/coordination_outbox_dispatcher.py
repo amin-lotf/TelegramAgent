@@ -6,6 +6,7 @@ import socket
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import timedelta
+from uuid import UUID
 
 from celery import Task
 
@@ -17,6 +18,7 @@ from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (
 from telegram_agent.core.agent_runtime.db.uow.sync_uow_factory import (
     sync_agent_runtime_uow_factory,
 )
+from telegram_agent.core.common.exceptions import RetryableAgentRuntimeCoordinationError
 from telegram_agent.core.common.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ class CoordinationOutboxDispatcher:
         outbox_lease_timeout: timedelta,
         retry_base_delay: timedelta,
         retry_max_delay: timedelta,
+        max_attempts: int,
         process_owner: str | None = None,
     ) -> None:
         self._uow_factory = uow_factory
@@ -45,6 +48,7 @@ class CoordinationOutboxDispatcher:
         self._outbox_lease_timeout = outbox_lease_timeout
         self._retry_base_delay = retry_base_delay
         self._retry_max_delay = retry_max_delay
+        self._max_attempts = max_attempts
         self._process_owner = process_owner or self._default_process_owner()
 
     @classmethod
@@ -65,6 +69,7 @@ class CoordinationOutboxDispatcher:
             ),
             retry_base_delay=timedelta(seconds=settings.outbox_retry_base_seconds),
             retry_max_delay=timedelta(seconds=settings.outbox_retry_max_seconds),
+            max_attempts=settings.outbox_max_attempts,
         )
 
     def dispatch_once(self) -> OutboxDispatchResult:
@@ -108,12 +113,15 @@ class CoordinationOutboxDispatcher:
                     args=(claim.chat_id, str(claim.claim_token)),
                 )
             except Exception as exc:
-                retryable_failures += 1
-                self._recover_from_enqueue_failure(
+                outcome = self._recover_from_enqueue_failure(
                     chat_id=claim.chat_id,
                     claim_token=claim.claim_token,
                     error=exc,
                 )
+                if outcome == "permanent":
+                    permanent_failures += 1
+                else:
+                    retryable_failures += 1
                 continue
 
             published += 1
@@ -129,23 +137,131 @@ class CoordinationOutboxDispatcher:
         self,
         *,
         chat_id: int,
-        claim_token,
+        claim_token: UUID,
         error: Exception,
-    ) -> None:
-        """Release claim and schedule head outbox retry under the claim token."""
-        with self._uow_factory() as uow:
-            head = uow.outbox_events.get_head_unresolved_for_chat(chat_id=chat_id)
-            attempt_count = 0 if head is None else head.attempt_count
-            next_available_at = utcnow() + self._retry_delay(attempt_count)
+    ) -> str:
+        """Release claim after broker enqueue failure.
 
-            if head is not None:
-                uow.outbox_events.schedule_dispatch_retry_for_head(
+        Schedules head outbox retry under the claim token, or promotes the head
+        message to permanent failure when retry attempts are exhausted.
+
+        Returns:
+            ``"retryable"`` or ``"permanent"`` depending on the outcome.
+        """
+        try:
+            return self._recover_from_enqueue_failure_locked(
+                chat_id=chat_id,
+                claim_token=claim_token,
+                error=error,
+            )
+        except RetryableAgentRuntimeCoordinationError:
+            # Permanent transition rolled back; still release the claim so the
+            # conversation is not stuck until lease expiry.
+            with self._uow_factory() as uow:
+                uow.conversation_claims.release(
                     chat_id=chat_id,
                     claim_token=claim_token,
-                    error_message=f"Broker enqueue failed: {error}",
-                    next_available_at=next_available_at,
+                    available_at=utcnow(),
                 )
+            logger.warning(
+                "Failed to enqueue conversation coordination task; "
+                "permanent promotion rolled back, claim released",
+                extra={
+                    "chat_id": chat_id,
+                    "claim_token": str(claim_token),
+                    "error": str(error),
+                },
+            )
+            return "retryable"
 
+    def _recover_from_enqueue_failure_locked(
+        self,
+        *,
+        chat_id: int,
+        claim_token: UUID,
+        error: Exception,
+    ) -> str:
+        with self._uow_factory() as uow:
+            head = uow.outbox_events.get_head_unresolved_for_chat(chat_id=chat_id)
+            if head is None:
+                uow.conversation_claims.release(
+                    chat_id=chat_id,
+                    claim_token=claim_token,
+                    available_at=utcnow(),
+                )
+                logger.warning(
+                    "Failed to enqueue conversation coordination task; "
+                    "no unresolved outbox head",
+                    extra={
+                        "chat_id": chat_id,
+                        "claim_token": str(claim_token),
+                        "error": str(error),
+                    },
+                )
+                return "retryable"
+
+            if head.attempt_count >= self._max_attempts:
+                exhausted_message = (
+                    f"Retry limit exhausted after {head.attempt_count} attempts "
+                    f"(broker enqueue failed): {error}"
+                )
+                # Message first: if outbox fails afterward, the whole UoW rolls back.
+                vague = uow.messages.mark_vague(
+                    runtime_message_id=head.runtime_message_id,
+                )
+                if vague is None:
+                    uow.conversation_claims.release(
+                        chat_id=chat_id,
+                        claim_token=claim_token,
+                        available_at=utcnow(),
+                    )
+                    logger.warning(
+                        "Enqueue failure exhausted retries but message was not pending",
+                        extra={
+                            "chat_id": chat_id,
+                            "runtime_message_id": str(head.runtime_message_id),
+                            "claim_token": str(claim_token),
+                            "error": str(error),
+                        },
+                    )
+                    return "permanent"
+
+                failed = uow.outbox_events.mark_failed_for_message(
+                    runtime_message_id=head.runtime_message_id,
+                    claim_token=claim_token,
+                    error_message=exhausted_message,
+                )
+                if failed is None:
+                    raise RetryableAgentRuntimeCoordinationError(
+                        "Permanent outbox failure update did not apply under active claim"
+                    )
+
+                uow.conversation_claims.release(
+                    chat_id=chat_id,
+                    claim_token=claim_token,
+                    available_at=utcnow(),
+                )
+                logger.error(
+                    "Failed to enqueue conversation coordination task; "
+                    "retry limit exhausted, marked permanent",
+                    extra={
+                        "chat_id": chat_id,
+                        "claim_token": str(claim_token),
+                        "runtime_message_id": str(head.runtime_message_id),
+                        "attempt_count": head.attempt_count,
+                        "max_attempts": self._max_attempts,
+                        "error": str(error),
+                    },
+                )
+                return "permanent"
+
+            next_available_at = utcnow() + self._retry_delay(head.attempt_count)
+            uow.outbox_events.schedule_dispatch_retry_for_head(
+                chat_id=chat_id,
+                claim_token=claim_token,
+                error_message=f"Broker enqueue failed: {error}",
+                next_available_at=next_available_at,
+            )
             uow.conversation_claims.release(
                 chat_id=chat_id,
                 claim_token=claim_token,
@@ -160,6 +276,7 @@ class CoordinationOutboxDispatcher:
                 "error": str(error),
             },
         )
+        return "retryable"
 
     def _retry_delay(self, attempt_count: int) -> timedelta:
         multiplier = 2 ** max(attempt_count, 0)

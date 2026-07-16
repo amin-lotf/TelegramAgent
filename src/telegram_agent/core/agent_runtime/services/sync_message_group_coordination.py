@@ -238,6 +238,7 @@ class SyncMessageGroupCoordinationService:
                 chat_id=chat_id,
                 runtime_message_id=runtime_message_id,
                 claim_token=claim_token,
+                lease_timeout=lease_timeout,
                 error=exc,
             )
             return None
@@ -246,6 +247,7 @@ class SyncMessageGroupCoordinationService:
                 chat_id=chat_id,
                 runtime_message_id=runtime_message_id,
                 claim_token=claim_token,
+                lease_timeout=lease_timeout,
                 error=exc,
             )
             logger.exception(
@@ -397,37 +399,66 @@ class SyncMessageGroupCoordinationService:
         chat_id: int,
         runtime_message_id: UUID,
         claim_token: UUID,
+        lease_timeout: timedelta,
         error: Exception,
     ) -> None:
         with self._uow_factory() as uow:
             event = uow.outbox_events.get_by_runtime_message_id(runtime_message_id)
             attempt_count = 0 if event is None else event.attempt_count
-            next_available_at = utcnow() + self._retry_delay(attempt_count)
-            updated = uow.outbox_events.record_failure_for_message(
-                runtime_message_id=runtime_message_id,
-                claim_token=claim_token,
-                error_message=str(error),
-                next_available_at=next_available_at,
-            )
-        if updated is None:
-            logger.info(
-                "Skipped retryable failure recording; claim token no longer active",
-                extra={
-                    "chat_id": chat_id,
-                    "runtime_message_id": str(runtime_message_id),
-                    "claim_token": str(claim_token),
-                },
-            )
-            return
-        logger.warning(
-            "Retryable coordination failure",
+
+            if attempt_count < self._settings.outbox_max_attempts:
+                next_available_at = utcnow() + self._retry_delay(attempt_count)
+                updated = uow.outbox_events.record_failure_for_message(
+                    runtime_message_id=runtime_message_id,
+                    claim_token=claim_token,
+                    error_message=str(error),
+                    next_available_at=next_available_at,
+                )
+                if updated is None:
+                    logger.info(
+                        "Skipped retryable failure recording; claim token no longer active",
+                        extra={
+                            "chat_id": chat_id,
+                            "runtime_message_id": str(runtime_message_id),
+                            "claim_token": str(claim_token),
+                        },
+                    )
+                    return
+                logger.warning(
+                    "Retryable coordination failure",
+                    extra={
+                        "chat_id": chat_id,
+                        "runtime_message_id": str(runtime_message_id),
+                        "attempt_count": updated.attempt_count,
+                        "next_available_at": next_available_at.isoformat(),
+                        "max_attempts": self._settings.outbox_max_attempts,
+                        "error": str(error),
+                    },
+                )
+                return
+
+        # attempt_count already at/above the limit: promote to permanent so the
+        # head message no longer blocks the conversation forever.
+        exhausted = RetryableAgentRuntimeCoordinationError(
+            f"Retry limit exhausted after {attempt_count} attempts: {error}"
+        )
+        exhausted.__cause__ = error
+        logger.error(
+            "Retryable coordination failure exhausted max attempts; promoting to permanent",
             extra={
                 "chat_id": chat_id,
                 "runtime_message_id": str(runtime_message_id),
-                "attempt_count": updated.attempt_count,
-                "next_available_at": next_available_at.isoformat(),
+                "attempt_count": attempt_count,
+                "max_attempts": self._settings.outbox_max_attempts,
                 "error": str(error),
             },
+        )
+        self._record_permanent_failure(
+            chat_id=chat_id,
+            runtime_message_id=runtime_message_id,
+            claim_token=claim_token,
+            lease_timeout=lease_timeout,
+            error=exhausted,
         )
 
     def _record_permanent_failure(

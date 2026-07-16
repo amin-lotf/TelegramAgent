@@ -206,6 +206,7 @@ async def test_broker_enqueue_failure_schedules_head_outbox_retry_and_releases_c
         outbox_lease_timeout=timedelta(minutes=1),
         retry_base_delay=timedelta(seconds=5),
         retry_max_delay=timedelta(minutes=5),
+        max_attempts=5,
         process_owner="dispatcher",
     ).dispatch_once()
 

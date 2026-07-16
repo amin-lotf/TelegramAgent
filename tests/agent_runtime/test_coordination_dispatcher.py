@@ -10,8 +10,18 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageBatchCommand,
     IngestMessageCommand,
 )
-from telegram_agent.core.agent_runtime.common.types import ClaimStatus
-from telegram_agent.core.agent_runtime.db.models.runtime import ConversationClaim
+from sqlalchemy import select
+
+from telegram_agent.core.agent_runtime.common.types import (
+    ClaimStatus,
+    CoordinationStatus,
+    OutboxEventStatus,
+)
+from telegram_agent.core.agent_runtime.db.models.runtime import (
+    ConversationClaim,
+    OutboxEvent,
+    RuntimeMessage,
+)
 from telegram_agent.core.agent_runtime.services.async_message_batch_ingestion import (
     AsyncMessageBatchIngestionService,
 )
@@ -50,7 +60,12 @@ async def _seed(agent_runtime_uow_factory, chat_id: int, key: str) -> None:
     )
 
 
-def _dispatcher(uow_factory, task: _FakeTask) -> CoordinationOutboxDispatcher:
+def _dispatcher(
+    uow_factory,
+    task: _FakeTask,
+    *,
+    max_attempts: int = 5,
+) -> CoordinationOutboxDispatcher:
     return CoordinationOutboxDispatcher(
         uow_factory=uow_factory,
         coordinate_task=task,  # type: ignore[arg-type]
@@ -59,6 +74,7 @@ def _dispatcher(uow_factory, task: _FakeTask) -> CoordinationOutboxDispatcher:
         outbox_lease_timeout=timedelta(minutes=1),
         retry_base_delay=timedelta(seconds=5),
         retry_max_delay=timedelta(minutes=5),
+        max_attempts=max_attempts,
         process_owner="dispatcher-1",
     )
 
@@ -133,3 +149,43 @@ async def test_dispatcher_recovers_expired_claims_before_claiming(
     assert result.published == 1
     assert task.calls[0][0] == chat_id
     assert task.calls[0][1]  # new claim token string
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_promotes_to_permanent_when_max_attempts_exhausted(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 7301
+    await _seed(agent_runtime_uow_factory, chat_id, "dispatch-max-attempts")
+
+    with agent_runtime_sync_sessionmaker() as session:
+        event = session.scalars(select(OutboxEvent)).one()
+        event.attempt_count = 5
+        session.commit()
+
+    task = _FakeTask()
+    task.fail = True
+    result = _dispatcher(
+        agent_runtime_sync_uow_factory,
+        task,
+        max_attempts=5,
+    ).dispatch_once()
+
+    assert result.claimed == 1
+    assert result.published == 0
+    assert result.retryable_failures == 0
+    assert result.permanent_failures == 1
+
+    with agent_runtime_sync_sessionmaker() as session:
+        claim = session.get(ConversationClaim, chat_id)
+        event = session.scalars(select(OutboxEvent)).one()
+        message = session.scalars(select(RuntimeMessage)).one()
+
+    assert claim is not None
+    assert claim.status == ClaimStatus.IDLE
+    assert claim.claim_token is None
+    assert event.status == OutboxEventStatus.FAILED
+    assert message.coordination_status == CoordinationStatus.VAGUE
+    assert "Retry limit exhausted" in (event.last_error or "")
