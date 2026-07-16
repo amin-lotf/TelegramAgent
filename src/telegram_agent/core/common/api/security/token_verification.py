@@ -11,7 +11,7 @@ from starlette.requests import Request
 class VerifyApiToken:
     def __init__(self, expected_token: str | None) -> None:
         self.expected_token = expected_token
-    def __call__(
+    async def __call__(
         self,
         request: Request,
         credentials: Annotated[
@@ -51,5 +51,4 @@ class VerifyApiToken:
         if provided.lower().startswith("bearer "):
             return provided[7:].strip() == token
         return False
-
 

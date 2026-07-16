@@ -12,12 +12,12 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageCommand,
 )
 from telegram_agent.core.agent_runtime.common.settings import Settings
+from telegram_agent.core.agent_runtime.common.models import CoordinatorDecision
 from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
     CoordinatorDecisionKind,
     OutboxEventStatus,
 )
-from telegram_agent.core.agent_runtime.coordinators.base import CoordinatorDecision
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
     OutboxEvent,
@@ -34,6 +34,7 @@ from telegram_agent.core.agent_runtime.services.sync_message_group_coordination 
 )
 from telegram_agent.core.common.exceptions import PermanentAgentRuntimeCoordinationError
 from telegram_agent.core.common.utils import utcnow
+from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
 
 
 def _settings(**overrides) -> Settings:
@@ -144,7 +145,7 @@ async def test_permanent_error_marks_outbox_failed_not_retryable(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=PermanentCoordinator(),
+        llm_gateway_client=coordinator_gateway(PermanentCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -204,7 +205,7 @@ async def test_stale_claim_cannot_record_retryable_failure(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=RetryableCoordinator(),
+        llm_gateway_client=coordinator_gateway(RetryableCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=old_token)
 
@@ -229,7 +230,7 @@ async def test_retryable_failure_uses_exponential_backoff(
     settings = _settings(outbox_retry_base_seconds=5, outbox_retry_max_seconds=40)
     service = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=RetryableCoordinator(),
+        llm_gateway_client=coordinator_gateway(RetryableCoordinator()),
         settings=settings,
     )
 
@@ -327,7 +328,7 @@ async def test_vague_messages_excluded_from_recent_window(
     capture = CaptureWindowCoordinator()
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=capture,
+        llm_gateway_client=coordinator_gateway(capture),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -367,7 +368,7 @@ async def test_recent_window_is_chronological_oldest_to_newest(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=AlwaysNew(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(coordination_message_batch_size=3),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -411,7 +412,7 @@ async def test_same_task_prior_group_visible_to_later_message(
 
     result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=ScriptedGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(ScriptedGroupCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 

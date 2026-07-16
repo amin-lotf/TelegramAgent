@@ -12,13 +12,13 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageCommand,
 )
 from telegram_agent.core.agent_runtime.common.settings import Settings
+from telegram_agent.core.agent_runtime.common.models import CoordinatorDecision
 from telegram_agent.core.agent_runtime.common.types import (
     ClaimStatus,
     CoordinationStatus,
     CoordinatorDecisionKind,
     OutboxEventStatus,
 )
-from telegram_agent.core.agent_runtime.coordinators.base import CoordinatorDecision
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
     OutboxEvent,
@@ -35,6 +35,7 @@ from telegram_agent.core.agent_runtime.services.sync_message_group_coordination 
 )
 from telegram_agent.core.common.exceptions import PermanentAgentRuntimeCoordinationError
 from telegram_agent.core.common.utils import utcnow
+from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
 
 
 def _settings(**overrides) -> Settings:
@@ -120,7 +121,7 @@ async def test_permanent_failure_is_atomic_vague_and_failed(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=PermanentCoordinator(),
+        llm_gateway_client=coordinator_gateway(PermanentCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=token)
 
@@ -167,7 +168,7 @@ async def test_permanent_failure_rolls_back_if_outbox_update_fails(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=PermanentCoordinator(),
+        llm_gateway_client=coordinator_gateway(PermanentCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=token)
 
@@ -281,7 +282,7 @@ async def test_bounded_batch_leaves_remainder_immediately_claimable(
 
     service = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=AlwaysNew(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(coordination_message_batch_size=2),
     )
 

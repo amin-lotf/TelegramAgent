@@ -83,6 +83,9 @@ services:
       --loglevel=info
     volumes:
       - ../..:/app
+    depends_on:
+      llm_gateway:
+        condition: service_healthy
     networks:
       - fatol-net
 

@@ -51,5 +51,34 @@ services:
       - ../..:/app
     networks:
       - fatol-net
+  llm_gateway:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+      target: llm-gateway
+    container_name: llm_gateway_app
+    env_file:
+      - .env.llm_gateway.docker
+    command: >
+      python -m uvicorn
+      telegram_agent.core.llm_gateway.api.v1.fastapi_app:fastapi_app
+      --host 0.0.0.0 --port 8000
+    volumes:
+      - ../..:/app
+    networks:
+      - fatol-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 networks:
   fatol-net:

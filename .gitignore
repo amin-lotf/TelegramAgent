@@ -196,6 +196,7 @@ celerybeat.pid
 
 # Environments
 .env.*
+!docker/app/.env.llm_gateway.docker.example
 venv/
 
 env.bak/

@@ -1,5 +1,9 @@
 from enum import StrEnum
 
+from telegram_agent.core.llm_gateway.common.schemas import (
+    MessageGroupingKind as CoordinatorDecisionKind,
+)
+
 
 class CoordinationStatus(StrEnum):
     PENDING = "pending"
@@ -23,7 +27,10 @@ class OutboxEventStatus(StrEnum):
     FAILED = "failed"
 
 
-class CoordinatorDecisionKind(StrEnum):
-    EXISTING = "existing"
-    NEW = "new"
-    VAGUE = "vague"
+__all__ = [
+    "ClaimStatus",
+    "CoordinationStatus",
+    "CoordinatorDecisionKind",
+    "OutboxEventStatus",
+    "OutboxEventType",
+]

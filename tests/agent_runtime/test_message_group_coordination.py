@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -13,14 +14,11 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageCommand,
 )
 from telegram_agent.core.agent_runtime.common.settings import Settings
+from telegram_agent.core.agent_runtime.common.models import CoordinatorDecision
 from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
     CoordinatorDecisionKind,
     OutboxEventStatus,
-)
-from telegram_agent.core.agent_runtime.coordinators.base import CoordinatorDecision
-from telegram_agent.core.agent_runtime.coordinators.heuristic import (
-    HeuristicMessageGroupCoordinator,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
@@ -36,6 +34,7 @@ from telegram_agent.core.agent_runtime.services.sync_message_group_coordination 
 )
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import utcnow
+from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
 
 
 def _settings(**overrides) -> Settings:
@@ -74,6 +73,11 @@ class AdaptiveCoordinator:
                 group_number=self.group_number,
             )
         return CoordinatorDecision(kind=CoordinatorDecisionKind.VAGUE)
+
+
+class AlwaysNew:
+    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
+        return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
 
 
 async def _ingest_and_claim(
@@ -139,7 +143,7 @@ async def test_existing_new_and_vague_assignment(
 
     result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=AdaptiveCoordinator(),
+        llm_gateway_client=coordinator_gateway(AdaptiveCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -177,15 +181,57 @@ async def test_existing_new_and_vague_assignment(
 
 
 @pytest.mark.asyncio
+async def test_gateway_call_runs_outside_database_transaction(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+) -> None:
+    chat_id = 5011
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="gateway-outside-transaction",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text="new topic",
+            ),
+        ),
+    )
+    active_transactions = 0
+
+    @contextmanager
+    def tracking_uow_factory():
+        nonlocal active_transactions
+        with agent_runtime_sync_uow_factory() as uow:
+            active_transactions += 1
+            try:
+                yield uow
+            finally:
+                active_transactions -= 1
+
+    class TransactionAwareDecision:
+        def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
+            assert active_transactions == 0
+            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=tracking_uow_factory,
+        llm_gateway_client=coordinator_gateway(TransactionAwareDecision()),
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    assert result.processed == 1
+
+
+@pytest.mark.asyncio
 async def test_sequential_group_numbers_per_chat(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
 ) -> None:
-    class AlwaysNew:
-        def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-
     chat_id = 5007
     claim_token = await _ingest_and_claim(
         agent_runtime_uow_factory,
@@ -216,7 +262,7 @@ async def test_sequential_group_numbers_per_chat(
 
     result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=AlwaysNew(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -275,7 +321,7 @@ async def test_invalid_group_number_becomes_vague(
 
     result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=BadExisting(),
+        llm_gateway_client=coordinator_gateway(BadExisting()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -326,7 +372,7 @@ async def test_text_followed_by_related_attachment_same_group(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=HeuristicMessageGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(AdaptiveCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -372,7 +418,7 @@ async def test_standalone_attachment_starts_new_group(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=HeuristicMessageGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -411,7 +457,7 @@ async def test_bounded_task_leaves_remainder_pending(
 
     result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=HeuristicMessageGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(coordination_message_batch_size=2),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -477,7 +523,7 @@ async def test_stale_claim_token_cannot_process_or_release(
 
     stale_result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=HeuristicMessageGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=old_token)
     assert stale_result.processed == 0
@@ -492,7 +538,7 @@ async def test_stale_claim_token_cannot_process_or_release(
 
     fresh_result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=HeuristicMessageGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=new_token)
     assert fresh_result.processed == 1
@@ -522,7 +568,7 @@ async def test_coordinator_failure_keeps_message_pending_and_releases_claim(
 
     result = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=FailingCoordinator(),
+        llm_gateway_client=coordinator_gateway(FailingCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -552,7 +598,7 @@ async def test_does_not_coordinate_same_message_twice(
     chat_id = 5006
     service = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinator=HeuristicMessageGroupCoordinator(),
+        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     )
 

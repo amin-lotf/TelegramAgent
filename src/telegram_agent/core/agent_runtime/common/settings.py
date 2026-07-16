@@ -11,6 +11,8 @@ from telegram_agent.core.agent_runtime.common.const import (
     DEFAULT_COORDINATION_CLAIM_LEASE_SECONDS,
     DEFAULT_COORDINATION_MESSAGE_BATCH_SIZE,
     DEFAULT_COORDINATION_RECENT_WINDOW_SIZE,
+    DEFAULT_LLM_GATEWAY_BASE_URL,
+    DEFAULT_LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_OUTBOX_DISPATCH_BATCH_SIZE,
     DEFAULT_OUTBOX_DISPATCH_LEASE_SECONDS,
     DEFAULT_OUTBOX_DISPATCH_POLL_INTERVAL_SECONDS,
@@ -72,6 +74,30 @@ class Settings(BaseSettings):
             "AGENT_RUNTIME_SERVICE_TOKEN",
             "agent_runtime_service_token",
         ),
+    )
+
+    llm_gateway_base_url: str = Field(
+        default=DEFAULT_LLM_GATEWAY_BASE_URL,
+        validation_alias=AliasChoices(
+            "LLM_GATEWAY_BASE_URL",
+            "llm_gateway_base_url",
+        ),
+        description="Base URL for the provider-independent LLM gateway.",
+    )
+    llm_gateway_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LLM_GATEWAY_SERVICE_TOKEN",
+            "llm_gateway_service_token",
+        ),
+    )
+    llm_gateway_request_timeout_seconds: float = Field(
+        default=DEFAULT_LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS",
+            "llm_gateway_request_timeout_seconds",
+        ),
+        gt=0,
     )
 
     sqlalchemy_database_url: str = Field(

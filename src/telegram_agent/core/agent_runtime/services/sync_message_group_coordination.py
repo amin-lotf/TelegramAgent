@@ -6,22 +6,21 @@ from contextlib import AbstractContextManager
 from datetime import timedelta
 from uuid import UUID
 
+from pydantic import ValidationError
+
+from telegram_agent.core.agent_runtime.clients.llm_gateway import LlmGatewayClient
 from telegram_agent.core.agent_runtime.common.results import (
     ConversationCoordinationResult,
     MessageCoordinationResult,
+)
+from telegram_agent.core.agent_runtime.common.models import (
+    CoordinatorDecision,
+    CoordinatorMessageView,
 )
 from telegram_agent.core.agent_runtime.common.settings import Settings, settings
 from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
     CoordinatorDecisionKind,
-)
-from telegram_agent.core.agent_runtime.coordinators.base import (
-    CoordinatorDecision,
-    CoordinatorMessageView,
-    MessageGroupCoordinator,
-)
-from telegram_agent.core.agent_runtime.coordinators.heuristic import (
-    default_message_group_coordinator,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import RuntimeMessage
 from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (
@@ -29,6 +28,9 @@ from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (
 )
 from telegram_agent.core.agent_runtime.db.uow.sync_uow_factory import (
     sync_agent_runtime_uow_factory,
+)
+from telegram_agent.core.agent_runtime.prompts.message_grouping import (
+    build_message_grouping_prompts,
 )
 from telegram_agent.core.common.exceptions import (
     PermanentAgentRuntimeCoordinationError,
@@ -47,22 +49,30 @@ class SyncMessageGroupCoordinationService:
             [],
             AbstractContextManager[SyncSqlAlchemyAgentRuntimeUnitOfWork],
         ],
-        coordinator: MessageGroupCoordinator,
+        llm_gateway_client: LlmGatewayClient,
         settings: Settings,
     ) -> None:
         self._uow_factory = uow_factory
-        self._coordinator = coordinator
+        self._llm_gateway_client = llm_gateway_client
         self._settings = settings
 
     @classmethod
     def from_settings(
         cls,
         *,
-        coordinator: MessageGroupCoordinator | None = None,
+        llm_gateway_client: LlmGatewayClient | None = None,
     ) -> "SyncMessageGroupCoordinationService":
+        if llm_gateway_client is None:
+            if settings.llm_gateway_service_token is None:
+                raise RuntimeError("LLM_GATEWAY_SERVICE_TOKEN must be configured")
+            llm_gateway_client = LlmGatewayClient(
+                base_url=settings.llm_gateway_base_url,
+                token=settings.llm_gateway_service_token,
+                timeout_seconds=settings.llm_gateway_request_timeout_seconds,
+            )
         return cls(
             uow_factory=sync_agent_runtime_uow_factory,
-            coordinator=coordinator or default_message_group_coordinator(),
+            llm_gateway_client=llm_gateway_client,
             settings=settings,
         )
 
@@ -192,10 +202,20 @@ class SyncMessageGroupCoordinationService:
             }
 
         try:
-            decision = self._coordinator.assign_group(
+            prompts = build_message_grouping_prompts(
                 current=current_view,
                 recent_window=recent_views,
             )
+            generation = self._llm_gateway_client.coordinate_message_group(
+                system_prompt=prompts.system_prompt,
+                user_prompt=prompts.user_prompt,
+            )
+            try:
+                decision = CoordinatorDecision.model_validate(generation.output)
+            except ValidationError as exc:
+                raise RetryableAgentRuntimeCoordinationError(
+                    "LLM gateway returned an invalid coordination decision"
+                ) from exc
             return self._apply_decision(
                 chat_id=chat_id,
                 runtime_message_id=runtime_message_id,

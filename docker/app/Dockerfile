@@ -82,6 +82,15 @@ COPY src ./src
 RUN uv sync --extra agent-runtime --extra apps --no-dev --frozen
 
 
+FROM base AS llm-gateway
+
+RUN uv sync --extra llm-gateway --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra llm-gateway --extra apps --no-dev --frozen
+
+
 
 FROM base AS admin-dashboard
 
