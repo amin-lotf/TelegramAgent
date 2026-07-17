@@ -25,6 +25,15 @@ class OutboxDispatchResult:
 
 
 @dataclass(frozen=True)
+class JobExpectationSweepResult:
+    claimed: int = 0
+    timed_out: int = 0
+    satisfied: int = 0
+    recovered_leases: int = 0
+    deleted: int = 0
+
+
+@dataclass(frozen=True)
 class TelegramDownloadContext:
     job_id: UUID
     media_asset_id: UUID

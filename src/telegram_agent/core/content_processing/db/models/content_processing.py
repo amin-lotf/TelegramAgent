@@ -11,6 +11,8 @@ from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import get_enum_values
 from telegram_agent.core.content_processing.common.types import (
+    JobCompletionExpectationKind,
+    JobCompletionExpectationStatus,
     JobStatus,
     JobKind,
     MediaAssetRole,
@@ -205,6 +207,102 @@ class MediaAsset(Base):
             "job_id",
             "role",
             name="uq_media_assets_job_id_role",
+        ),
+    )
+
+
+class JobCompletionExpectation(Base):
+    __tablename__ = "job_completion_expectations"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    kind: Mapped[JobCompletionExpectationKind] = mapped_column(
+        sa.Enum(
+            JobCompletionExpectationKind,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=64,
+        ),
+        nullable=False,
+        default=JobCompletionExpectationKind.JOB_COMPLETION,
+        server_default=JobCompletionExpectationKind.JOB_COMPLETION.value,
+    )
+
+    status: Mapped[JobCompletionExpectationStatus] = mapped_column(
+        sa.Enum(
+            JobCompletionExpectationStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=JobCompletionExpectationStatus.OPEN,
+        server_default=JobCompletionExpectationStatus.OPEN.value,
+    )
+
+    due_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    locked_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    job: Mapped[Job] = relationship()
+
+    __table_args__ = (
+        Index(
+            "ix_job_completion_expectations_open_due",
+            "due_at",
+            "created_at",
+            postgresql_where=sa.text("status = 'open'"),
+        ),
+        Index(
+            "ix_job_completion_expectations_processing_lease",
+            "locked_at",
+            postgresql_where=sa.text("status = 'processing'"),
+        ),
+        Index(
+            "ix_job_completion_expectations_resolved",
+            "resolved_at",
+            postgresql_where=sa.text(
+                "status IN ('satisfied', 'timed_out')"
+            ),
         ),
     )
 

@@ -29,10 +29,26 @@ class StubTelegramIngressClient:
 
 
 @pytest.mark.parametrize(
-    ("job_status", "with_transcript", "expected_text"),
+    ("job_status", "with_transcript", "expected_status", "expected_text"),
     [
-        (JobStatus.COMPLETED, True, "hello from voice"),
-        (JobStatus.FAILED, False, None),
+        (
+            JobStatus.COMPLETED,
+            True,
+            AttachmentProcessingResultStatus.COMPLETED,
+            "hello from voice",
+        ),
+        (
+            JobStatus.FAILED,
+            False,
+            AttachmentProcessingResultStatus.FAILED,
+            None,
+        ),
+        (
+            JobStatus.TIMED_OUT,
+            False,
+            AttachmentProcessingResultStatus.TIMED_OUT,
+            None,
+        ),
     ],
 )
 def test_callback_service_builds_terminal_ingress_request(
@@ -40,6 +56,7 @@ def test_callback_service_builds_terminal_ingress_request(
     content_sync_uow_factory,
     job_status: JobStatus,
     with_transcript: bool,
+    expected_status: AttachmentProcessingResultStatus,
     expected_text: str | None,
 ) -> None:
     job_id, message_id, attachment_id = _seed_terminal_job(
@@ -58,7 +75,7 @@ def test_callback_service_builds_terminal_ingress_request(
     command = client.commands[0]
     assert command.ingress_message_id == message_id
     assert command.ingress_attachment_id == attachment_id
-    assert command.status == AttachmentProcessingResultStatus(job_status.value)
+    assert command.status == expected_status
     assert command.transcribed_text == expected_text
 
 

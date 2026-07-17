@@ -37,6 +37,65 @@ def upgrade() -> None:
     op.create_index(op.f("ix_jobs_idempotency_key"), "jobs", ["idempotency_key"], unique=True)
 
     op.create_table(
+        "job_completion_expectations",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("job_id", sa.UUID(), nullable=False),
+        sa.Column(
+            "kind",
+            sa.String(length=64),
+            server_default="job_completion",
+            nullable=False,
+        ),
+        sa.Column(
+            "status",
+            sa.String(length=32),
+            server_default="open",
+            nullable=False,
+        ),
+        sa.Column("due_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("locked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("locked_by", sa.String(length=255), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("job_id", name="uq_job_completion_expectations_job_id"),
+    )
+    op.create_index(
+        op.f("ix_job_completion_expectations_job_id"),
+        "job_completion_expectations",
+        ["job_id"],
+        unique=True,
+    )
+    op.create_index(
+        "ix_job_completion_expectations_open_due",
+        "job_completion_expectations",
+        ["due_at", "created_at"],
+        unique=False,
+        postgresql_where=sa.text("status = 'open'"),
+    )
+    op.create_index(
+        "ix_job_completion_expectations_processing_lease",
+        "job_completion_expectations",
+        ["locked_at"],
+        unique=False,
+        postgresql_where=sa.text("status = 'processing'"),
+    )
+    op.create_index(
+        "ix_job_completion_expectations_resolved",
+        "job_completion_expectations",
+        ["resolved_at"],
+        unique=False,
+        postgresql_where=sa.text("status IN ('satisfied', 'timed_out')"),
+    )
+
+    op.create_table(
         "media_assets",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("job_id", sa.UUID(), nullable=False),
@@ -182,6 +241,24 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_media_assets_parent_asset_id"), table_name="media_assets")
     op.drop_index(op.f("ix_media_assets_job_id"), table_name="media_assets")
     op.drop_table("media_assets")
+
+    op.drop_index(
+        "ix_job_completion_expectations_resolved",
+        table_name="job_completion_expectations",
+    )
+    op.drop_index(
+        "ix_job_completion_expectations_processing_lease",
+        table_name="job_completion_expectations",
+    )
+    op.drop_index(
+        "ix_job_completion_expectations_open_due",
+        table_name="job_completion_expectations",
+    )
+    op.drop_index(
+        op.f("ix_job_completion_expectations_job_id"),
+        table_name="job_completion_expectations",
+    )
+    op.drop_table("job_completion_expectations")
 
     op.drop_index(op.f("ix_jobs_idempotency_key"), table_name="jobs")
     op.drop_table("jobs")

@@ -5,6 +5,9 @@ from types import TracebackType
 from sqlalchemy.orm import Session
 
 from telegram_agent.core.content_processing.db.repositories.sync_job import SyncSqlAlchemyJobRepository
+from telegram_agent.core.content_processing.db.repositories.sync_job_expectation import (
+    SyncSqlAlchemyJobExpectationRepository,
+)
 from telegram_agent.core.content_processing.db.repositories.sync_media_asset import SyncSqlAlchemyMediaAssetRepository
 from telegram_agent.core.content_processing.db.repositories.sync_outbox import SyncSqlAlchemyOutboxRepository
 from telegram_agent.core.content_processing.db.repositories.sync_telegram_source import SyncSqlAlchemyTelegramSourceRepository
@@ -15,6 +18,7 @@ class SyncSqlAlchemyContentProcessingUnitOfWork:
     def __init__(self, session: Session):
         self._session = session
         self.jobs = SyncSqlAlchemyJobRepository(session)
+        self.job_expectations = SyncSqlAlchemyJobExpectationRepository(session)
         self.media_assets = SyncSqlAlchemyMediaAssetRepository(session)
         self.telegram_sources = SyncSqlAlchemyTelegramSourceRepository(session)
         self.transcripts = SyncSqlAlchemyTranscriptRepository(session)

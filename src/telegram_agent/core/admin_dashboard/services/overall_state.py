@@ -11,7 +11,7 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
 _BLOCKING_ATTACHMENT_TYPES = frozenset({"voice", "video_note"})
 _TERMINAL_ATTACHMENT = frozenset({"ready", "failed"})
 _ACTIVE_JOB = frozenset({"queued", "running", "downloaded", "transcribing"})
-_FAILED_JOB = frozenset({"failed", "cancelled"})
+_FAILED_JOB = frozenset({"failed", "cancelled", "timed_out"})
 
 
 def overall_state_label(state: OverallState) -> str:

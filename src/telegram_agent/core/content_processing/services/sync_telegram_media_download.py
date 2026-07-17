@@ -147,6 +147,7 @@ class SyncTelegramMediaDownloadService:
             error_message = self._source_error(asset=asset, sources=sources)
             if error_message:
                 uow.jobs.mark_failed(job_id=job_id, error_message=error_message)
+                uow.job_expectations.mark_satisfied(job_id=job_id)
                 self._enqueue_terminal_callback_in_uow(uow, job_id)
                 return None
 
@@ -243,6 +244,8 @@ class SyncTelegramMediaDownloadService:
                             payload={},
                         )
                     )
+            else:
+                uow.job_expectations.mark_satisfied(job_id=context.job_id)
             self._enqueue_terminal_callback_in_uow(uow, context.job_id)
 
     def _enqueue_terminal_callback(self, job_id: UUID) -> None:
@@ -258,7 +261,8 @@ class SyncTelegramMediaDownloadService:
         if (
             job is None
             or not job.callback_required
-            or job.status not in (JobStatus.COMPLETED, JobStatus.FAILED)
+            or job.status
+            not in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMED_OUT)
         ):
             return
 
@@ -283,5 +287,6 @@ class SyncTelegramMediaDownloadService:
 
     def _mark_failed(self, job_id: UUID, error_message: str) -> None:
         with self._uow_factory() as uow:
-            uow.jobs.mark_failed(job_id=job_id, error_message=error_message)
+            if uow.jobs.mark_failed(job_id=job_id, error_message=error_message):
+                uow.job_expectations.mark_satisfied(job_id=job_id)
             self._enqueue_terminal_callback_in_uow(uow, job_id)

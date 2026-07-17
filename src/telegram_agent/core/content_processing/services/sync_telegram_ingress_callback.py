@@ -69,7 +69,11 @@ class SyncTelegramIngressCallbackService:
             job = uow.jobs.get_by_id(job_id)
             if job is None or not job.callback_required:
                 return None
-            if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+            if job.status not in (
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.TIMED_OUT,
+            ):
                 raise PermanentContentProcessingError(
                     "Ingress callback requested for a non-terminal job"
                 )
@@ -93,13 +97,16 @@ class SyncTelegramIngressCallbackService:
                     )
                 transcribed_text = transcript.text
 
+            if job.status == JobStatus.COMPLETED:
+                result_status = AttachmentProcessingResultStatus.COMPLETED
+            elif job.status == JobStatus.TIMED_OUT:
+                result_status = AttachmentProcessingResultStatus.TIMED_OUT
+            else:
+                result_status = AttachmentProcessingResultStatus.FAILED
+
             return NotifyAttachmentProcessingResultCommand(
                 ingress_message_id=source.ingress_message_id,
                 ingress_attachment_id=source.ingress_attachment_id,
-                status=(
-                    AttachmentProcessingResultStatus.COMPLETED
-                    if job.status == JobStatus.COMPLETED
-                    else AttachmentProcessingResultStatus.FAILED
-                ),
+                status=result_status,
                 transcribed_text=transcribed_text,
             )

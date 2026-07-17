@@ -12,7 +12,19 @@ class JobStatus(StrEnum):
     TRANSCRIBING = "transcribing"
     COMPLETED = "completed"
     FAILED = "failed"
+    TIMED_OUT = "timed_out"
     CANCELLED = "cancelled"
+
+
+class JobCompletionExpectationKind(StrEnum):
+    JOB_COMPLETION = "job_completion"
+
+
+class JobCompletionExpectationStatus(StrEnum):
+    OPEN = "open"
+    PROCESSING = "processing"
+    SATISFIED = "satisfied"
+    TIMED_OUT = "timed_out"
 
 
 class MediaAssetRole(StrEnum):

@@ -51,11 +51,12 @@ class AsyncAttachmentProcessingResultService:
                 return ApplyAttachmentProcessingResultResult(applied=False)
 
             chat_id = message.chat_id
-            message.attachment.status = (
-                AttachmentStatus.READY
-                if command.status == AttachmentProcessingResultStatus.COMPLETED
-                else AttachmentStatus.FAILED
-            )
+            # TIMED_OUT is accepted from content-processing and stored as FAILED for
+            # now; a later ingress expectation phase may preserve timed_out distinctly.
+            if command.status == AttachmentProcessingResultStatus.COMPLETED:
+                message.attachment.status = AttachmentStatus.READY
+            else:
+                message.attachment.status = AttachmentStatus.FAILED
             if (
                 command.status == AttachmentProcessingResultStatus.COMPLETED
                 and command.transcribed_text is not None

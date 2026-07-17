@@ -8,13 +8,21 @@ from sqlalchemy import func, select
 
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
+from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import (
+    JobCompletionExpectationStatus,
     JobStatus,
     MediaAssetRole,
     OutboxEventStatus,
     OutboxEventType,
 )
-from telegram_agent.core.content_processing.db.models.content_processing import Job, MediaAsset, OutboxEvent, TelegramSource
+from telegram_agent.core.content_processing.db.models.content_processing import (
+    Job,
+    JobCompletionExpectation,
+    MediaAsset,
+    OutboxEvent,
+    TelegramSource,
+)
 from telegram_agent.core.content_processing.db.uow.async_content_processing import (
     AsyncSqlAlchemyContentProcessingUnitOfWork,
 )
@@ -46,6 +54,13 @@ async def test_create_job_persists_job_related_records_and_outbox_atomically(
         event = (
             await session.execute(select(OutboxEvent).where(OutboxEvent.job_id == result.job_id))
         ).scalar_one_or_none()
+        expectation = (
+            await session.execute(
+                select(JobCompletionExpectation).where(
+                    JobCompletionExpectation.job_id == result.job_id
+                )
+            )
+        ).scalar_one_or_none()
 
     assert job is not None
     assert job.status == JobStatus.QUEUED
@@ -63,6 +78,11 @@ async def test_create_job_persists_job_related_records_and_outbox_atomically(
     )
     assert event.payload == {}
     assert event.status == OutboxEventStatus.PENDING
+    assert expectation is not None
+    assert expectation.status == JobCompletionExpectationStatus.OPEN
+    expected_seconds = settings.job_expectation_voice_video_note_seconds
+    delta = (expectation.due_at - expectation.created_at).total_seconds()
+    assert abs(delta - expected_seconds) < 2
 
 
 async def test_create_job_rolls_back_job_and_outbox_when_late_write_fails(
@@ -93,11 +113,15 @@ async def test_create_job_rolls_back_job_and_outbox_when_late_write_fails(
         event_count = await session.scalar(select(func.count()).select_from(OutboxEvent))
         source_count = await session.scalar(select(func.count()).select_from(TelegramSource))
         asset_count = await session.scalar(select(func.count()).select_from(MediaAsset))
+        expectation_count = await session.scalar(
+            select(func.count()).select_from(JobCompletionExpectation)
+        )
 
     assert job_count == 0
     assert event_count == 0
     assert source_count == 0
     assert asset_count == 0
+    assert expectation_count == 0
 
 
 async def test_duplicate_idempotency_key_returns_existing_job_without_duplicate_outbox(
@@ -118,18 +142,54 @@ async def test_duplicate_idempotency_key_returns_existing_job_without_duplicate_
         event_count = await session.scalar(
             select(func.count()).select_from(OutboxEvent).where(OutboxEvent.job_id == first.job_id)
         )
+        expectation_count = await session.scalar(
+            select(func.count())
+            .select_from(JobCompletionExpectation)
+            .where(JobCompletionExpectation.job_id == first.job_id)
+        )
 
     assert event_count == 1
+    assert expectation_count == 1
 
 
-def _create_command(*, idempotency_key: str) -> CreateTelegramJobCommand:
+async def test_create_job_uses_default_deadline_for_non_voice_types(
+    content_uow_factory,
+    content_sessionmaker,
+) -> None:
+    service = AsyncTelegramJobService(uow_factory=content_uow_factory)
+    result = await service.create_job(
+        _create_command(
+            idempotency_key="photo-job",
+            attachment_type=TelegramAttachmentType.PHOTO,
+        )
+    )
+
+    async with content_sessionmaker() as session:
+        expectation = (
+            await session.execute(
+                select(JobCompletionExpectation).where(
+                    JobCompletionExpectation.job_id == result.job_id
+                )
+            )
+        ).scalar_one()
+
+    expected_seconds = settings.job_expectation_default_seconds
+    delta = (expectation.due_at - expectation.created_at).total_seconds()
+    assert abs(delta - expected_seconds) < 2
+
+
+def _create_command(
+    *,
+    idempotency_key: str,
+    attachment_type: TelegramAttachmentType = TelegramAttachmentType.VOICE,
+) -> CreateTelegramJobCommand:
     return CreateTelegramJobCommand(
         ingress_message_id=uuid4(),
         ingress_attachment_id=uuid4(),
         telegram_user_id=555000111,
         telegram_file_id="telegram-file-001",
         telegram_file_unique_id="telegram-unique-001",
-        attachment_type=TelegramAttachmentType.VOICE,
+        attachment_type=attachment_type,
         callback_required=True,
         idempotency_key=idempotency_key,
     )

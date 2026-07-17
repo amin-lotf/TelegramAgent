@@ -16,6 +16,7 @@ def create_celery_app() -> Celery:
             "telegram_agent.core.content_processing.celery.tasks.transcription",
             "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
             "telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback",
+            "telegram_agent.core.content_processing.celery.tasks.job_expectation_sweep",
         ],
     )
 
@@ -63,6 +64,10 @@ def create_celery_app() -> Celery:
                 "queue": "outbox_dispatch",
                 "routing_key": "outbox.dispatch",
             },
+            "job_expectations.sweep": {
+                "queue": "outbox_dispatch",
+                "routing_key": "outbox.dispatch",
+            },
             "telegram.download": {
                 "queue": "telegram_download",
                 "routing_key": "telegram.download",
@@ -81,6 +86,10 @@ def create_celery_app() -> Celery:
             "dispatch-content-processing-outbox": {
                 "task": "outbox.dispatch",
                 "schedule": settings.outbox_dispatch_poll_interval_seconds,
+            },
+            "sweep-job-completion-expectations": {
+                "task": "job_expectations.sweep",
+                "schedule": settings.job_expectation_sweep_interval_seconds,
             },
         },
     )

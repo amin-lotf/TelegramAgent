@@ -20,6 +20,12 @@ from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHE
 from telegram_agent.core.content_processing.common.const import (
     DEFAULT_CALLBACK_TASK_MAX_RETRIES,
     DEFAULT_CALLBACK_TASK_RETRY_BASE_SECONDS,
+    DEFAULT_JOB_EXPECTATION_DEFAULT_SECONDS,
+    DEFAULT_JOB_EXPECTATION_RESOLVED_RETENTION_SECONDS,
+    DEFAULT_JOB_EXPECTATION_SWEEP_BATCH_SIZE,
+    DEFAULT_JOB_EXPECTATION_SWEEP_INTERVAL_SECONDS,
+    DEFAULT_JOB_EXPECTATION_SWEEP_LEASE_SECONDS,
+    DEFAULT_JOB_EXPECTATION_VOICE_VIDEO_NOTE_SECONDS,
     DEFAULT_TELEGRAM_INGRESS_BASE_URL,
     DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
 )
@@ -185,6 +191,68 @@ class Settings(BaseSettings):
         description="Maximum delay for outbox exponential retry backoff.",
     )
 
+    job_expectation_voice_video_note_seconds: int = Field(
+        default=DEFAULT_JOB_EXPECTATION_VOICE_VIDEO_NOTE_SECONDS,
+        validation_alias=AliasChoices(
+            "JOB_EXPECTATION_VOICE_VIDEO_NOTE_SECONDS",
+            "job_expectation_voice_video_note_seconds",
+        ),
+        description="SLA seconds for voice/video_note job completion expectations.",
+        gt=0,
+    )
+
+    job_expectation_default_seconds: int = Field(
+        default=DEFAULT_JOB_EXPECTATION_DEFAULT_SECONDS,
+        validation_alias=AliasChoices(
+            "JOB_EXPECTATION_DEFAULT_SECONDS",
+            "job_expectation_default_seconds",
+        ),
+        description="SLA seconds for non-voice/video_note job completion expectations.",
+        gt=0,
+    )
+
+    job_expectation_sweep_interval_seconds: float = Field(
+        default=DEFAULT_JOB_EXPECTATION_SWEEP_INTERVAL_SECONDS,
+        validation_alias=AliasChoices(
+            "JOB_EXPECTATION_SWEEP_INTERVAL_SECONDS",
+            "job_expectation_sweep_interval_seconds",
+        ),
+        description="Celery Beat interval for sweeping due job completion expectations.",
+        gt=0,
+    )
+
+    job_expectation_sweep_batch_size: int = Field(
+        default=DEFAULT_JOB_EXPECTATION_SWEEP_BATCH_SIZE,
+        validation_alias=AliasChoices(
+            "JOB_EXPECTATION_SWEEP_BATCH_SIZE",
+            "job_expectation_sweep_batch_size",
+        ),
+        description="Maximum open expectations claimed per sweep tick.",
+        gt=0,
+    )
+
+    job_expectation_sweep_lease_seconds: int = Field(
+        default=DEFAULT_JOB_EXPECTATION_SWEEP_LEASE_SECONDS,
+        validation_alias=AliasChoices(
+            "JOB_EXPECTATION_SWEEP_LEASE_SECONDS",
+            "job_expectation_sweep_lease_seconds",
+        ),
+        description="Seconds before a processing expectation lease can be reclaimed.",
+        gt=0,
+    )
+
+    job_expectation_resolved_retention_seconds: int = Field(
+        default=DEFAULT_JOB_EXPECTATION_RESOLVED_RETENTION_SECONDS,
+        validation_alias=AliasChoices(
+            "JOB_EXPECTATION_RESOLVED_RETENTION_SECONDS",
+            "job_expectation_resolved_retention_seconds",
+        ),
+        description=(
+            "Seconds to keep satisfied/timed_out expectations before purge. "
+            "0 deletes them on the next sweep."
+        ),
+        ge=0,
+    )
 
     LOG_LEVEL: str = Field(
         default=DEFAULT_LOG_LEVEL,

@@ -4,6 +4,7 @@ from enum import StrEnum
 class AttachmentProcessingResultStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
+    TIMED_OUT = "timed_out"
 
 
 class TelegramAttachmentType(StrEnum):

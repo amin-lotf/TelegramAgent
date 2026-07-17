@@ -1,20 +1,39 @@
 from contextlib import AbstractAsyncContextManager
+from datetime import timedelta
 from typing import Callable
 
 from sqlalchemy.exc import IntegrityError
 
 from telegram_agent.core.common.exceptions import JobCreationError
+from telegram_agent.core.common.types import TelegramAttachmentType
+from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.content_processing.common.commands import CreateTelegramJobCommand
 from telegram_agent.core.content_processing.common.results import CreateTelegramJobResult
+from telegram_agent.core.content_processing.common.settings import Settings, settings
 from telegram_agent.core.content_processing.common.types import (
+    JobCompletionExpectationKind,
+    JobCompletionExpectationStatus,
     JobKind,
     JobStatus,
     MediaAssetRole,
     OutboxEventType,
 )
-from telegram_agent.core.content_processing.db.models.content_processing import Job, MediaAsset, OutboxEvent, TelegramSource
+from telegram_agent.core.content_processing.db.models.content_processing import (
+    Job,
+    JobCompletionExpectation,
+    MediaAsset,
+    OutboxEvent,
+    TelegramSource,
+)
 from telegram_agent.core.content_processing.db.uow.async_content_processing import \
     AsyncSqlAlchemyContentProcessingUnitOfWork
+
+_VOICE_NOTE_TYPES = frozenset(
+    {
+        TelegramAttachmentType.VOICE,
+        TelegramAttachmentType.VIDEO_NOTE,
+    }
+)
 
 
 class AsyncTelegramJobService:
@@ -24,8 +43,10 @@ class AsyncTelegramJobService:
                 [],
                 AbstractAsyncContextManager[AsyncSqlAlchemyContentProcessingUnitOfWork],
             ],
+            app_settings: Settings | None = None,
     ):
         self._uow_factory = uow_factory
+        self._settings = app_settings if app_settings is not None else settings
 
     async def create_job(
             self,
@@ -88,6 +109,15 @@ class AsyncTelegramJobService:
 
                 await uow.outbox_events.add(outbox_event)
 
+                await uow.job_expectations.add(
+                    JobCompletionExpectation(
+                        job_id=job.id,
+                        kind=JobCompletionExpectationKind.JOB_COMPLETION,
+                        status=JobCompletionExpectationStatus.OPEN,
+                        due_at=utcnow() + self._deadline_for(command.attachment_type),
+                    )
+                )
+
                 return CreateTelegramJobResult(
                     job_id=job.id,
                     status=job.status,
@@ -111,3 +141,10 @@ class AsyncTelegramJobService:
             raise JobCreationError(
                 "Failed to persist content-processing job"
             ) from exc
+
+    def _deadline_for(self, attachment_type: TelegramAttachmentType) -> timedelta:
+        if attachment_type in _VOICE_NOTE_TYPES:
+            seconds = self._settings.job_expectation_voice_video_note_seconds
+        else:
+            seconds = self._settings.job_expectation_default_seconds
+        return timedelta(seconds=seconds)

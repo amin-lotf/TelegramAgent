@@ -166,7 +166,7 @@ def build_timeline(
                 "transcribing",
                 "completed",
             } or any(a.role == "source" and a.local_path for a in content.assets)
-            if job.status == "failed" and not download_done:
+            if job.status in {"failed", "timed_out"} and not download_done:
                 events.append(
                     _event(
                         StageKey.MEDIA_DOWNLOADED,
@@ -206,7 +206,7 @@ def build_timeline(
                             source_db=DbName.CONTENT_PROCESSING,
                         )
                     )
-                elif job.status == "failed":
+                elif job.status in {"failed", "timed_out"}:
                     events.append(
                         _event(
                             StageKey.MEDIA_DEMUXED,
@@ -238,7 +238,7 @@ def build_timeline(
                     events.append(
                         _event(StageKey.TRANSCRIPTION_DONE, StageStatus.PENDING, source_db=DbName.CONTENT_PROCESSING)
                     )
-                elif job.status == "failed":
+                elif job.status in {"failed", "timed_out"}:
                     events.append(
                         _event(
                             StageKey.TRANSCRIPTION_DONE,
@@ -270,7 +270,7 @@ def build_timeline(
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
-            elif job.status == "failed":
+            elif job.status in {"failed", "timed_out"}:
                 events.append(
                     _event(
                         StageKey.CP_FINISHED,
