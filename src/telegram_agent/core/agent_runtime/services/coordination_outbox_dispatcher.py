@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from uuid import UUID
@@ -12,6 +12,7 @@ from celery import Task
 
 from telegram_agent.core.agent_runtime.common.results import OutboxDispatchResult
 from telegram_agent.core.agent_runtime.common.settings import settings
+from telegram_agent.core.agent_runtime.common.types import OutboxEventType
 from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (
     SyncSqlAlchemyAgentRuntimeUnitOfWork,
 )
@@ -32,7 +33,7 @@ class CoordinationOutboxDispatcher:
             [],
             AbstractContextManager[SyncSqlAlchemyAgentRuntimeUnitOfWork],
         ],
-        coordinate_task: Task,
+        task_by_event_type: Mapping[str, Task],
         batch_size: int,
         claim_lease_timeout: timedelta,
         outbox_lease_timeout: timedelta,
@@ -42,7 +43,7 @@ class CoordinationOutboxDispatcher:
         process_owner: str | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._coordinate_task = coordinate_task
+        self._task_by_event_type = dict(task_by_event_type)
         self._batch_size = batch_size
         self._claim_lease_timeout = claim_lease_timeout
         self._outbox_lease_timeout = outbox_lease_timeout
@@ -53,13 +54,21 @@ class CoordinationOutboxDispatcher:
 
     @classmethod
     def from_settings(cls) -> "CoordinationOutboxDispatcher":
+        from telegram_agent.core.agent_runtime.celery.tasks.classify_intent import (
+            classify_intent_task,
+        )
         from telegram_agent.core.agent_runtime.celery.tasks.coordinate_conversation import (
             coordinate_conversation_task,
         )
 
         return cls(
             uow_factory=sync_agent_runtime_uow_factory,
-            coordinate_task=coordinate_conversation_task,
+            task_by_event_type={
+                OutboxEventType.MESSAGE_PENDING_COORDINATION.value: (
+                    coordinate_conversation_task
+                ),
+                OutboxEventType.INTENT_CLASSIFIER.value: classify_intent_task,
+            },
             batch_size=settings.outbox_dispatch_batch_size,
             claim_lease_timeout=timedelta(
                 seconds=settings.coordination_claim_lease_seconds
@@ -100,16 +109,57 @@ class CoordinationOutboxDispatcher:
         permanent_failures = 0
 
         for claim in claims:
-            try:
-                logger.info(
-                    "Dispatching conversation coordination task",
+            head_event_type: str | None = None
+            with self._uow_factory() as uow:
+                head = uow.outbox_events.get_head_unresolved_for_chat(
+                    chat_id=claim.chat_id
+                )
+                if head is not None:
+                    head_event_type = head.event_type
+
+            if head_event_type is None:
+                with self._uow_factory() as uow:
+                    uow.conversation_claims.release(
+                        chat_id=claim.chat_id,
+                        claim_token=claim.claim_token,
+                        available_at=utcnow(),
+                    )
+                logger.warning(
+                    "Released claim with no unresolved outbox head",
                     extra={
                         "chat_id": claim.chat_id,
                         "claim_token": str(claim.claim_token),
+                    },
+                )
+                continue
+
+            task = self._task_by_event_type.get(head_event_type)
+            if task is None:
+                outcome = self._recover_from_enqueue_failure(
+                    chat_id=claim.chat_id,
+                    claim_token=claim.claim_token,
+                    error=RuntimeError(
+                        f"Unsupported outbox event type: {head_event_type}"
+                    ),
+                    force_permanent=True,
+                )
+                if outcome == "permanent":
+                    permanent_failures += 1
+                else:
+                    retryable_failures += 1
+                continue
+
+            try:
+                logger.info(
+                    "Dispatching agent-runtime outbox task",
+                    extra={
+                        "chat_id": claim.chat_id,
+                        "claim_token": str(claim.claim_token),
+                        "event_type": head_event_type,
                         "process_owner": self._process_owner,
                     },
                 )
-                self._coordinate_task.apply_async(
+                task.apply_async(
                     args=(claim.chat_id, str(claim.claim_token)),
                 )
             except Exception as exc:
@@ -139,6 +189,7 @@ class CoordinationOutboxDispatcher:
         chat_id: int,
         claim_token: UUID,
         error: Exception,
+        force_permanent: bool = False,
     ) -> str:
         """Release claim after broker enqueue failure.
 
@@ -153,6 +204,7 @@ class CoordinationOutboxDispatcher:
                 chat_id=chat_id,
                 claim_token=claim_token,
                 error=error,
+                force_permanent=force_permanent,
             )
         except RetryableAgentRuntimeCoordinationError:
             # Permanent transition rolled back; still release the claim so the
@@ -164,7 +216,7 @@ class CoordinationOutboxDispatcher:
                     available_at=utcnow(),
                 )
             logger.warning(
-                "Failed to enqueue conversation coordination task; "
+                "Failed to enqueue agent-runtime task; "
                 "permanent promotion rolled back, claim released",
                 extra={
                     "chat_id": chat_id,
@@ -180,6 +232,7 @@ class CoordinationOutboxDispatcher:
         chat_id: int,
         claim_token: UUID,
         error: Exception,
+        force_permanent: bool = False,
     ) -> str:
         with self._uow_factory() as uow:
             head = uow.outbox_events.get_head_unresolved_for_chat(chat_id=chat_id)
@@ -190,7 +243,7 @@ class CoordinationOutboxDispatcher:
                     available_at=utcnow(),
                 )
                 logger.warning(
-                    "Failed to enqueue conversation coordination task; "
+                    "Failed to enqueue agent-runtime task; "
                     "no unresolved outbox head",
                     extra={
                         "chat_id": chat_id,
@@ -200,28 +253,66 @@ class CoordinationOutboxDispatcher:
                 )
                 return "retryable"
 
-            if head.attempt_count >= self._max_attempts:
+            if force_permanent or head.attempt_count >= self._max_attempts:
                 exhausted_message = (
                     f"Retry limit exhausted after {head.attempt_count} attempts "
                     f"(broker enqueue failed): {error}"
+                    if not force_permanent
+                    else str(error)
                 )
-                # Message first: if outbox fails afterward, the whole UoW rolls back.
-                vague = uow.messages.mark_vague(
-                    runtime_message_id=head.runtime_message_id,
-                )
-                if vague is None:
+                if head.event_type == OutboxEventType.MESSAGE_PENDING_COORDINATION.value:
+                    # Message first: if outbox fails afterward, the whole UoW rolls back.
+                    vague = uow.messages.mark_vague(
+                        runtime_message_id=head.runtime_message_id,
+                    )
+                    if vague is None:
+                        uow.conversation_claims.release(
+                            chat_id=chat_id,
+                            claim_token=claim_token,
+                            available_at=utcnow(),
+                        )
+                        logger.warning(
+                            "Enqueue failure exhausted retries but message was not pending",
+                            extra={
+                                "chat_id": chat_id,
+                                "runtime_message_id": str(head.runtime_message_id),
+                                "claim_token": str(claim_token),
+                                "error": str(error),
+                            },
+                        )
+                        return "permanent"
+                elif head.event_type == OutboxEventType.INTENT_CLASSIFIER.value:
+                    failed_message = uow.messages.mark_classification_failed(
+                        runtime_message_id=head.runtime_message_id,
+                    )
+                    if failed_message is None:
+                        uow.conversation_claims.release(
+                            chat_id=chat_id,
+                            claim_token=claim_token,
+                            available_at=utcnow(),
+                        )
+                        logger.warning(
+                            "Enqueue failure exhausted retries but message was not classifiable",
+                            extra={
+                                "chat_id": chat_id,
+                                "runtime_message_id": str(head.runtime_message_id),
+                                "claim_token": str(claim_token),
+                                "error": str(error),
+                            },
+                        )
+                        return "permanent"
+                else:
                     uow.conversation_claims.release(
                         chat_id=chat_id,
                         claim_token=claim_token,
                         available_at=utcnow(),
                     )
-                    logger.warning(
-                        "Enqueue failure exhausted retries but message was not pending",
+                    logger.error(
+                        "Unsupported outbox event type during permanent enqueue recovery",
                         extra={
                             "chat_id": chat_id,
+                            "event_type": head.event_type,
                             "runtime_message_id": str(head.runtime_message_id),
-                            "claim_token": str(claim_token),
-                            "error": str(error),
                         },
                     )
                     return "permanent"
@@ -230,6 +321,7 @@ class CoordinationOutboxDispatcher:
                     runtime_message_id=head.runtime_message_id,
                     claim_token=claim_token,
                     error_message=exhausted_message,
+                    event_type=head.event_type,
                 )
                 if failed is None:
                     raise RetryableAgentRuntimeCoordinationError(
@@ -242,12 +334,13 @@ class CoordinationOutboxDispatcher:
                     available_at=utcnow(),
                 )
                 logger.error(
-                    "Failed to enqueue conversation coordination task; "
+                    "Failed to enqueue agent-runtime task; "
                     "retry limit exhausted, marked permanent",
                     extra={
                         "chat_id": chat_id,
                         "claim_token": str(claim_token),
                         "runtime_message_id": str(head.runtime_message_id),
+                        "event_type": head.event_type,
                         "attempt_count": head.attempt_count,
                         "max_attempts": self._max_attempts,
                         "error": str(error),
@@ -269,7 +362,7 @@ class CoordinationOutboxDispatcher:
             )
 
         logger.warning(
-            "Failed to enqueue conversation coordination task; scheduled retry",
+            "Failed to enqueue agent-runtime task; scheduled retry",
             extra={
                 "chat_id": chat_id,
                 "claim_token": str(claim_token),

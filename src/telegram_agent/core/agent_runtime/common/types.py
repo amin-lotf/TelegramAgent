@@ -11,6 +11,20 @@ class CoordinationStatus(StrEnum):
     VAGUE = "vague"
 
 
+class RuntimeMessageStatus(StrEnum):
+    RECEIVED = "received"
+    COORDINATING = "coordinating"
+    COORDINATED = "coordinated"
+    CLASSIFYING = "classifying"
+    CLASSIFIED = "classified"
+    FAILED = "failed"
+
+
+class MessageIntent(StrEnum):
+    CONVERSATION = "conversation"
+    DOWNLOAD_REQUEST = "download_request"
+
+
 class ClaimStatus(StrEnum):
     IDLE = "idle"
     CLAIMED = "claimed"
@@ -18,6 +32,7 @@ class ClaimStatus(StrEnum):
 
 class OutboxEventType(StrEnum):
     MESSAGE_PENDING_COORDINATION = "agent_runtime.message.pending_coordination"
+    INTENT_CLASSIFIER = "agent_runtime.message.pending_intent_classification"
 
 
 class OutboxEventStatus(StrEnum):
@@ -31,6 +46,8 @@ __all__ = [
     "ClaimStatus",
     "CoordinationStatus",
     "CoordinatorDecisionKind",
+    "MessageIntent",
     "OutboxEventStatus",
     "OutboxEventType",
+    "RuntimeMessageStatus",
 ]

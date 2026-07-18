@@ -216,11 +216,13 @@ class MessageListingService:
             attempt["status"] == filters.content_status for attempt in content_attempts
         ):
             return False
-        if filters.runtime_status and (
-            runtime_item is None
-            or runtime_item["coordination_status"] != filters.runtime_status
-        ):
+        if filters.runtime_status and runtime_item is None:
             return False
+        if filters.runtime_status and runtime_item is not None:
+            pipeline = str(runtime_item.get("status") or "")
+            coordination = str(runtime_item.get("coordination_status") or "")
+            if filters.runtime_status not in {pipeline, coordination}:
+                return False
         if filters.failed_only:
             failed = (
                 row["conversation_status"] == "failed"
@@ -228,7 +230,10 @@ class MessageListingService:
                 or any(attempt["status"] == "failed" for attempt in content_attempts)
                 or (
                     runtime_item is not None
-                    and runtime_item.get("outbox_status") == "failed"
+                    and (
+                        runtime_item.get("outbox_status") == "failed"
+                        or runtime_item.get("status") == "failed"
+                    )
                 )
             )
             if not failed:
@@ -245,24 +250,41 @@ class MessageListingService:
         partial: bool,
     ) -> MessageSummaryView:
         content_statuses = tuple(str(item["status"]) for item in content_attempts)
-        runtime_status = str(runtime_item["coordination_status"]) if runtime_item else None
+        pipeline_status = str(runtime_item["status"]) if runtime_item and runtime_item.get("status") else None
+        coordination_status = (
+            str(runtime_item["coordination_status"]) if runtime_item else None
+        )
+        # Prefer pipeline status for list badges; fall back to coordination.
+        runtime_status = pipeline_status or coordination_status
         has_failure = (
             row["conversation_status"] == "failed"
             or row.get("attachment_status") == "failed"
             or "failed" in content_statuses
-            or (runtime_item is not None and runtime_item.get("outbox_status") == "failed")
+            or (
+                runtime_item is not None
+                and (
+                    runtime_item.get("outbox_status") == "failed"
+                    or pipeline_status == "failed"
+                )
+            )
         )
         has_pending = (
             row["conversation_status"] in _PENDING_INGRESS
             or row.get("attachment_status") in {"pending", "processing"}
             or any(status in _PENDING_CONTENT for status in content_statuses)
-            or runtime_status == "pending"
+            or coordination_status == "pending"
+            or pipeline_status
+            in {"received", "coordinating", "coordinated", "classifying"}
         )
         if has_failure:
             overall = "failed"
+        elif pipeline_status == "classified":
+            overall = "classified"
+        elif pipeline_status in {"coordinated", "classifying"}:
+            overall = "classifying"
         elif has_pending:
             overall = "pending"
-        elif runtime_status in {"grouped", "vague"}:
+        elif coordination_status in {"grouped", "vague"}:
             overall = "coordinated"
         elif row["conversation_status"] == "dispatched":
             overall = "dispatched"

@@ -6,7 +6,11 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
-from telegram_agent.core.agent_runtime.common.types import CoordinationStatus
+from telegram_agent.core.agent_runtime.common.types import (
+    CoordinationStatus,
+    MessageIntent,
+    RuntimeMessageStatus,
+)
 from telegram_agent.core.agent_runtime.db.models.runtime import RuntimeMessage
 from telegram_agent.core.common.utils import utcnow
 
@@ -85,6 +89,28 @@ class SyncSqlAlchemyRuntimeMessageRepository:
         )
         return list(self._session.scalars(statement).all())
 
+    def mark_coordinating(
+        self,
+        *,
+        runtime_message_id: UUID,
+    ) -> RuntimeMessage | None:
+        statement = (
+            update(RuntimeMessage)
+            .where(
+                RuntimeMessage.id == runtime_message_id,
+                RuntimeMessage.coordination_status == CoordinationStatus.PENDING,
+                RuntimeMessage.status.in_(
+                    (
+                        RuntimeMessageStatus.RECEIVED,
+                        RuntimeMessageStatus.COORDINATING,
+                    )
+                ),
+            )
+            .values(status=RuntimeMessageStatus.COORDINATING)
+            .returning(RuntimeMessage)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
     def mark_grouped(
         self,
         *,
@@ -100,6 +126,7 @@ class SyncSqlAlchemyRuntimeMessageRepository:
             )
             .values(
                 coordination_status=CoordinationStatus.GROUPED,
+                status=RuntimeMessageStatus.COORDINATED,
                 group_id=group_id,
                 coordinated_at=coordinated_at or utcnow(),
             )
@@ -121,9 +148,75 @@ class SyncSqlAlchemyRuntimeMessageRepository:
             )
             .values(
                 coordination_status=CoordinationStatus.VAGUE,
+                status=RuntimeMessageStatus.FAILED,
                 group_id=None,
                 coordinated_at=coordinated_at or utcnow(),
             )
+            .returning(RuntimeMessage)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
+    def mark_classifying(
+        self,
+        *,
+        runtime_message_id: UUID,
+    ) -> RuntimeMessage | None:
+        statement = (
+            update(RuntimeMessage)
+            .where(
+                RuntimeMessage.id == runtime_message_id,
+                RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
+                RuntimeMessage.status.in_(
+                    (
+                        RuntimeMessageStatus.COORDINATED,
+                        RuntimeMessageStatus.CLASSIFYING,
+                    )
+                ),
+            )
+            .values(status=RuntimeMessageStatus.CLASSIFYING)
+            .returning(RuntimeMessage)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
+    def mark_classified(
+        self,
+        *,
+        runtime_message_id: UUID,
+        intent: MessageIntent,
+    ) -> RuntimeMessage | None:
+        statement = (
+            update(RuntimeMessage)
+            .where(
+                RuntimeMessage.id == runtime_message_id,
+                RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
+                RuntimeMessage.status == RuntimeMessageStatus.CLASSIFYING,
+            )
+            .values(
+                status=RuntimeMessageStatus.CLASSIFIED,
+                intent=intent,
+            )
+            .returning(RuntimeMessage)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
+    def mark_classification_failed(
+        self,
+        *,
+        runtime_message_id: UUID,
+    ) -> RuntimeMessage | None:
+        statement = (
+            update(RuntimeMessage)
+            .where(
+                RuntimeMessage.id == runtime_message_id,
+                RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
+                RuntimeMessage.status.in_(
+                    (
+                        RuntimeMessageStatus.COORDINATED,
+                        RuntimeMessageStatus.CLASSIFYING,
+                    )
+                ),
+            )
+            .values(status=RuntimeMessageStatus.FAILED)
             .returning(RuntimeMessage)
         )
         return self._session.execute(statement).scalar_one_or_none()

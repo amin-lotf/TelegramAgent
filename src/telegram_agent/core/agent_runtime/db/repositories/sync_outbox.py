@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from telegram_agent.core.agent_runtime.common.types import (
     ClaimStatus,
     OutboxEventStatus,
+    OutboxEventType,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
@@ -23,12 +24,28 @@ class SyncSqlAlchemyOutboxRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def add(self, event: OutboxEvent) -> OutboxEvent:
+        self._session.add(event)
+        return event
+
+    def get_by_idempotency_key(self, idempotency_key: str) -> OutboxEvent | None:
+        statement = select(OutboxEvent).where(
+            OutboxEvent.idempotency_key == idempotency_key
+        )
+        return self._session.scalar(statement)
+
     def get_by_runtime_message_id(
         self,
         runtime_message_id: UUID,
+        *,
+        event_type: OutboxEventType | str = OutboxEventType.MESSAGE_PENDING_COORDINATION,
     ) -> OutboxEvent | None:
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
         statement = select(OutboxEvent).where(
-            OutboxEvent.runtime_message_id == runtime_message_id
+            OutboxEvent.runtime_message_id == runtime_message_id,
+            OutboxEvent.event_type == event_type_value,
         )
         return self._session.scalar(statement)
 
@@ -64,9 +81,14 @@ class SyncSqlAlchemyOutboxRepository:
         *,
         runtime_message_id: UUID,
         claim_token: UUID | None = None,
+        event_type: OutboxEventType | str = OutboxEventType.MESSAGE_PENDING_COORDINATION,
     ) -> OutboxEvent | None:
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
         conditions = [
             OutboxEvent.runtime_message_id == runtime_message_id,
+            OutboxEvent.event_type == event_type_value,
             OutboxEvent.status.in_(
                 (OutboxEventStatus.PENDING, OutboxEventStatus.PROCESSING)
             ),
@@ -95,12 +117,17 @@ class SyncSqlAlchemyOutboxRepository:
         claim_token: UUID,
         error_message: str,
         next_available_at: datetime,
+        event_type: OutboxEventType | str = OutboxEventType.MESSAGE_PENDING_COORDINATION,
     ) -> OutboxEvent | None:
         """Retryable failure. No-op unless claim_token owns the active conversation claim."""
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
         statement = (
             update(OutboxEvent)
             .where(
                 OutboxEvent.runtime_message_id == runtime_message_id,
+                OutboxEvent.event_type == event_type_value,
                 OutboxEvent.status.in_(
                     (OutboxEventStatus.PENDING, OutboxEventStatus.PROCESSING)
                 ),
@@ -124,12 +151,17 @@ class SyncSqlAlchemyOutboxRepository:
         runtime_message_id: UUID,
         claim_token: UUID,
         error_message: str,
+        event_type: OutboxEventType | str = OutboxEventType.MESSAGE_PENDING_COORDINATION,
     ) -> OutboxEvent | None:
         """Permanent failure. No-op unless claim_token owns the active conversation claim."""
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
         statement = (
             update(OutboxEvent)
             .where(
                 OutboxEvent.runtime_message_id == runtime_message_id,
+                OutboxEvent.event_type == event_type_value,
                 OutboxEvent.status.in_(
                     (OutboxEventStatus.PENDING, OutboxEventStatus.PROCESSING)
                 ),
@@ -161,6 +193,31 @@ class SyncSqlAlchemyOutboxRepository:
         )
         return self._session.scalar(statement)
 
+    def list_unresolved_for_chat_by_type(
+        self,
+        *,
+        chat_id: int,
+        event_type: OutboxEventType | str,
+        limit: int,
+    ) -> list[OutboxEvent]:
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
+        statement = (
+            select(OutboxEvent)
+            .where(
+                OutboxEvent.chat_id == chat_id,
+                OutboxEvent.event_type == event_type_value,
+                OutboxEvent.status.in_(
+                    (OutboxEventStatus.PENDING, OutboxEventStatus.PROCESSING)
+                ),
+            )
+            .order_by(OutboxEvent.message_id.asc(), OutboxEvent.created_at.asc())
+            .limit(limit)
+            .with_for_update()
+        )
+        return list(self._session.scalars(statement).all())
+
     def schedule_dispatch_retry_for_head(
         self,
         *,
@@ -183,6 +240,7 @@ class SyncSqlAlchemyOutboxRepository:
             claim_token=claim_token,
             error_message=error_message,
             next_available_at=next_available_at,
+            event_type=head.event_type,
         )
 
     def recover_expired_leases(self, *, lease_timeout: timedelta) -> int:

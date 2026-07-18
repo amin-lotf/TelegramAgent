@@ -174,6 +174,33 @@ def upgrade() -> None:
             server_default="pending",
             nullable=False,
         ),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "received",
+                "coordinating",
+                "coordinated",
+                "classifying",
+                "classified",
+                "failed",
+                name="runtimemessagestatus",
+                native_enum=False,
+                length=32,
+            ),
+            server_default="received",
+            nullable=False,
+        ),
+        sa.Column(
+            "intent",
+            sa.Enum(
+                "conversation",
+                "download_request",
+                name="messageintent",
+                native_enum=False,
+                length=32,
+            ),
+            nullable=True,
+        ),
         sa.Column("coordinated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
@@ -305,7 +332,8 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "runtime_message_id",
-            name="uq_coordination_outbox_events_runtime_message_id",
+            "event_type",
+            name="uq_coordination_outbox_events_runtime_message_id_event_type",
         ),
     )
     op.create_index(

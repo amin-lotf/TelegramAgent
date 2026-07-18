@@ -24,6 +24,7 @@ class OverallState(StrEnum):
     PROCESSING_MEDIA = "processing_media"
     DISPATCHING = "dispatching"
     COORDINATING = "coordinating"
+    CLASSIFYING = "classifying"
     COMPLETED = "completed"
     PENDING_DISPATCH = "pending_dispatch"
     PARTIAL = "partial"
@@ -43,6 +44,7 @@ class StageKey(StrEnum):
     CONVERSATION_DISPATCHED = "conversation_dispatched"
     RUNTIME_INGESTED = "runtime_ingested"
     COORDINATED = "coordinated"
+    INTENT_CLASSIFIED = "intent_classified"
 
 
 class StageStatus(StrEnum):

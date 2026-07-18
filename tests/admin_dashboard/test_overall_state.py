@@ -98,6 +98,8 @@ def test_completed_after_coordination() -> None:
         attachment_file_unique_id=None,
         group_id=uuid4(),
         coordination_status="grouped",
+        status="classified",
+        intent="conversation",
         coordinated_at=_now(),
         created_at=_now(),
     )
@@ -113,6 +115,43 @@ def test_completed_after_coordination() -> None:
         ),
     )
     assert state == OverallState.COMPLETED
+
+
+def test_classifying_after_coordination() -> None:
+    msg = _message(conversation_status="dispatched")
+    runtime_msg = RuntimeMessageRow(
+        id=uuid4(),
+        batch_id=uuid4(),
+        ingress_message_id=msg.id,
+        chat_id=msg.chat_id,
+        telegram_user_id=msg.telegram_user_id,
+        message_id=msg.message_id,
+        reply_message_id=None,
+        text="hello",
+        attachment_ingress_id=None,
+        attachment_type=None,
+        attachment_status=None,
+        attachment_file_id=None,
+        attachment_file_unique_id=None,
+        group_id=uuid4(),
+        coordination_status="grouped",
+        status="coordinated",
+        intent=None,
+        coordinated_at=_now(),
+        created_at=_now(),
+    )
+    state = derive_overall_state(
+        message=msg,
+        content=None,
+        runtime=AgentRuntimeView(
+            message=runtime_msg,
+            batch=None,
+            group=None,
+            outbox=None,
+            claim=None,
+        ),
+    )
+    assert state == OverallState.CLASSIFYING
 
 
 def test_processing_media_from_job_status() -> None:

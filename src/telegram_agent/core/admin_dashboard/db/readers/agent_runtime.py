@@ -38,8 +38,30 @@ class AgentRuntimeReader:
             attachment_file_unique_id=row.attachment_file_unique_id,  # type: ignore[attr-defined]
             group_id=row.group_id,  # type: ignore[attr-defined]
             coordination_status=row.coordination_status,  # type: ignore[attr-defined]
+            status=row.status,  # type: ignore[attr-defined]
+            intent=row.intent,  # type: ignore[attr-defined]
             coordinated_at=row.coordinated_at,  # type: ignore[attr-defined]
             created_at=row.created_at,  # type: ignore[attr-defined]
+        )
+
+    @staticmethod
+    def _to_outbox(row: object) -> OutboxRow:
+        return OutboxRow(
+            id=row.id,  # type: ignore[attr-defined]
+            event_type=row.event_type,  # type: ignore[attr-defined]
+            status=row.status,  # type: ignore[attr-defined]
+            attempt_count=row.attempt_count,  # type: ignore[attr-defined]
+            created_at=row.created_at,  # type: ignore[attr-defined]
+            published_at=row.published_at,  # type: ignore[attr-defined]
+            available_at=row.available_at,  # type: ignore[attr-defined]
+            locked_at=row.locked_at,  # type: ignore[attr-defined]
+            locked_by=row.locked_by,  # type: ignore[attr-defined]
+            last_error=row.last_error,  # type: ignore[attr-defined]
+            idempotency_key=row.idempotency_key,  # type: ignore[attr-defined]
+            payload=dict(row.payload or {}),  # type: ignore[attr-defined]
+            chat_id=row.chat_id,  # type: ignore[attr-defined]
+            runtime_message_id=row.runtime_message_id,  # type: ignore[attr-defined]
+            message_id=row.message_id,  # type: ignore[attr-defined]
         )
 
     async def get_message_by_ingress_id(
@@ -95,30 +117,25 @@ class AgentRuntimeReader:
         )
 
     async def get_outbox_for_message(self, runtime_message_id: UUID) -> OutboxRow | None:
+        events = await self.list_outbox_for_message(runtime_message_id)
+        if not events:
+            return None
+        for event in events:
+            if "pending_coordination" in event.event_type:
+                return event
+        return events[0]
+
+    async def list_outbox_for_message(
+        self,
+        runtime_message_id: UUID,
+    ) -> list[OutboxRow]:
         tbl = tables.coordination_outbox_events
         result = await self._session.execute(
-            select(tbl).where(tbl.c.runtime_message_id == runtime_message_id)
+            select(tbl)
+            .where(tbl.c.runtime_message_id == runtime_message_id)
+            .order_by(tbl.c.created_at.asc(), tbl.c.id.asc())
         )
-        row = result.one_or_none()
-        if row is None:
-            return None
-        return OutboxRow(
-            id=row.id,
-            event_type=row.event_type,
-            status=row.status,
-            attempt_count=row.attempt_count,
-            created_at=row.created_at,
-            published_at=row.published_at,
-            available_at=row.available_at,
-            locked_at=row.locked_at,
-            locked_by=row.locked_by,
-            last_error=row.last_error,
-            idempotency_key=row.idempotency_key,
-            payload=dict(row.payload or {}),
-            chat_id=row.chat_id,
-            runtime_message_id=row.runtime_message_id,
-            message_id=row.message_id,
-        )
+        return [self._to_outbox(row) for row in result]
 
     async def get_claim(self, chat_id: int) -> ConversationClaimRow | None:
         tbl = tables.conversation_claims
@@ -138,16 +155,38 @@ class AgentRuntimeReader:
             updated_at=row.updated_at,
         )
 
-    async def list_coordination_status_by_ingress_ids(
+    async def list_pipeline_status_by_ingress_ids(
         self,
         ingress_ids: list[UUID],
-    ) -> dict[UUID, str]:
+    ) -> dict[UUID, dict[str, str | None]]:
+        """Return pipeline + coordination status per ingress message id."""
         if not ingress_ids:
             return {}
         tbl = tables.runtime_messages
         result = await self._session.execute(
-            select(tbl.c.ingress_message_id, tbl.c.coordination_status).where(
-                tbl.c.ingress_message_id.in_(ingress_ids)
-            )
+            select(
+                tbl.c.ingress_message_id,
+                tbl.c.status,
+                tbl.c.coordination_status,
+                tbl.c.intent,
+            ).where(tbl.c.ingress_message_id.in_(ingress_ids))
         )
-        return {row.ingress_message_id: row.coordination_status for row in result}
+        return {
+            row.ingress_message_id: {
+                "status": row.status,
+                "coordination_status": row.coordination_status,
+                "intent": row.intent,
+            }
+            for row in result
+        }
+
+    async def list_coordination_status_by_ingress_ids(
+        self,
+        ingress_ids: list[UUID],
+    ) -> dict[UUID, str]:
+        """Backward-compatible map of ingress id → coordination_status."""
+        data = await self.list_pipeline_status_by_ingress_ids(ingress_ids)
+        return {
+            ingress_id: str(values["coordination_status"] or "")
+            for ingress_id, values in data.items()
+        }

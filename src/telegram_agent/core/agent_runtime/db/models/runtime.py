@@ -22,7 +22,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from telegram_agent.core.agent_runtime.common.types import (
     ClaimStatus,
     CoordinationStatus,
+    MessageIntent,
     OutboxEventStatus,
+    RuntimeMessageStatus,
 )
 from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.types import TelegramAttachmentType
@@ -156,6 +158,26 @@ class RuntimeMessage(Base):
         nullable=False,
         default=CoordinationStatus.PENDING,
         server_default=CoordinationStatus.PENDING.value,
+    )
+    status: Mapped[RuntimeMessageStatus] = mapped_column(
+        sa.Enum(
+            RuntimeMessageStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=RuntimeMessageStatus.RECEIVED,
+        server_default=RuntimeMessageStatus.RECEIVED.value,
+    )
+    intent: Mapped[MessageIntent | None] = mapped_column(
+        sa.Enum(
+            MessageIntent,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=True,
     )
     coordinated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -352,7 +374,8 @@ class OutboxEvent(Base):
         ),
         UniqueConstraint(
             "runtime_message_id",
-            name="uq_coordination_outbox_events_runtime_message_id",
+            "event_type",
+            name="uq_coordination_outbox_events_runtime_message_id_event_type",
         ),
         CheckConstraint(
             "attempt_count >= 0",

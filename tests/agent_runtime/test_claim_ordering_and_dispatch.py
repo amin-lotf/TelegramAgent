@@ -18,6 +18,7 @@ from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
     CoordinatorDecisionKind,
     OutboxEventStatus,
+    OutboxEventType,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
@@ -200,7 +201,10 @@ async def test_broker_enqueue_failure_schedules_head_outbox_retry_and_releases_c
     before = utcnow()
     result = CoordinationOutboxDispatcher(
         uow_factory=agent_runtime_sync_uow_factory,
-        coordinate_task=task,  # type: ignore[arg-type]
+        task_by_event_type={
+            OutboxEventType.MESSAGE_PENDING_COORDINATION.value: task,  # type: ignore[dict-item]
+            OutboxEventType.INTENT_CLASSIFIER.value: task,  # type: ignore[dict-item]
+        },
         batch_size=10,
         claim_lease_timeout=timedelta(minutes=5),
         outbox_lease_timeout=timedelta(minutes=1),
@@ -299,22 +303,35 @@ async def test_bounded_batch_leaves_remainder_immediately_claimable(
     assert result1.processed == 2
 
     with agent_runtime_sync_sessionmaker() as session:
-        events = list(
+        coordination_events = list(
             session.scalars(
-                select(OutboxEvent).order_by(OutboxEvent.message_id)
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.event_type
+                    == OutboxEventType.MESSAGE_PENDING_COORDINATION.value
+                )
+                .order_by(OutboxEvent.message_id)
             ).all()
         )
-        statuses = [e.status for e in events]
-        # Unprocessed events remain pending and available (not stuck processing).
-        assert statuses == [
+        intent_events = list(
+            session.scalars(
+                select(OutboxEvent)
+                .where(OutboxEvent.event_type == OutboxEventType.INTENT_CLASSIFIER.value)
+                .order_by(OutboxEvent.message_id)
+            ).all()
+        )
+        # Unprocessed coordination events remain pending and available.
+        assert [e.status for e in coordination_events] == [
             OutboxEventStatus.PUBLISHED,
             OutboxEventStatus.PUBLISHED,
             OutboxEventStatus.PENDING,
             OutboxEventStatus.PENDING,
         ]
+        assert len(intent_events) == 2
+        assert all(e.status == OutboxEventStatus.PENDING for e in intent_events)
         assert all(
             e.available_at <= utcnow()
-            for e in events
+            for e in coordination_events
             if e.status == OutboxEventStatus.PENDING
         )
 

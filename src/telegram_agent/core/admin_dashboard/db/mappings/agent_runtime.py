@@ -51,6 +51,8 @@ runtime_messages = Table(
     Column("attachment_file_unique_id", String(255), nullable=True),
     Column("group_id", UUID(as_uuid=True), nullable=True),
     Column("coordination_status", String(32), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("intent", String(32), nullable=True),
     Column("coordinated_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )

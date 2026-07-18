@@ -68,7 +68,7 @@
             </li>
           {% endfor %}
         </ol>
-        <p class="muted small" style="margin: 0.85rem 0 0;">Pipeline ends at agent-runtime message coordination. No outbound Telegram reply is stored in this system yet.</p>
+        <p class="muted small" style="margin: 0.85rem 0 0;">Pipeline currently ends at intent classification. Conversation and download handlers are not stored yet.</p>
       </section>
 
       <div class="tabs" data-tabs>
@@ -282,6 +282,8 @@
                 <table class="kv">
                   <tr><th>ID</th><td><code>{{ rt.message.id }}</code></td></tr>
                   <tr><th>Batch ID</th><td><code>{{ rt.message.batch_id }}</code></td></tr>
+                  <tr><th>Pipeline status</th><td><strong>{{ rt.message.status }}</strong></td></tr>
+                  <tr><th>Intent</th><td>{{ rt.message.intent or '—' }}</td></tr>
                   <tr><th>Coordination status</th><td>{{ rt.message.coordination_status }}</td></tr>
                   <tr><th>Coordinated at</th><td class="dt">{{ rt.message.coordinated_at|dt }}</td></tr>
                   <tr><th>Created at</th><td class="dt">{{ rt.message.created_at|dt }}</td></tr>
@@ -308,15 +310,37 @@
                   </table>
                 {% endif %}
 
-                {% if rt.outbox %}
-                  <h3>Coordination outbox</h3>
-                  <table class="kv">
-                    <tr><th>Status</th><td>{{ rt.outbox.status }}</td></tr>
-                    <tr><th>Attempt count</th><td>{{ rt.outbox.attempt_count }}</td></tr>
-                    <tr><th>Event type</th><td>{{ rt.outbox.event_type }}</td></tr>
-                    <tr><th>Last error</th><td>{{ rt.outbox.last_error or '—' }}</td></tr>
-                    <tr><th>Published at</th><td class="dt">{{ rt.outbox.published_at|dt }}</td></tr>
-                  </table>
+                {% set outbox_rows = rt.outbox_events if rt.outbox_events else ([rt.outbox] if rt.outbox else []) %}
+                <h3>Runtime outbox events</h3>
+                {% if outbox_rows %}
+                  <div class="table-wrap">
+                    <table class="data">
+                      <thead>
+                        <tr>
+                          <th>Event type</th>
+                          <th>Status</th>
+                          <th>Attempts</th>
+                          <th>Created</th>
+                          <th>Published</th>
+                          <th>Error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for e in outbox_rows %}
+                          <tr>
+                            <td><code>{{ e.event_type }}</code></td>
+                            <td>{{ e.status }}</td>
+                            <td>{{ e.attempt_count }}</td>
+                            <td class="dt">{{ e.created_at|dt }}</td>
+                            <td class="dt">{{ e.published_at|dt }}</td>
+                            <td>{{ e.last_error or '—' }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% else %}
+                  <p class="muted">No runtime outbox events.</p>
                 {% endif %}
 
                 {% if rt.claim %}
@@ -356,7 +380,9 @@
                         <tr>
                           <th></th>
                           <th>Msg #</th>
-                          <th>Status</th>
+                          <th>Pipeline</th>
+                          <th>Coord</th>
+                          <th>Intent</th>
                           <th>Attachment</th>
                           <th>Text</th>
                           <th>Ingress ID</th>
@@ -372,7 +398,9 @@
                               {% endif %}
                             </td>
                             <td>{{ gm.message_id }}</td>
+                            <td>{{ gm.status }}</td>
                             <td>{{ gm.coordination_status }}</td>
+                            <td>{{ gm.intent or '—' }}</td>
                             <td>
                               {% if gm.attachment_type %}
                                 {{ gm.attachment_type }}

@@ -15,6 +15,7 @@ from telegram_agent.core.agent_runtime.common.results import IngestMessageBatchR
 from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
     OutboxEventType,
+    RuntimeMessageStatus,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     OutboxEvent,
@@ -247,6 +248,7 @@ class AsyncMessageBatchIngestionService:
             reply_message_id=message_command.reply_message_id,
             text=message_command.text,
             coordination_status=CoordinationStatus.PENDING,
+            status=RuntimeMessageStatus.RECEIVED,
         )
         if message_command.attachment is not None:
             message.attachment_ingress_id = (

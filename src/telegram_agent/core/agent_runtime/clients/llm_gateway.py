@@ -11,7 +11,7 @@ from telegram_agent.core.common.exceptions import (
 
 
 class LlmGatewayClient:
-    """Synchronous transport adapter for message-grouping LLM generation."""
+    """Synchronous transport adapter for agent-runtime LLM generation use cases."""
 
     def __init__(
         self,
@@ -32,13 +32,52 @@ class LlmGatewayClient:
         system_prompt: str,
         user_prompt: str,
     ) -> LlmGatewayGeneration:
+        return self._post_generation(
+            path="/message-grouping",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            unavailable_message="LLM coordination is temporarily unavailable",
+            auth_failed_message="LLM gateway authentication failed",
+            rejected_message="LLM gateway rejected the coordination request",
+            invalid_response_message="LLM gateway returned an invalid generation response",
+        )
+
+    def classify_intent(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> LlmGatewayGeneration:
+        return self._post_generation(
+            path="/intent-classification",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            unavailable_message="LLM intent classification is temporarily unavailable",
+            auth_failed_message="LLM gateway authentication failed",
+            rejected_message="LLM gateway rejected the intent classification request",
+            invalid_response_message=(
+                "LLM gateway returned an invalid intent classification response"
+            ),
+        )
+
+    def _post_generation(
+        self,
+        *,
+        path: str,
+        system_prompt: str,
+        user_prompt: str,
+        unavailable_message: str,
+        auth_failed_message: str,
+        rejected_message: str,
+        invalid_response_message: str,
+    ) -> LlmGatewayGeneration:
         try:
             with httpx.Client(
                 timeout=self._timeout,
                 transport=self._transport,
             ) as client:
                 response = client.post(
-                    f"{self._base_url}/message-grouping",
+                    f"{self._base_url}{path}",
                     headers={"Authorization": f"Bearer {self._token}"},
                     json={
                         "system_prompt": system_prompt,
@@ -51,24 +90,18 @@ class LlmGatewayClient:
             status_code = exc.response.status_code
             if status_code in {408, 429} or status_code >= 500:
                 raise RetryableAgentRuntimeCoordinationError(
-                    "LLM coordination is temporarily unavailable"
+                    unavailable_message
                 ) from exc
             if status_code in {401, 403}:
                 raise PermanentAgentRuntimeCoordinationError(
-                    "LLM gateway authentication failed"
+                    auth_failed_message
                 ) from exc
-            raise PermanentAgentRuntimeCoordinationError(
-                "LLM gateway rejected the coordination request"
-            ) from exc
+            raise PermanentAgentRuntimeCoordinationError(rejected_message) from exc
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise RetryableAgentRuntimeCoordinationError(
-                "LLM coordination is temporarily unavailable"
-            ) from exc
+            raise RetryableAgentRuntimeCoordinationError(unavailable_message) from exc
         except httpx.RequestError as exc:
-            raise RetryableAgentRuntimeCoordinationError(
-                "LLM coordination is temporarily unavailable"
-            ) from exc
+            raise RetryableAgentRuntimeCoordinationError(unavailable_message) from exc
         except (ValueError, TypeError, ValidationError) as exc:
             raise RetryableAgentRuntimeCoordinationError(
-                "LLM gateway returned an invalid generation response"
+                invalid_response_message
             ) from exc

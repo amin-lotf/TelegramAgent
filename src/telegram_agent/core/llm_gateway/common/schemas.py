@@ -27,3 +27,16 @@ class MessageGroupingResponse(BaseModel):
         elif self.group_number is not None:
             raise ValueError("Only EXISTING decisions may include group_number")
         return self
+
+
+class IntentKind(StrEnum):
+    CONVERSATION = "conversation"
+    DOWNLOAD_REQUEST = "download_request"
+
+
+class IntentClassificationResponse(BaseModel):
+    """Fixed structured-output schema for intent classification."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    intent: IntentKind

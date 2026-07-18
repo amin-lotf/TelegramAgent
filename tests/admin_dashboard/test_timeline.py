@@ -136,6 +136,8 @@ def test_voice_happy_path_timeline() -> None:
             attachment_file_unique_id=None,
             group_id=uuid4(),
             coordination_status="grouped",
+            status="classified",
+            intent="conversation",
             coordinated_at=_now(),
             created_at=_now(),
         ),

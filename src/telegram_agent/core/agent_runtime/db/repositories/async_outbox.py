@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telegram_agent.core.agent_runtime.common.types import OutboxEventType
 from telegram_agent.core.agent_runtime.db.models.runtime import OutboxEvent
 
 
@@ -26,9 +27,15 @@ class AsyncSqlAlchemyOutboxRepository:
     async def get_by_runtime_message_id(
         self,
         runtime_message_id: UUID,
+        *,
+        event_type: OutboxEventType | str = OutboxEventType.MESSAGE_PENDING_COORDINATION,
     ) -> OutboxEvent | None:
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
         statement = select(OutboxEvent).where(
-            OutboxEvent.runtime_message_id == runtime_message_id
+            OutboxEvent.runtime_message_id == runtime_message_id,
+            OutboxEvent.event_type == event_type_value,
         )
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()

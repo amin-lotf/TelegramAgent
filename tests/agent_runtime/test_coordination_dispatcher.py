@@ -16,6 +16,7 @@ from telegram_agent.core.agent_runtime.common.types import (
     ClaimStatus,
     CoordinationStatus,
     OutboxEventStatus,
+    OutboxEventType,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
@@ -68,7 +69,10 @@ def _dispatcher(
 ) -> CoordinationOutboxDispatcher:
     return CoordinationOutboxDispatcher(
         uow_factory=uow_factory,
-        coordinate_task=task,  # type: ignore[arg-type]
+        task_by_event_type={
+            OutboxEventType.MESSAGE_PENDING_COORDINATION.value: task,  # type: ignore[dict-item]
+            OutboxEventType.INTENT_CLASSIFIER.value: task,  # type: ignore[dict-item]
+        },
         batch_size=10,
         claim_lease_timeout=timedelta(minutes=5),
         outbox_lease_timeout=timedelta(minutes=1),

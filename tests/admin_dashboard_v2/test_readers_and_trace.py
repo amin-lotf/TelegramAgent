@@ -75,7 +75,7 @@ async def test_listing_and_trace_correlate_all_databases(
     )
     assert len(page.items) == 1
     assert page.items[0].ingress_message_id == ids["ingress_message_id"]
-    assert page.items[0].overall_status == "coordinated"
+    assert page.items[0].overall_status == "classified"
     assert page.items[0].current_user_label == "Ada Operator"
     assert page.items[0].content_statuses == ("completed",)
 
@@ -86,7 +86,7 @@ async def test_listing_and_trace_correlate_all_databases(
         auth=auth,
         settings=dashboard_settings,
     ).get_trace(ids["ingress_message_id"])
-    assert trace.overall_status == "coordinated"
+    assert trace.overall_status == "classified"
     assert set(trace.available_tabs) == {
         "telegram_ingress",
         "content_processing",
@@ -372,6 +372,8 @@ async def _seed_complete_voice_trace(
                 attachment_file_unique_id="stable-file-id",
                 group_id=group_id,
                 coordination_status="grouped",
+                status="classified",
+                intent="conversation",
                 coordinated_at=now,
                 created_at=now,
             )
@@ -381,6 +383,16 @@ async def _seed_complete_voice_trace(
                 id=uuid4(), event_type="agent_runtime.message.pending_coordination",
                 chat_id=7001, runtime_message_id=runtime_message_id, message_id=42,
                 idempotency_key=f"agent_runtime:coordinate:{ingress_message_id}:v1",
+                payload={"ingress_message_id": str(ingress_message_id)},
+                status="published", attempt_count=0, available_at=now,
+                created_at=now, published_at=now,
+            )
+        )
+        await connection.execute(
+            insert(coordination_outbox_events).values(
+                id=uuid4(), event_type="agent_runtime.message.pending_intent_classification",
+                chat_id=7001, runtime_message_id=runtime_message_id, message_id=42,
+                idempotency_key=f"agent_runtime:intent_classifier:{ingress_message_id}:v1",
                 payload={"ingress_message_id": str(ingress_message_id)},
                 status="published", attempt_count=0, available_at=now,
                 created_at=now, published_at=now,

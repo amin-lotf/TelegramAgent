@@ -14,6 +14,7 @@ def create_celery_app() -> Celery:
         include=[
             "telegram_agent.core.agent_runtime.celery.tasks.outbox_dispatch",
             "telegram_agent.core.agent_runtime.celery.tasks.coordinate_conversation",
+            "telegram_agent.core.agent_runtime.celery.tasks.classify_intent",
         ],
     )
     celery_app.conf.update(
@@ -40,6 +41,11 @@ def create_celery_app() -> Celery:
                 Exchange("agent_runtime", type="direct"),
                 routing_key="agent_runtime.coordinate_conversation",
             ),
+            Queue(
+                "agent_runtime_classification",
+                Exchange("agent_runtime", type="direct"),
+                routing_key="agent_runtime.classify_intent",
+            ),
         ),
         task_routes={
             "coordination.outbox.dispatch": {
@@ -49,6 +55,10 @@ def create_celery_app() -> Celery:
             "agent_runtime.coordinate_conversation": {
                 "queue": "agent_runtime_coordination",
                 "routing_key": "agent_runtime.coordinate_conversation",
+            },
+            "agent_runtime.classify_intent": {
+                "queue": "agent_runtime_classification",
+                "routing_key": "agent_runtime.classify_intent",
             },
         },
         beat_schedule={

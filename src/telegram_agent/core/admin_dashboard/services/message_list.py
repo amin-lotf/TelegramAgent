@@ -159,6 +159,12 @@ class MessageListService:
         if coord_status is not None:
             from telegram_agent.core.admin_dashboard.services.view_models import RuntimeMessageRow
 
+            # List enrichment may carry "pipeline|coordination" or plain coordination.
+            if "|" in coord_status:
+                pipeline_status, coordination_status = coord_status.split("|", 1)
+            else:
+                pipeline_status = "received"
+                coordination_status = coord_status
             runtime = AgentRuntimeView(
                 message=RuntimeMessageRow(
                     id=row.id,
@@ -175,7 +181,9 @@ class MessageListService:
                     attachment_file_id=None,
                     attachment_file_unique_id=None,
                     group_id=None,
-                    coordination_status=coord_status,
+                    coordination_status=coordination_status,
+                    status=pipeline_status,
+                    intent=None,
                     coordinated_at=None,
                     created_at=row.created_at,
                 ),
@@ -232,10 +240,15 @@ class MessageListService:
         try:
             async with self._databases.session(DbName.AGENT_RUNTIME) as session:
                 reader = AgentRuntimeReader(session)
-                data = await asyncio.wait_for(
-                    reader.list_coordination_status_by_ingress_ids(ids),
+                pipeline = await asyncio.wait_for(
+                    reader.list_pipeline_status_by_ingress_ids(ids),
                     timeout=self._settings.db_query_timeout_seconds,
                 )
+                # Encode both fields for list overall-state derivation.
+                data = {
+                    ingress_id: f"{values.get('status') or 'received'}|{values.get('coordination_status') or 'pending'}"
+                    for ingress_id, values in pipeline.items()
+                }
             return data, DbAvailability.OK
         except TimeoutError:
             return {}, DbAvailability.TIMEOUT

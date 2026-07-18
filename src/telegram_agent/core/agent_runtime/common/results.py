@@ -45,3 +45,19 @@ class ConversationCoordinationResult(BaseModel):
     chat_id: int
     processed: int
     results: tuple[MessageCoordinationResult, ...]
+
+
+class MessageIntentClassificationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    runtime_message_id: UUID
+    status: str
+    intent: str | None = None
+
+
+class ConversationIntentClassificationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: int
+    processed: int
+    results: tuple[MessageIntentClassificationResult, ...]

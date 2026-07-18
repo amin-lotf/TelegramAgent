@@ -12,9 +12,14 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageBatchCommand,
     IngestMessageCommand,
 )
+from telegram_agent.core.agent_runtime.common.types import (
+    OutboxEventStatus,
+    OutboxEventType,
+)
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
     ConversationGroup,
+    OutboxEvent,
     RuntimeBatch,
     RuntimeMessage,
 )
@@ -22,6 +27,7 @@ from telegram_agent.core.agent_runtime.services.async_message_batch_ingestion im
     AsyncMessageBatchIngestionService,
 )
 from telegram_agent.core.common.utils import utcnow
+from sqlalchemy import select
 
 
 @pytest.mark.asyncio
@@ -189,3 +195,67 @@ def test_no_redundant_unique_group_number_index(
     index_names = {row[0] for row in rows}
     assert "ix_conversation_groups_chat_number" not in index_names
     assert any("uq_conversation_groups_chat_id_group_number" in name for name in index_names)
+
+
+@pytest.mark.asyncio
+async def test_outbox_allows_multiple_event_types_per_message(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    await AsyncMessageBatchIngestionService(agent_runtime_uow_factory).ingest(
+        IngestMessageBatchCommand(
+            batch_id=uuid4(),
+            chat_id=8501,
+            idempotency_key="multi-outbox",
+            messages=(
+                IngestMessageCommand(
+                    ingress_message_id=uuid4(),
+                    telegram_user_id=1,
+                    message_id=1,
+                    text="multi",
+                ),
+            ),
+        )
+    )
+
+    with agent_runtime_sync_sessionmaker() as session:
+        message = session.scalars(select(RuntimeMessage)).one()
+        session.add(
+            OutboxEvent(
+                event_type=OutboxEventType.INTENT_CLASSIFIER.value,
+                chat_id=message.chat_id,
+                runtime_message_id=message.id,
+                message_id=message.message_id,
+                idempotency_key=f"agent_runtime:intent_classifier:{message.ingress_message_id}:v1",
+                payload={},
+                status=OutboxEventStatus.PENDING,
+            )
+        )
+        session.commit()
+
+        events = list(
+            session.scalars(
+                select(OutboxEvent).where(OutboxEvent.runtime_message_id == message.id)
+            ).all()
+        )
+        assert len(events) == 2
+        types = {event.event_type for event in events}
+        assert types == {
+            OutboxEventType.MESSAGE_PENDING_COORDINATION.value,
+            OutboxEventType.INTENT_CLASSIFIER.value,
+        }
+
+        session.add(
+            OutboxEvent(
+                event_type=OutboxEventType.INTENT_CLASSIFIER.value,
+                chat_id=message.chat_id,
+                runtime_message_id=message.id,
+                message_id=message.message_id,
+                idempotency_key="duplicate-intent",
+                payload={},
+                status=OutboxEventStatus.PENDING,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()

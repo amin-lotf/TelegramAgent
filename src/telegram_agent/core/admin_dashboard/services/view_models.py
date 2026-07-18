@@ -158,6 +158,8 @@ class RuntimeMessageRow:
     attachment_file_unique_id: str | None
     group_id: UUID | None
     coordination_status: str
+    status: str
+    intent: str | None
     coordinated_at: datetime | None
     created_at: datetime
 
@@ -217,10 +219,11 @@ class AgentRuntimeView:
     message: RuntimeMessageRow | None
     batch: RuntimeBatchRow | None
     group: ConversationGroupRow | None
-    outbox: OutboxRow | None
+    outbox: OutboxRow | None  # first/legacy single-event view (coordination if present)
     claim: ConversationClaimRow | None
     # Other messages sharing conversation_groups.id (empty if ungrouped/vague).
     group_messages: tuple[RuntimeMessageRow, ...] = ()
+    outbox_events: tuple[OutboxRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,6 +19,8 @@ from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
     CoordinatorDecisionKind,
     OutboxEventStatus,
+    OutboxEventType,
+    RuntimeMessageStatus,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
     ConversationClaim,
@@ -168,13 +170,29 @@ async def test_existing_new_and_vague_assignment(
         claim = session.get(ConversationClaim, chat_id)
 
     assert messages[0].coordination_status == CoordinationStatus.GROUPED
+    assert messages[0].status == RuntimeMessageStatus.COORDINATED
     assert messages[1].coordination_status == CoordinationStatus.GROUPED
+    assert messages[1].status == RuntimeMessageStatus.COORDINATED
     assert messages[1].group_id == messages[0].group_id
     assert messages[2].coordination_status == CoordinationStatus.VAGUE
+    assert messages[2].status == RuntimeMessageStatus.FAILED
     assert messages[2].group_id is None
     assert len(groups) == 1
     assert groups[0].group_number == 1
-    assert all(event.status == OutboxEventStatus.PUBLISHED for event in events)
+    coordination_events = [
+        event
+        for event in events
+        if event.event_type == OutboxEventType.MESSAGE_PENDING_COORDINATION.value
+    ]
+    intent_events = [
+        event
+        for event in events
+        if event.event_type == OutboxEventType.INTENT_CLASSIFIER.value
+    ]
+    assert len(coordination_events) == 3
+    assert all(event.status == OutboxEventStatus.PUBLISHED for event in coordination_events)
+    assert len(intent_events) == 2
+    assert all(event.status == OutboxEventStatus.PENDING for event in intent_events)
     assert claim is not None
     assert claim.status.value == "idle"
     assert claim.claim_token is None
@@ -638,4 +656,18 @@ async def test_does_not_coordinate_same_message_twice(
 
     assert len(messages) == 1
     assert messages[0].coordination_status == CoordinationStatus.GROUPED
-    assert events[0].status == OutboxEventStatus.PUBLISHED
+    assert messages[0].status == RuntimeMessageStatus.COORDINATED
+    coordination_events = [
+        event
+        for event in events
+        if event.event_type == OutboxEventType.MESSAGE_PENDING_COORDINATION.value
+    ]
+    intent_events = [
+        event
+        for event in events
+        if event.event_type == OutboxEventType.INTENT_CLASSIFIER.value
+    ]
+    assert len(coordination_events) == 1
+    assert coordination_events[0].status == OutboxEventStatus.PUBLISHED
+    assert len(intent_events) == 1
+    assert intent_events[0].status == OutboxEventStatus.PENDING

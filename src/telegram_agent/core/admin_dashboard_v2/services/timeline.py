@@ -149,21 +149,122 @@ def build_lifecycle_and_timeline(
         status = StageStatus.FAILED if conversation_state == "failed" else StageStatus.PENDING if message else _downstream_missing(ingress.status)
         stages.append(_stage("conversation_enqueued", "Conversation batch enqueued", "telegram_ingress", status))
 
+    runtime_outbox_events = runtime_data.get("outbox_events") or (
+        [runtime_outbox] if runtime_outbox else []
+    )
+    intent_outbox = next(
+        (
+            event
+            for event in runtime_outbox_events
+            if event and "intent" in str(event.get("event_type") or "")
+        ),
+        None,
+    )
+    coordination_outbox = next(
+        (
+            event
+            for event in runtime_outbox_events
+            if event and "pending_coordination" in str(event.get("event_type") or "")
+        ),
+        runtime_outbox,
+    )
+
     if runtime_message:
-        stages.append(_stage("runtime_accepted", "Runtime message persisted", "agent_runtime", StageStatus.COMPLETED))
-        events.append(_event("runtime_accepted", "agent_runtime", "Runtime message persisted", StageStatus.COMPLETED, runtime_message.get("created_at"), runtime_message.get("id")))
-        coordination_status = str(runtime_message["coordination_status"])
-        coord_stage_status = (
-            StageStatus.FAILED
-            if runtime_outbox and runtime_outbox.get("status") == "failed"
-            else StageStatus.COMPLETED
-            if coordination_status in {"grouped", "vague"}
-            else StageStatus.PENDING
+        pipeline_status = str(runtime_message.get("status") or "received")
+        stages.append(
+            _stage(
+                "runtime_accepted",
+                "Runtime message persisted",
+                "agent_runtime",
+                StageStatus.COMPLETED,
+                f"pipeline={pipeline_status}",
+            )
         )
-        detail = "Conversation claim is active" if claim and claim.get("status") == "claimed" else None
-        stages.append(_stage("runtime_coordination", "Runtime conversation coordinated", "agent_runtime", coord_stage_status, detail))
+        events.append(
+            _event(
+                "runtime_accepted",
+                "agent_runtime",
+                "Runtime message persisted",
+                StageStatus.COMPLETED,
+                runtime_message.get("created_at"),
+                runtime_message.get("id"),
+            )
+        )
+        coordination_status = str(runtime_message["coordination_status"])
+        if pipeline_status == "failed" and coordination_status != "grouped":
+            coord_stage_status = StageStatus.FAILED
+        elif coordination_outbox and coordination_outbox.get("status") == "failed":
+            coord_stage_status = StageStatus.FAILED
+        elif coordination_status in {"grouped", "vague"}:
+            coord_stage_status = StageStatus.COMPLETED
+        else:
+            coord_stage_status = StageStatus.PENDING
+        detail = f"pipeline={pipeline_status}"
+        if claim and claim.get("status") == "claimed":
+            detail = f"{detail}; conversation claim is active"
+        stages.append(
+            _stage(
+                "runtime_coordination",
+                "Runtime conversation coordinated",
+                "agent_runtime",
+                coord_stage_status,
+                detail,
+            )
+        )
         if runtime_message.get("coordinated_at"):
-            events.append(_event("runtime_coordination", "agent_runtime", f"Runtime decision: {coordination_status}", coord_stage_status, runtime_message.get("coordinated_at"), runtime_message.get("id")))
+            events.append(
+                _event(
+                    "runtime_coordination",
+                    "agent_runtime",
+                    f"Runtime decision: {coordination_status}",
+                    coord_stage_status,
+                    runtime_message.get("coordinated_at"),
+                    runtime_message.get("id"),
+                )
+            )
+
+        if pipeline_status == "classified":
+            intent_status = StageStatus.COMPLETED
+            intent_detail = str(runtime_message.get("intent") or "classified")
+        elif pipeline_status == "failed" and coordination_status == "grouped":
+            intent_status = StageStatus.FAILED
+            intent_detail = (
+                str(intent_outbox.get("last_error"))
+                if intent_outbox and intent_outbox.get("last_error")
+                else "classification failed"
+            )
+        elif coordination_status == "vague":
+            intent_status = StageStatus.NOT_APPLICABLE
+            intent_detail = "vague messages are not classified"
+        elif intent_outbox and intent_outbox.get("status") == "failed":
+            intent_status = StageStatus.FAILED
+            intent_detail = str(intent_outbox.get("last_error") or "intent outbox failed")
+        elif coordination_status == "grouped":
+            intent_status = StageStatus.PENDING
+            intent_detail = pipeline_status
+        else:
+            intent_status = StageStatus.NOT_STARTED
+            intent_detail = None
+        stages.append(
+            _stage(
+                "intent_classified",
+                "Intent classified",
+                "agent_runtime",
+                intent_status,
+                intent_detail,
+            )
+        )
+        if pipeline_status == "classified":
+            events.append(
+                _event(
+                    "intent_classified",
+                    "agent_runtime",
+                    f"Intent: {runtime_message.get('intent')}",
+                    StageStatus.COMPLETED,
+                    runtime_message.get("coordinated_at"),
+                    runtime_message.get("id"),
+                )
+            )
     else:
         ingress_conversation_status = str(message.get("conversation_status")) if message else None
         missing = (
@@ -173,6 +274,7 @@ def build_lifecycle_and_timeline(
         )
         stages.append(_stage("runtime_accepted", "Runtime message persisted", "agent_runtime", missing))
         stages.append(_stage("runtime_coordination", "Runtime conversation coordinated", "agent_runtime", missing))
+        stages.append(_stage("intent_classified", "Intent classified", "agent_runtime", missing))
 
     stages.extend(
         (

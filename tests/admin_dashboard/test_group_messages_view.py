@@ -26,6 +26,8 @@ def _msg(*, group_id, message_id: int) -> RuntimeMessageRow:
         attachment_file_unique_id=None,
         group_id=group_id,
         coordination_status="grouped",
+        status="classified",
+        intent="conversation",
         coordinated_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
     )

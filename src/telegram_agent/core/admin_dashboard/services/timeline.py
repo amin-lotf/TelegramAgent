@@ -25,6 +25,7 @@ _STAGE_ORDER = (
     StageKey.CONVERSATION_DISPATCHED,
     StageKey.RUNTIME_INGESTED,
     StageKey.COORDINATED,
+    StageKey.INTENT_CLASSIFIED,
 )
 
 _LABELS = {
@@ -40,6 +41,7 @@ _LABELS = {
     StageKey.CONVERSATION_DISPATCHED: "Dispatched to agent-runtime",
     StageKey.RUNTIME_INGESTED: "Runtime message ingested",
     StageKey.COORDINATED: "Message coordinated",
+    StageKey.INTENT_CLASSIFIED: "Intent classified",
 }
 
 
@@ -378,12 +380,29 @@ def build_timeline(
         )
 
     # Runtime
+    outbox_events = ()
+    if runtime is not None:
+        if runtime.outbox_events:
+            outbox_events = runtime.outbox_events
+        elif runtime.outbox is not None:
+            outbox_events = (runtime.outbox,)
+    coordination_outbox = next(
+        (e for e in outbox_events if "pending_coordination" in e.event_type),
+        outbox_events[0] if outbox_events else None,
+    )
+    intent_outbox = next(
+        (e for e in outbox_events if "intent" in e.event_type),
+        None,
+    )
+
     if not runtime_available:
         events.append(_event(StageKey.RUNTIME_INGESTED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.COORDINATED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
+        events.append(_event(StageKey.INTENT_CLASSIFIED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
     elif runtime is None or runtime.message is None:
         events.append(_event(StageKey.RUNTIME_INGESTED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.COORDINATED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
+        events.append(_event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
     else:
         rm = runtime.message
         events.append(
@@ -391,10 +410,24 @@ def build_timeline(
                 StageKey.RUNTIME_INGESTED,
                 StageStatus.COMPLETED,
                 rm.created_at,
+                detail=f"pipeline={rm.status}",
                 source_db=DbName.AGENT_RUNTIME,
             )
         )
-        if rm.coordination_status in {"grouped", "vague"}:
+        if rm.status == "failed" and rm.coordination_status != "grouped":
+            events.append(
+                _event(
+                    StageKey.COORDINATED,
+                    StageStatus.FAILED,
+                    rm.coordinated_at,
+                    detail=rm.coordination_status,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
+            events.append(
+                _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
+        elif rm.coordination_status in {"grouped", "vague"}:
             detail = rm.coordination_status
             if runtime.group is not None:
                 detail = f"{rm.coordination_status} group #{runtime.group.group_number}"
@@ -407,18 +440,78 @@ def build_timeline(
                     source_db=DbName.AGENT_RUNTIME,
                 )
             )
-        elif runtime.outbox is not None and runtime.outbox.status == "failed":
+            if rm.status == "classified":
+                events.append(
+                    _event(
+                        StageKey.INTENT_CLASSIFIED,
+                        StageStatus.COMPLETED,
+                        detail=rm.intent,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            elif rm.status == "failed":
+                events.append(
+                    _event(
+                        StageKey.INTENT_CLASSIFIED,
+                        StageStatus.FAILED,
+                        detail=(
+                            intent_outbox.last_error
+                            if intent_outbox is not None
+                            else "classification failed"
+                        ),
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            elif rm.coordination_status == "vague":
+                events.append(
+                    _event(
+                        StageKey.INTENT_CLASSIFIED,
+                        StageStatus.NOT_APPLICABLE,
+                        detail="vague messages are not classified",
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            elif intent_outbox is not None and intent_outbox.status == "failed":
+                events.append(
+                    _event(
+                        StageKey.INTENT_CLASSIFIED,
+                        StageStatus.FAILED,
+                        detail=intent_outbox.last_error,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            else:
+                events.append(
+                    _event(
+                        StageKey.INTENT_CLASSIFIED,
+                        StageStatus.PENDING,
+                        detail=rm.status,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+        elif coordination_outbox is not None and coordination_outbox.status == "failed":
             events.append(
                 _event(
                     StageKey.COORDINATED,
                     StageStatus.FAILED,
-                    detail=runtime.outbox.last_error,
+                    detail=coordination_outbox.last_error,
                     source_db=DbName.AGENT_RUNTIME,
                 )
             )
+            events.append(
+                _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
         else:
             events.append(
-                _event(StageKey.COORDINATED, StageStatus.PENDING, source_db=DbName.AGENT_RUNTIME)
+                _event(
+                    StageKey.COORDINATED,
+                    StageStatus.PENDING,
+                    detail=rm.status,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
+            events.append(
+                _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
             )
 
     # Stable order

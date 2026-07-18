@@ -181,9 +181,35 @@ class MessageTraceQueryService:
             for event in attempt.get("outbox_events", []):
                 if event.get("status") == "failed":
                     failures.append({"service": "Content processing", "stage": str(event.get("event_type")), "error": sanitize_text(str(event.get("last_error") or "No error detail retained"))})
-        runtime_outbox = (runtime.data or {}).get("outbox") or {}
-        if runtime_outbox.get("status") == "failed":
-            failures.append({"service": "Agent runtime", "stage": "coordination", "error": sanitize_text(str(runtime_outbox.get("last_error") or "No error detail retained"))})
+        runtime_message = (runtime.data or {}).get("message") or {}
+        if runtime_message.get("status") == "failed":
+            intent = runtime_message.get("intent")
+            detail = "Pipeline status is failed"
+            if intent:
+                detail = f"{detail} (intent={intent})"
+            failures.append(
+                {
+                    "service": "Agent runtime",
+                    "stage": "pipeline",
+                    "error": sanitize_text(detail),
+                }
+            )
+        runtime_outbox_events = (runtime.data or {}).get("outbox_events") or []
+        if not runtime_outbox_events:
+            runtime_outbox = (runtime.data or {}).get("outbox")
+            if runtime_outbox:
+                runtime_outbox_events = [runtime_outbox]
+        for event in runtime_outbox_events:
+            if event and (event.get("status") == "failed" or event.get("last_error")):
+                failures.append(
+                    {
+                        "service": "Agent runtime",
+                        "stage": str(event.get("event_type") or "outbox"),
+                        "error": sanitize_text(
+                            str(event.get("last_error") or "No error detail retained")
+                        ),
+                    }
+                )
         return failures
 
     @staticmethod
@@ -219,6 +245,13 @@ class MessageTraceQueryService:
         if any(stage.status == StageStatus.PENDING for stage in authoritative):
             return "pending"
         runtime_message = (runtime.data or {}).get("message") or {}
+        pipeline_status = runtime_message.get("status")
+        if pipeline_status == "classified":
+            return "classified"
+        if pipeline_status in {"coordinated", "classifying"}:
+            return "classifying"
+        if pipeline_status == "failed":
+            return "failed"
         if runtime_message.get("coordination_status") in {"grouped", "vague"}:
             return "coordinated"
         ingress_message = (ingress.data or {}).get("message") or {}

@@ -46,7 +46,7 @@
                     <label>Runtime state
                         <select name="runtime_status">
                             <option value="">Any</option>
-                            {% for value in ['pending', 'grouped', 'vague'] %}<option value="{{ value }}" {% if filters.runtime_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                            {% for value in ['received', 'coordinating', 'coordinated', 'classifying', 'classified', 'failed', 'pending', 'grouped', 'vague'] %}<option value="{{ value }}" {% if filters.runtime_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
                         </select>
                     </label>
                     <label>Attachments
@@ -82,6 +82,7 @@
                 </div>
                 <p>{{ item.text_preview or '(no text)' }}</p>
                 <div class="message-flags">
+                    {% if item.runtime_status %}<span>runtime · {{ item.runtime_status }}</span>{% endif %}
                     {% if item.attachment_type %}<span>📎 {{ item.attachment_type }} · {{ item.attachment_status }}</span>{% endif %}
                     {% if item.has_failure %}<span class="failure-text">failure</span>{% endif %}
                     {% if item.has_pending %}<span>pending</span>{% endif %}

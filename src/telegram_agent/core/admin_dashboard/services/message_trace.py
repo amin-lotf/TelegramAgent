@@ -152,14 +152,30 @@ class MessageTraceService:
                     status=ingress_outbox.status,
                 )
             )
-        if runtime is not None and runtime.outbox is not None and runtime.outbox.last_error:
-            failures.append(
-                FailureInfo(
-                    source="agent_runtime.outbox",
-                    message=runtime.outbox.last_error,
-                    status=runtime.outbox.status,
+        if runtime is not None:
+            if runtime.message is not None and runtime.message.status == "failed":
+                detail = "Pipeline status is failed"
+                if runtime.message.intent:
+                    detail = f"{detail} (intent={runtime.message.intent})"
+                failures.append(
+                    FailureInfo(
+                        source="agent_runtime.pipeline",
+                        message=detail,
+                        status=runtime.message.status,
+                    )
                 )
+            outbox_events = runtime.outbox_events or (
+                (runtime.outbox,) if runtime.outbox is not None else ()
             )
+            for event in outbox_events:
+                if event.last_error or event.status == "failed":
+                    failures.append(
+                        FailureInfo(
+                            source=f"agent_runtime.outbox:{event.event_type}",
+                            message=event.last_error or "Outbox event failed",
+                            status=event.status,
+                        )
+                    )
 
         state = derive_overall_state(message=message, content=content, runtime=runtime)
         timeline = build_timeline(
@@ -298,6 +314,7 @@ class MessageTraceService:
                             outbox=None,
                             claim=None,
                             group_messages=(),
+                            outbox_events=(),
                         )
                     batch = await reader.get_batch(message.batch_id)
                     group = (
@@ -310,6 +327,9 @@ class MessageTraceService:
                         group_messages = tuple(
                             await reader.list_messages_by_group_id(message.group_id)
                         )
+                    outbox_events = tuple(
+                        await reader.list_outbox_for_message(message.id)
+                    )
                     outbox = await reader.get_outbox_for_message(message.id)
                     claim = await reader.get_claim(chat_id)
                     return AgentRuntimeView(
@@ -319,6 +339,7 @@ class MessageTraceService:
                         outbox=outbox,
                         claim=claim,
                         group_messages=group_messages,
+                        outbox_events=outbox_events,
                     )
 
                 view = await asyncio.wait_for(
