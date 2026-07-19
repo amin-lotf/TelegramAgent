@@ -268,6 +268,21 @@ class MessageListingService:
                 )
             )
         )
+        outbox_events = (
+            list(runtime_item.get("outbox_events") or [])
+            if runtime_item is not None
+            else []
+        )
+        download_pending = any(
+            "download_handler" in str(event.get("event_type") or "")
+            and event.get("status") in {"pending", "processing"}
+            for event in outbox_events
+        )
+        handoff_pending = any(
+            "content_processing" in str(event.get("event_type") or "")
+            and event.get("status") in {"pending", "processing"}
+            for event in outbox_events
+        )
         has_pending = (
             row["conversation_status"] in _PENDING_INGRESS
             or row.get("attachment_status") in {"pending", "processing"}
@@ -275,9 +290,13 @@ class MessageListingService:
             or coordination_status == "pending"
             or pipeline_status
             in {"received", "coordinating", "coordinated", "classifying"}
+            or download_pending
+            or handoff_pending
         )
         if has_failure:
             overall = "failed"
+        elif handoff_pending or download_pending:
+            overall = "handling_download"
         elif pipeline_status == "classified":
             overall = "classified"
         elif pipeline_status in {"coordinated", "classifying"}:

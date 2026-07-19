@@ -265,6 +265,224 @@ def build_lifecycle_and_timeline(
                     runtime_message.get("id"),
                 )
             )
+
+        download_outbox = next(
+            (
+                event
+                for event in runtime_outbox_events
+                if event and "download_handler" in str(event.get("event_type") or "")
+            ),
+            None,
+        )
+        handoff_outbox = next(
+            (
+                event
+                for event in runtime_outbox_events
+                if event
+                and "content_processing" in str(event.get("event_type") or "")
+            ),
+            None,
+        )
+        agent_messages = runtime_data.get("agent_messages") or []
+        download_agent_message = next(
+            (
+                item
+                for item in agent_messages
+                if str(item.get("role") or "") == "download_agent"
+            ),
+            agent_messages[0] if agent_messages else None,
+        )
+        intent = str(runtime_message.get("intent") or "")
+
+        if intent == "conversation":
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    StageStatus.NOT_APPLICABLE,
+                    "conversation intent has no download handler",
+                )
+            )
+            stages.append(
+                _stage(
+                    "content_processing_handoff",
+                    "Content-processing handoff",
+                    "agent_runtime",
+                    StageStatus.NOT_APPLICABLE,
+                    "conversation intent has no content-processing handoff",
+                )
+            )
+        elif pipeline_status == "failed" and download_outbox and download_outbox.get("status") == "failed":
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    StageStatus.FAILED,
+                    str(download_outbox.get("last_error") or "download handler failed"),
+                )
+            )
+            stages.append(
+                _stage(
+                    "content_processing_handoff",
+                    "Content-processing handoff",
+                    "agent_runtime",
+                    StageStatus.NOT_STARTED,
+                )
+            )
+        elif download_agent_message is not None:
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    StageStatus.COMPLETED,
+                    f"role={download_agent_message.get('role')}",
+                )
+            )
+            events.append(
+                _event(
+                    "download_handler",
+                    "agent_runtime",
+                    "Download agent message recorded",
+                    StageStatus.COMPLETED,
+                    download_agent_message.get("created_at"),
+                    download_agent_message.get("id"),
+                )
+            )
+            if handoff_outbox is None:
+                stages.append(
+                    _stage(
+                        "content_processing_handoff",
+                        "Content-processing handoff",
+                        "agent_runtime",
+                        StageStatus.NOT_STARTED,
+                    )
+                )
+            elif handoff_outbox.get("status") == "failed":
+                stages.append(
+                    _stage(
+                        "content_processing_handoff",
+                        "Content-processing handoff",
+                        "agent_runtime",
+                        StageStatus.FAILED,
+                        str(handoff_outbox.get("last_error") or "handoff failed"),
+                    )
+                )
+            elif handoff_outbox.get("status") == "published":
+                stages.append(
+                    _stage(
+                        "content_processing_handoff",
+                        "Content-processing handoff",
+                        "agent_runtime",
+                        StageStatus.COMPLETED,
+                        "content-processing notified",
+                    )
+                )
+                events.append(
+                    _event(
+                        "content_processing_handoff",
+                        "agent_runtime",
+                        "Content-processing handoff published",
+                        StageStatus.COMPLETED,
+                        handoff_outbox.get("published_at") or handoff_outbox.get("created_at"),
+                        handoff_outbox.get("id"),
+                    )
+                )
+            else:
+                stages.append(
+                    _stage(
+                        "content_processing_handoff",
+                        "Content-processing handoff",
+                        "agent_runtime",
+                        StageStatus.PENDING,
+                        str(handoff_outbox.get("status")),
+                    )
+                )
+        elif download_outbox is not None:
+            if download_outbox.get("status") == "failed":
+                dl_status = StageStatus.FAILED
+                dl_detail = str(download_outbox.get("last_error") or "download handler failed")
+            elif download_outbox.get("status") == "published":
+                # Early-exit publishes without creating AgentMessage.
+                dl_status = StageStatus.COMPLETED
+                dl_detail = "early-exit or completed without agent message"
+            else:
+                dl_status = StageStatus.PENDING
+                dl_detail = str(download_outbox.get("status"))
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    dl_status,
+                    dl_detail,
+                )
+            )
+            stages.append(
+                _stage(
+                    "content_processing_handoff",
+                    "Content-processing handoff",
+                    "agent_runtime",
+                    StageStatus.NOT_STARTED
+                    if dl_status != StageStatus.FAILED
+                    else StageStatus.NOT_STARTED,
+                )
+            )
+        elif pipeline_status == "classified" and intent == "download_request":
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    StageStatus.PENDING,
+                    "awaiting download handler outbox",
+                )
+            )
+            stages.append(
+                _stage(
+                    "content_processing_handoff",
+                    "Content-processing handoff",
+                    "agent_runtime",
+                    StageStatus.NOT_STARTED,
+                )
+            )
+        elif pipeline_status == "classified":
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    StageStatus.NOT_APPLICABLE,
+                    intent or "no download intent",
+                )
+            )
+            stages.append(
+                _stage(
+                    "content_processing_handoff",
+                    "Content-processing handoff",
+                    "agent_runtime",
+                    StageStatus.NOT_APPLICABLE,
+                )
+            )
+        else:
+            stages.append(
+                _stage(
+                    "download_handler",
+                    "Download request handled",
+                    "agent_runtime",
+                    StageStatus.NOT_STARTED,
+                )
+            )
+            stages.append(
+                _stage(
+                    "content_processing_handoff",
+                    "Content-processing handoff",
+                    "agent_runtime",
+                    StageStatus.NOT_STARTED,
+                )
+            )
     else:
         ingress_conversation_status = str(message.get("conversation_status")) if message else None
         missing = (
@@ -275,12 +493,32 @@ def build_lifecycle_and_timeline(
         stages.append(_stage("runtime_accepted", "Runtime message persisted", "agent_runtime", missing))
         stages.append(_stage("runtime_coordination", "Runtime conversation coordinated", "agent_runtime", missing))
         stages.append(_stage("intent_classified", "Intent classified", "agent_runtime", missing))
+        stages.append(_stage("download_handler", "Download request handled", "agent_runtime", missing))
+        stages.append(
+            _stage(
+                "content_processing_handoff",
+                "Content-processing handoff",
+                "agent_runtime",
+                missing,
+            )
+        )
 
     stages.extend(
         (
-            _stage("agent_execution", "Agent execution completed", "agent_runtime", StageStatus.NOT_IMPLEMENTED, "No current source-of-truth record exists"),
-            _stage("response_prepared", "Outgoing response prepared", "agent_runtime", StageStatus.NOT_IMPLEMENTED, "No current source-of-truth record exists"),
-            _stage("telegram_response_sent", "Telegram response sent", "telegram_ingress", StageStatus.NOT_IMPLEMENTED, "No current source-of-truth record exists"),
+            _stage(
+                "response_prepared",
+                "Outgoing response prepared",
+                "agent_runtime",
+                StageStatus.NOT_IMPLEMENTED,
+                "No durable response-prep record yet",
+            ),
+            _stage(
+                "telegram_response_sent",
+                "Telegram response sent",
+                "telegram_ingress",
+                StageStatus.NOT_IMPLEMENTED,
+                "No durable send receipt yet",
+            ),
         )
     )
 

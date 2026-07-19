@@ -25,6 +25,7 @@ class OverallState(StrEnum):
     DISPATCHING = "dispatching"
     COORDINATING = "coordinating"
     CLASSIFYING = "classifying"
+    HANDLING_DOWNLOAD = "handling_download"
     COMPLETED = "completed"
     PENDING_DISPATCH = "pending_dispatch"
     PARTIAL = "partial"
@@ -45,6 +46,8 @@ class StageKey(StrEnum):
     RUNTIME_INGESTED = "runtime_ingested"
     COORDINATED = "coordinated"
     INTENT_CLASSIFIED = "intent_classified"
+    DOWNLOAD_HANDLED = "download_handled"
+    CONTENT_PROCESSING_HANDOFF = "content_processing_handoff"
 
 
 class StageStatus(StrEnum):

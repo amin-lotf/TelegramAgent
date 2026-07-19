@@ -176,6 +176,18 @@ class ConversationClaimRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentMessageRow:
+    id: UUID
+    ingress_message_id: UUID
+    chat_id: int
+    telegram_user_id: int
+    group_id: UUID
+    text: str
+    role: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class AuthUserRow:
     id: int
     telegram_user_id: int
@@ -224,6 +236,7 @@ class AgentRuntimeView:
     # Other messages sharing conversation_groups.id (empty if ungrouped/vague).
     group_messages: tuple[RuntimeMessageRow, ...] = ()
     outbox_events: tuple[OutboxRow, ...] = ()
+    agent_messages: tuple[AgentMessageRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -61,3 +61,35 @@ class ConversationIntentClassificationResult(BaseModel):
     chat_id: int
     processed: int
     results: tuple[MessageIntentClassificationResult, ...]
+
+
+class MessageDownloadHandlerResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    runtime_message_id: UUID
+    status: str
+    early_exit: bool = False
+    agent_message_id: UUID | None = None
+
+
+class ConversationDownloadHandlerResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: int
+    processed: int
+    results: tuple[MessageDownloadHandlerResult, ...]
+
+
+class MessageContentProcessingHandoffResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    runtime_message_id: UUID
+    status: str
+
+
+class ConversationContentProcessingHandoffResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: int
+    processed: int
+    results: tuple[MessageContentProcessingHandoffResult, ...]

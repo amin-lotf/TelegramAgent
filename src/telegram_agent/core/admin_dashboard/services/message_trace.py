@@ -315,6 +315,7 @@ class MessageTraceService:
                             claim=None,
                             group_messages=(),
                             outbox_events=(),
+                            agent_messages=(),
                         )
                     batch = await reader.get_batch(message.batch_id)
                     group = (
@@ -332,6 +333,11 @@ class MessageTraceService:
                     )
                     outbox = await reader.get_outbox_for_message(message.id)
                     claim = await reader.get_claim(chat_id)
+                    agent_messages = ()
+                    if message.group_id is not None:
+                        agent_messages = tuple(
+                            await reader.list_agent_messages_for_group(message.group_id)
+                        )
                     return AgentRuntimeView(
                         message=message,
                         batch=batch,
@@ -340,6 +346,7 @@ class MessageTraceService:
                         claim=claim,
                         group_messages=group_messages,
                         outbox_events=outbox_events,
+                        agent_messages=agent_messages,
                     )
 
                 view = await asyncio.wait_for(

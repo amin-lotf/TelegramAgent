@@ -79,6 +79,7 @@ CONTENT_PROCESSING_TABLES = (
     "jobs",
 )
 AGENT_RUNTIME_TABLES = (
+    "agent_messages",
     "coordination_outbox_events",
     "runtime_messages",
     "conversation_groups",

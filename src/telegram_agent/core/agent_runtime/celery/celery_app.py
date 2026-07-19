@@ -15,6 +15,8 @@ def create_celery_app() -> Celery:
             "telegram_agent.core.agent_runtime.celery.tasks.outbox_dispatch",
             "telegram_agent.core.agent_runtime.celery.tasks.coordinate_conversation",
             "telegram_agent.core.agent_runtime.celery.tasks.classify_intent",
+            "telegram_agent.core.agent_runtime.celery.tasks.download_handler",
+            "telegram_agent.core.agent_runtime.celery.tasks.content_processing_handoff",
         ],
     )
     celery_app.conf.update(
@@ -46,6 +48,16 @@ def create_celery_app() -> Celery:
                 Exchange("agent_runtime", type="direct"),
                 routing_key="agent_runtime.classify_intent",
             ),
+            Queue(
+                "agent_runtime_download",
+                Exchange("agent_runtime", type="direct"),
+                routing_key="agent_runtime.download_handler",
+            ),
+            Queue(
+                "agent_runtime_content_handoff",
+                Exchange("agent_runtime", type="direct"),
+                routing_key="agent_runtime.content_processing_handoff",
+            ),
         ),
         task_routes={
             "coordination.outbox.dispatch": {
@@ -59,6 +71,14 @@ def create_celery_app() -> Celery:
             "agent_runtime.classify_intent": {
                 "queue": "agent_runtime_classification",
                 "routing_key": "agent_runtime.classify_intent",
+            },
+            "agent_runtime.download_handler": {
+                "queue": "agent_runtime_download",
+                "routing_key": "agent_runtime.download_handler",
+            },
+            "agent_runtime.content_processing_handoff": {
+                "queue": "agent_runtime_content_handoff",
+                "routing_key": "agent_runtime.content_processing_handoff",
             },
         },
         beat_schedule={

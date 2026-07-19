@@ -99,7 +99,9 @@ async def test_listing_and_trace_correlate_all_databases(
     assert attempt["assets"][0]["local_path"] == "<masked>/voice.ogg"
     stage_by_key = {stage.key: stage for stage in trace.lifecycle}
     assert stage_by_key["transcription"].status.value == "completed"
-    assert stage_by_key["agent_execution"].status.value == "not_implemented"
+    assert stage_by_key["download_handler"].status.value == "not_applicable"
+    assert stage_by_key["content_processing_handoff"].status.value == "not_applicable"
+    assert stage_by_key["response_prepared"].status.value == "not_implemented"
 
     app = create_app(dashboard_settings)
     async with app.router.lifespan_context(app):
@@ -398,4 +400,5 @@ async def _seed_complete_voice_trace(
                 created_at=now, published_at=now,
             )
         )
+        # Conversation intent: no download_handler outbox / agent_messages.
     return {"ingress_message_id": ingress_message_id}

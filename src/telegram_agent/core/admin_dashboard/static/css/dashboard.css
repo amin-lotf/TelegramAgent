@@ -536,6 +536,8 @@ input::placeholder {
 .state-processing_media,
 .state-dispatching,
 .state-coordinating,
+.state-classifying,
+.state-handling_download,
 .state-pending_dispatch,
 .stage-pending {
   color: #d7e4ff;

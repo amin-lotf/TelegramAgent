@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from telegram_agent.core.agent_runtime.common.types import (
+    AgentMessageRole,
     ClaimStatus,
     CoordinationStatus,
     MessageIntent,
@@ -397,5 +398,61 @@ class OutboxEvent(Base):
             "ix_coordination_outbox_events_processing_lease",
             "locked_at",
             postgresql_where=sa.text("status = 'processing'"),
+        ),
+    )
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+
+    id: Mapped[UUID] = mapped_column(
+        sa.UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    ingress_message_id: Mapped[UUID] = mapped_column(
+        sa.UUID(as_uuid=True),
+        nullable=False,
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    group_id: Mapped[UUID] = mapped_column(
+        sa.UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[AgentMessageRole] = mapped_column(
+        sa.Enum(
+            AgentMessageRole,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["group_id", "chat_id"],
+            ["conversation_groups.id", "conversation_groups.chat_id"],
+            ondelete="RESTRICT",
+            name="fk_agent_messages_group_id_chat_id",
+        ),
+        # One download-agent reply per conversation group.
+        UniqueConstraint(
+            "group_id",
+            "role",
+            name="uq_agent_messages_group_id_role",
+        ),
+        Index(
+            "ix_agent_messages_chat_id_created_at",
+            "chat_id",
+            "created_at",
         ),
     )

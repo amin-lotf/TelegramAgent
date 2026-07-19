@@ -25,6 +25,7 @@ def overall_state_label(state: OverallState) -> str:
         OverallState.DISPATCHING: "Dispatching",
         OverallState.COORDINATING: "Coordinating",
         OverallState.CLASSIFYING: "Classifying intent",
+        OverallState.HANDLING_DOWNLOAD: "Handling download",
         OverallState.COMPLETED: "Completed",
         OverallState.PENDING_DISPATCH: "Pending dispatch",
         OverallState.PARTIAL: "Partial",
@@ -78,6 +79,18 @@ def derive_overall_state(
 
     if message.conversation_status == "dispatched" and runtime_message is not None:
         pipeline = runtime_message.status
+        download_pending = any(
+            "download_handler" in event.event_type
+            and event.status in {"pending", "processing"}
+            for event in outbox_events
+        )
+        handoff_pending = any(
+            "content_processing" in event.event_type
+            and event.status in {"pending", "processing"}
+            for event in outbox_events
+        )
+        if download_pending or handoff_pending:
+            return OverallState.HANDLING_DOWNLOAD
         if pipeline == "classified":
             return OverallState.COMPLETED
         if pipeline in {"coordinated", "classifying"}:

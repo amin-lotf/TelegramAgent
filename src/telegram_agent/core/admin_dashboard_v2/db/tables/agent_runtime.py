@@ -72,3 +72,16 @@ coordination_outbox_events = Table(
     Column("locked_by", String(255)),
     Column("last_error", Text),
 )
+
+agent_messages = Table(
+    "agent_messages",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("ingress_message_id", UUID(as_uuid=True), nullable=False),
+    Column("chat_id", BigInteger, nullable=False),
+    Column("telegram_user_id", BigInteger, nullable=False),
+    Column("group_id", UUID(as_uuid=True), nullable=False),
+    Column("text", Text, nullable=False),
+    Column("role", String(32), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)

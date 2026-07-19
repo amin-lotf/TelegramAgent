@@ -23,7 +23,7 @@ from telegram_agent.core.agent_runtime.common.types import (
     OutboxEventType,
     RuntimeMessageStatus,
 )
-from telegram_agent.core.agent_runtime.db.models.runtime import RuntimeMessage
+from telegram_agent.core.agent_runtime.db.models.runtime import OutboxEvent, RuntimeMessage
 from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (
     SyncSqlAlchemyAgentRuntimeUnitOfWork,
 )
@@ -291,11 +291,45 @@ class SyncIntentClassificationService:
                     "Failed to mark intent outbox published under active claim"
                 )
 
+            if intent == MessageIntent.DOWNLOAD_REQUEST:
+                self._ensure_download_handler_outbox(uow=uow, message=updated)
+
             return MessageIntentClassificationResult(
                 runtime_message_id=runtime_message_id,
                 status=RuntimeMessageStatus.CLASSIFIED.value,
                 intent=intent.value,
             )
+
+    @staticmethod
+    def _ensure_download_handler_outbox(
+        *,
+        uow: SyncSqlAlchemyAgentRuntimeUnitOfWork,
+        message: RuntimeMessage,
+    ) -> None:
+        event_type = OutboxEventType.DOWNLOAD_HANDLER
+        idempotency_key = (
+            f"agent_runtime:download_handler:{message.ingress_message_id}:v1"
+        )
+        existing = uow.outbox_events.get_by_idempotency_key(idempotency_key)
+        if existing is not None:
+            return
+        payload: dict[str, object] = {
+            "ingress_message_id": str(message.ingress_message_id),
+            "chat_id": message.chat_id,
+            "message_id": message.message_id,
+        }
+        if message.group_id is not None:
+            payload["group_id"] = str(message.group_id)
+        uow.outbox_events.add(
+            OutboxEvent(
+                event_type=event_type.value,
+                chat_id=message.chat_id,
+                runtime_message_id=message.id,
+                message_id=message.message_id,
+                idempotency_key=idempotency_key,
+                payload=payload,
+            )
+        )
 
     def _record_retryable_failure(
         self,

@@ -60,6 +60,26 @@ class LlmGatewayClient:
             ),
         )
 
+    def extract_download_request(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        media_type: str,
+    ) -> LlmGatewayGeneration:
+        return self._post_generation(
+            path="/download-agent",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            unavailable_message="LLM download-agent extraction is temporarily unavailable",
+            auth_failed_message="LLM gateway authentication failed",
+            rejected_message="LLM gateway rejected the download-agent request",
+            invalid_response_message=(
+                "LLM gateway returned an invalid download-agent response"
+            ),
+            extra_json={"media_type": media_type},
+        )
+
     def _post_generation(
         self,
         *,
@@ -70,7 +90,14 @@ class LlmGatewayClient:
         auth_failed_message: str,
         rejected_message: str,
         invalid_response_message: str,
+        extra_json: dict[str, object] | None = None,
     ) -> LlmGatewayGeneration:
+        payload: dict[str, object] = {
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+        }
+        if extra_json:
+            payload.update(extra_json)
         try:
             with httpx.Client(
                 timeout=self._timeout,
@@ -79,10 +106,7 @@ class LlmGatewayClient:
                 response = client.post(
                     f"{self._base_url}{path}",
                     headers={"Authorization": f"Bearer {self._token}"},
-                    json={
-                        "system_prompt": system_prompt,
-                        "user_prompt": user_prompt,
-                    },
+                    json=payload,
                 )
             response.raise_for_status()
             return LlmGatewayGeneration.model_validate(response.json())

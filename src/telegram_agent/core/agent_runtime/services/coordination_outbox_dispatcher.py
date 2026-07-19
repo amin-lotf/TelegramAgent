@@ -57,8 +57,14 @@ class CoordinationOutboxDispatcher:
         from telegram_agent.core.agent_runtime.celery.tasks.classify_intent import (
             classify_intent_task,
         )
+        from telegram_agent.core.agent_runtime.celery.tasks.content_processing_handoff import (
+            content_processing_handoff_task,
+        )
         from telegram_agent.core.agent_runtime.celery.tasks.coordinate_conversation import (
             coordinate_conversation_task,
+        )
+        from telegram_agent.core.agent_runtime.celery.tasks.download_handler import (
+            download_handler_task,
         )
 
         return cls(
@@ -68,6 +74,10 @@ class CoordinationOutboxDispatcher:
                     coordinate_conversation_task
                 ),
                 OutboxEventType.INTENT_CLASSIFIER.value: classify_intent_task,
+                OutboxEventType.DOWNLOAD_HANDLER.value: download_handler_task,
+                OutboxEventType.CONTENT_PROCESSING_HANDOFF.value: (
+                    content_processing_handoff_task
+                ),
             },
             batch_size=settings.outbox_dispatch_batch_size,
             claim_lease_timeout=timedelta(
@@ -301,6 +311,30 @@ class CoordinationOutboxDispatcher:
                             },
                         )
                         return "permanent"
+                elif head.event_type == OutboxEventType.DOWNLOAD_HANDLER.value:
+                    failed_message = uow.messages.mark_download_handler_failed(
+                        runtime_message_id=head.runtime_message_id,
+                    )
+                    if failed_message is None:
+                        uow.conversation_claims.release(
+                            chat_id=chat_id,
+                            claim_token=claim_token,
+                            available_at=utcnow(),
+                        )
+                        logger.warning(
+                            "Enqueue failure exhausted retries but message was not "
+                            "a classified download request",
+                            extra={
+                                "chat_id": chat_id,
+                                "runtime_message_id": str(head.runtime_message_id),
+                                "claim_token": str(claim_token),
+                                "error": str(error),
+                            },
+                        )
+                        return "permanent"
+                elif head.event_type == OutboxEventType.CONTENT_PROCESSING_HANDOFF.value:
+                    # Download work already completed; only fail the handoff outbox.
+                    pass
                 else:
                     uow.conversation_claims.release(
                         chat_id=chat_id,

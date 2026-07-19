@@ -68,7 +68,7 @@
             </li>
           {% endfor %}
         </ol>
-        <p class="muted small" style="margin: 0.85rem 0 0;">Pipeline currently ends at intent classification. Conversation and download handlers are not stored yet.</p>
+        <p class="muted small" style="margin: 0.85rem 0 0;">Runtime pipeline includes coordination, intent classification, download handling, and content-processing handoff. Conversation agent and Telegram send receipts are not stored yet.</p>
       </section>
 
       <div class="tabs" data-tabs>
@@ -341,6 +341,35 @@
                   </div>
                 {% else %}
                   <p class="muted">No runtime outbox events.</p>
+                {% endif %}
+
+                <h3>Agent messages</h3>
+                {% if rt.agent_messages %}
+                  <div class="table-wrap">
+                    <table class="data">
+                      <thead>
+                        <tr>
+                          <th>Role</th>
+                          <th>Text</th>
+                          <th>Ingress message</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for item in rt.agent_messages %}
+                          <tr>
+                            <td><code>{{ item.role }}</code></td>
+                            <td class="pre">{{ item.text }}</td>
+                            <td><code>{{ item.ingress_message_id }}</code></td>
+                            <td class="dt">{{ item.created_at|dt }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p class="muted small">Assistant-facing rows (e.g. download_agent). Structured extraction is not stored on this table.</p>
+                {% else %}
+                  <p class="muted">No agent messages for this group yet.</p>
                 {% endif %}
 
                 {% if rt.claim %}

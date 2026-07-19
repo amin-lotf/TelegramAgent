@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from telegram_agent.core.admin_dashboard_v2.db.engines import ReadDatabaseManager
 from telegram_agent.core.admin_dashboard_v2.db.tables.agent_runtime import (
+    agent_messages,
     conversation_claims,
     conversation_groups,
     coordination_outbox_events,
@@ -133,6 +134,7 @@ class AgentRuntimeReader:
                 )
             ).one_or_none()
             siblings: list[dict[str, Any]] = []
+            agent_message_rows: list[Any] = []
             if flattened["group_id"] is not None:
                 sibling_rows = (
                     await connection.execute(
@@ -153,6 +155,13 @@ class AgentRuntimeReader:
                     )
                 ).all()
                 siblings = [_mapping(item) for item in sibling_rows]
+                agent_message_rows = (
+                    await connection.execute(
+                        select(agent_messages)
+                        .where(agent_messages.c.group_id == flattened["group_id"])
+                        .order_by(agent_messages.c.created_at.asc(), agent_messages.c.id.asc())
+                    )
+                ).all()
 
         batch = {
             "id": flattened["batch_id"],
@@ -188,6 +197,7 @@ class AgentRuntimeReader:
             "claim": _mapping(claim_row) if claim_row is not None else None,
             "outbox": primary_outbox,
             "outbox_events": outbox_events,
+            "agent_messages": [_mapping(item) for item in agent_message_rows],
             "group_siblings": siblings,
             "group_siblings_truncated": len(siblings) >= sibling_limit,
         }

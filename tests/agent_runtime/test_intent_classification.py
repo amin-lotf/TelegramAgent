@@ -205,8 +205,15 @@ async def test_intent_classifier_download_request(
     assert result.results[0].intent == MessageIntent.DOWNLOAD_REQUEST.value
     with agent_runtime_sync_sessionmaker() as session:
         message = session.scalars(select(RuntimeMessage)).one()
+        download_event = session.scalars(
+            select(OutboxEvent).where(
+                OutboxEvent.event_type == OutboxEventType.DOWNLOAD_HANDLER.value
+            )
+        ).one()
     assert message.intent == MessageIntent.DOWNLOAD_REQUEST
     assert message.status == RuntimeMessageStatus.CLASSIFIED
+    assert download_event.status == OutboxEventStatus.PENDING
+    assert download_event.runtime_message_id == message.id
 
 
 @pytest.mark.asyncio

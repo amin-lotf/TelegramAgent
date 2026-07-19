@@ -79,7 +79,7 @@ services:
       - .env.agent_runtime.docker
     command: >
       python -m celery -A telegram_agent.core.agent_runtime.celery.celery_app.celery_app worker
-      -Q agent_runtime_outbox,agent_runtime_coordination,agent_runtime_classification
+      -Q agent_runtime_outbox,agent_runtime_coordination,agent_runtime_classification,agent_runtime_download,agent_runtime_content_handoff
       --loglevel=info
     volumes:
       - ../..:/app

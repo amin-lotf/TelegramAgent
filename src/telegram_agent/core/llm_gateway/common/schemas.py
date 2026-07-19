@@ -40,3 +40,47 @@ class IntentClassificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     intent: IntentKind
+
+
+class DownloadAgentVideoResponse(BaseModel):
+    """Structured output for video download requests."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    requested_subtitle_language: str | None = None
+    requested_dub_language: str | None = None
+    assistant_text: str = Field(min_length=1, max_length=2_000)
+
+
+class DownloadAgentAudioResponse(BaseModel):
+    """Structured output for audio download requests."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    requested_language: str | None = None
+    assistant_text: str = Field(min_length=1, max_length=2_000)
+
+
+class DownloadAgentDocumentResponse(BaseModel):
+    """Structured output for document download requests."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    requested_format: str | None = None
+    assistant_text: str = Field(min_length=1, max_length=2_000)
+
+
+class DownloadAgentResponse(BaseModel):
+    """Union envelope used by the download-agent gateway endpoint.
+
+    Exactly one media-type payload is expected based on the request media type;
+    the gateway validates against the media-specific schema before returning.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    assistant_text: str = Field(min_length=1, max_length=2_000)
+    requested_subtitle_language: str | None = None
+    requested_dub_language: str | None = None
+    requested_language: str | None = None
+    requested_format: str | None = None

@@ -33,6 +33,8 @@ class ClaimStatus(StrEnum):
 class OutboxEventType(StrEnum):
     MESSAGE_PENDING_COORDINATION = "agent_runtime.message.pending_coordination"
     INTENT_CLASSIFIER = "agent_runtime.message.pending_intent_classification"
+    DOWNLOAD_HANDLER = "agent_runtime.message.pending_download_handler"
+    CONTENT_PROCESSING_HANDOFF = "agent_runtime.download.pending_content_processing"
 
 
 class OutboxEventStatus(StrEnum):
@@ -42,7 +44,12 @@ class OutboxEventStatus(StrEnum):
     FAILED = "failed"
 
 
+class AgentMessageRole(StrEnum):
+    DOWNLOAD_AGENT = "download_agent"
+
+
 __all__ = [
+    "AgentMessageRole",
     "ClaimStatus",
     "CoordinationStatus",
     "CoordinatorDecisionKind",

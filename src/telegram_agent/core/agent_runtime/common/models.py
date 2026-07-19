@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.llm_gateway.common.schemas import (
+    DownloadAgentResponse,
     IntentClassificationResponse,
     MessageGroupingResponse,
 )
@@ -13,6 +14,7 @@ from telegram_agent.core.llm_gateway.common.schemas import (
 # Shared structured-output contracts owned by llm_gateway; re-exported for domain use.
 CoordinatorDecision = MessageGroupingResponse
 IntentClassificationDecision = IntentClassificationResponse
+DownloadAgentDecision = DownloadAgentResponse
 
 
 class CoordinatorMessageView(BaseModel):

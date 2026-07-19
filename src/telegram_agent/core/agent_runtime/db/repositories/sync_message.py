@@ -220,3 +220,22 @@ class SyncSqlAlchemyRuntimeMessageRepository:
             .returning(RuntimeMessage)
         )
         return self._session.execute(statement).scalar_one_or_none()
+
+    def mark_download_handler_failed(
+        self,
+        *,
+        runtime_message_id: UUID,
+    ) -> RuntimeMessage | None:
+        """Mark a classified download-request message as permanently failed."""
+        statement = (
+            update(RuntimeMessage)
+            .where(
+                RuntimeMessage.id == runtime_message_id,
+                RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
+                RuntimeMessage.status == RuntimeMessageStatus.CLASSIFIED,
+                RuntimeMessage.intent == MessageIntent.DOWNLOAD_REQUEST,
+            )
+            .values(status=RuntimeMessageStatus.FAILED)
+            .returning(RuntimeMessage)
+        )
+        return self._session.execute(statement).scalar_one_or_none()

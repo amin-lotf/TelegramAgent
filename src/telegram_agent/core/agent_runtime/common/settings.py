@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from telegram_agent.core.agent_runtime.common.const import (
     DEFAULT_ALLOWED_ORIGINS,
     DEFAULT_CONTENT_PROCESSING_BASE_URL,
+    DEFAULT_CONTENT_PROCESSING_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_COORDINATION_CLAIM_LEASE_SECONDS,
     DEFAULT_COORDINATION_MESSAGE_BATCH_SIZE,
     DEFAULT_COORDINATION_RECENT_WINDOW_SIZE,
@@ -22,6 +23,7 @@ from telegram_agent.core.agent_runtime.common.const import (
     DEFAULT_REDIS_URL,
     DEFAULT_SQLALCHEMY_DATABASE_URL,
     DEFAULT_TELEGRAM_INGRESS_BASE_URL,
+    DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
 )
 
 
@@ -67,6 +69,22 @@ class Settings(BaseSettings):
             "TELEGRAM_INGRESS_SERVICE_TOKEN",
             "telegram_ingress_service_token",
         ),
+    )
+    telegram_ingress_request_timeout_seconds: float = Field(
+        default=DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS",
+            "telegram_ingress_request_timeout_seconds",
+        ),
+        gt=0,
+    )
+    content_processing_request_timeout_seconds: float = Field(
+        default=DEFAULT_CONTENT_PROCESSING_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "CONTENT_PROCESSING_REQUEST_TIMEOUT_SECONDS",
+            "content_processing_request_timeout_seconds",
+        ),
+        gt=0,
     )
 
     agent_runtime_service_token: str | None = Field(

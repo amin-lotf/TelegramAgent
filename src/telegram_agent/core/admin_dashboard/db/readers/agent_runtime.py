@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telegram_agent.core.admin_dashboard.db.mappings import agent_runtime as tables
 from telegram_agent.core.admin_dashboard.services.view_models import (
+    AgentMessageRow,
     ConversationClaimRow,
     ConversationGroupRow,
     OutboxRow,
@@ -154,6 +155,30 @@ class AgentRuntimeReader:
             available_at=row.available_at,
             updated_at=row.updated_at,
         )
+
+    async def list_agent_messages_for_group(
+        self,
+        group_id: UUID,
+    ) -> list[AgentMessageRow]:
+        tbl = tables.agent_messages
+        result = await self._session.execute(
+            select(tbl)
+            .where(tbl.c.group_id == group_id)
+            .order_by(tbl.c.created_at.asc(), tbl.c.id.asc())
+        )
+        return [
+            AgentMessageRow(
+                id=row.id,
+                ingress_message_id=row.ingress_message_id,
+                chat_id=row.chat_id,
+                telegram_user_id=row.telegram_user_id,
+                group_id=row.group_id,
+                text=row.text,
+                role=row.role,
+                created_at=row.created_at,
+            )
+            for row in result
+        ]
 
     async def list_pipeline_status_by_ingress_ids(
         self,

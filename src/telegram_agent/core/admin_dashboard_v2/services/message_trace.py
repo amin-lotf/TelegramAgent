@@ -239,10 +239,21 @@ class MessageTraceQueryService:
         runtime: SourceResult[dict[str, Any]],
         ingress: SourceResult[dict[str, Any]],
     ) -> str:
-        authoritative = [stage for stage in lifecycle if stage.status != StageStatus.NOT_IMPLEMENTED]
+        authoritative = [
+            stage
+            for stage in lifecycle
+            if stage.status not in {StageStatus.NOT_IMPLEMENTED, StageStatus.NOT_APPLICABLE}
+        ]
         if any(stage.status == StageStatus.FAILED for stage in authoritative):
             return "failed"
         if any(stage.status == StageStatus.PENDING for stage in authoritative):
+            # Distinguish download-stage work from earlier pipeline pending.
+            download_keys = {"download_handler", "content_processing_handoff"}
+            if any(
+                stage.key in download_keys and stage.status == StageStatus.PENDING
+                for stage in authoritative
+            ):
+                return "handling_download"
             return "pending"
         runtime_message = (runtime.data or {}).get("message") or {}
         pipeline_status = runtime_message.get("status")

@@ -26,6 +26,8 @@ _STAGE_ORDER = (
     StageKey.RUNTIME_INGESTED,
     StageKey.COORDINATED,
     StageKey.INTENT_CLASSIFIED,
+    StageKey.DOWNLOAD_HANDLED,
+    StageKey.CONTENT_PROCESSING_HANDOFF,
 )
 
 _LABELS = {
@@ -42,6 +44,8 @@ _LABELS = {
     StageKey.RUNTIME_INGESTED: "Runtime message ingested",
     StageKey.COORDINATED: "Message coordinated",
     StageKey.INTENT_CLASSIFIED: "Intent classified",
+    StageKey.DOWNLOAD_HANDLED: "Download request handled",
+    StageKey.CONTENT_PROCESSING_HANDOFF: "Content-processing handoff",
 }
 
 
@@ -395,14 +399,44 @@ def build_timeline(
         None,
     )
 
+    download_outbox = next(
+        (e for e in outbox_events if "download_handler" in e.event_type),
+        None,
+    )
+    handoff_outbox = next(
+        (e for e in outbox_events if "content_processing" in e.event_type),
+        None,
+    )
+    agent_messages = runtime.agent_messages if runtime is not None else ()
+    download_agent_message = next(
+        (item for item in agent_messages if item.role == "download_agent"),
+        agent_messages[0] if agent_messages else None,
+    )
+
     if not runtime_available:
         events.append(_event(StageKey.RUNTIME_INGESTED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.COORDINATED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.INTENT_CLASSIFIED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
+        events.append(_event(StageKey.DOWNLOAD_HANDLED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
+        events.append(
+            _event(
+                StageKey.CONTENT_PROCESSING_HANDOFF,
+                StageStatus.UNAVAILABLE,
+                source_db=DbName.AGENT_RUNTIME,
+            )
+        )
     elif runtime is None or runtime.message is None:
         events.append(_event(StageKey.RUNTIME_INGESTED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.COORDINATED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
+        events.append(_event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
+        events.append(
+            _event(
+                StageKey.CONTENT_PROCESSING_HANDOFF,
+                StageStatus.NOT_STARTED,
+                source_db=DbName.AGENT_RUNTIME,
+            )
+        )
     else:
         rm = runtime.message
         events.append(
@@ -426,6 +460,16 @@ def build_timeline(
             )
             events.append(
                 _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
+            events.append(
+                _event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.NOT_STARTED,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
             )
         elif rm.coordination_status in {"grouped", "vague"}:
             detail = rm.coordination_status
@@ -489,6 +533,138 @@ def build_timeline(
                         source_db=DbName.AGENT_RUNTIME,
                     )
                 )
+
+            # Download handler + content-processing handoff stages.
+            intent = rm.intent or ""
+            if intent == "conversation" or rm.coordination_status == "vague":
+                events.append(
+                    _event(
+                        StageKey.DOWNLOAD_HANDLED,
+                        StageStatus.NOT_APPLICABLE,
+                        detail="no download handler for this intent",
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+                events.append(
+                    _event(
+                        StageKey.CONTENT_PROCESSING_HANDOFF,
+                        StageStatus.NOT_APPLICABLE,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            elif download_agent_message is not None:
+                events.append(
+                    _event(
+                        StageKey.DOWNLOAD_HANDLED,
+                        StageStatus.COMPLETED,
+                        download_agent_message.created_at,
+                        detail=f"role={download_agent_message.role}",
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+                if handoff_outbox is None:
+                    events.append(
+                        _event(
+                            StageKey.CONTENT_PROCESSING_HANDOFF,
+                            StageStatus.NOT_STARTED,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+                elif handoff_outbox.status == "failed":
+                    events.append(
+                        _event(
+                            StageKey.CONTENT_PROCESSING_HANDOFF,
+                            StageStatus.FAILED,
+                            detail=handoff_outbox.last_error,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+                elif handoff_outbox.status == "published":
+                    events.append(
+                        _event(
+                            StageKey.CONTENT_PROCESSING_HANDOFF,
+                            StageStatus.COMPLETED,
+                            handoff_outbox.published_at,
+                            detail="content-processing notified",
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+                else:
+                    events.append(
+                        _event(
+                            StageKey.CONTENT_PROCESSING_HANDOFF,
+                            StageStatus.PENDING,
+                            detail=handoff_outbox.status,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+            elif download_outbox is not None:
+                if download_outbox.status == "failed":
+                    events.append(
+                        _event(
+                            StageKey.DOWNLOAD_HANDLED,
+                            StageStatus.FAILED,
+                            detail=download_outbox.last_error,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+                elif download_outbox.status == "published":
+                    events.append(
+                        _event(
+                            StageKey.DOWNLOAD_HANDLED,
+                            StageStatus.COMPLETED,
+                            download_outbox.published_at,
+                            detail="early-exit or completed",
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+                else:
+                    events.append(
+                        _event(
+                            StageKey.DOWNLOAD_HANDLED,
+                            StageStatus.PENDING,
+                            detail=download_outbox.status,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
+                events.append(
+                    _event(
+                        StageKey.CONTENT_PROCESSING_HANDOFF,
+                        StageStatus.NOT_STARTED,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            elif rm.status == "classified" and intent == "download_request":
+                events.append(
+                    _event(
+                        StageKey.DOWNLOAD_HANDLED,
+                        StageStatus.PENDING,
+                        detail="awaiting download handler",
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+                events.append(
+                    _event(
+                        StageKey.CONTENT_PROCESSING_HANDOFF,
+                        StageStatus.NOT_STARTED,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+            else:
+                events.append(
+                    _event(
+                        StageKey.DOWNLOAD_HANDLED,
+                        StageStatus.NOT_STARTED,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
+                events.append(
+                    _event(
+                        StageKey.CONTENT_PROCESSING_HANDOFF,
+                        StageStatus.NOT_STARTED,
+                        source_db=DbName.AGENT_RUNTIME,
+                    )
+                )
         elif coordination_outbox is not None and coordination_outbox.status == "failed":
             events.append(
                 _event(
@@ -501,6 +677,16 @@ def build_timeline(
             events.append(
                 _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
             )
+            events.append(
+                _event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.NOT_STARTED,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
         else:
             events.append(
                 _event(
@@ -512,6 +698,16 @@ def build_timeline(
             )
             events.append(
                 _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
+            events.append(
+                _event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
+            )
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.NOT_STARTED,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
             )
 
     # Stable order

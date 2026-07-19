@@ -4,6 +4,9 @@ from types import TracebackType
 
 from sqlalchemy.orm import Session
 
+from telegram_agent.core.agent_runtime.db.repositories.sync_agent_message import (
+    SyncSqlAlchemyAgentMessageRepository,
+)
 from telegram_agent.core.agent_runtime.db.repositories.sync_claim import (
     SyncSqlAlchemyConversationClaimRepository,
 )
@@ -25,6 +28,7 @@ class SyncSqlAlchemyAgentRuntimeUnitOfWork:
         self.groups = SyncSqlAlchemyConversationGroupRepository(session)
         self.outbox_events = SyncSqlAlchemyOutboxRepository(session)
         self.conversation_claims = SyncSqlAlchemyConversationClaimRepository(session)
+        self.agent_messages = SyncSqlAlchemyAgentMessageRepository(session)
 
     def commit(self) -> None:
         self._session.commit()
