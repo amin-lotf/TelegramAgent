@@ -14,6 +14,12 @@ from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.content_processing.common.results import OutboxDispatchResult
 from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import OutboxEventType
+from telegram_agent.core.content_processing.celery.tasks.download_delivery import (
+    deliver_download_task,
+)
+from telegram_agent.core.content_processing.celery.tasks.download_preparation import (
+    prepare_download_task,
+)
 from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
 from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
 from telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback import notify_telegram_ingress_task
@@ -24,8 +30,6 @@ from telegram_agent.core.content_processing.db.uow.sync_content_processing impor
 from telegram_agent.core.content_processing.db.uow.sync_uow_factory import sync_content_processing_uow_factory
 
 logger = logging.getLogger(__name__)
-
-
 
 
 class OutboxDispatcher:
@@ -49,6 +53,8 @@ class OutboxDispatcher:
             OutboxEventType.CONTENT_PROCESSING_JOB_READY.value: download_telegram_media_task,
             OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value: transcribe_media_task,
             OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value: notify_telegram_ingress_task,
+            OutboxEventType.DOWNLOAD_PREPARATION_READY.value: prepare_download_task,
+            OutboxEventType.DOWNLOAD_READY_FOR_DELIVERY.value: deliver_download_task,
         }
 
     @classmethod

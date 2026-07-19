@@ -13,4 +13,20 @@ class SyncSqlAlchemyTelegramSourceRepository:
         self._session = session
 
     def list_by_job_id(self, job_id: UUID) -> list[TelegramSource]:
-        return list(self._session.scalars(select(TelegramSource).where(TelegramSource.job_id == job_id)).all())
+        return list(
+            self._session.scalars(
+                select(TelegramSource).where(TelegramSource.job_id == job_id)
+            ).all()
+        )
+
+    def list_by_ingress_message_id(
+        self,
+        ingress_message_id: UUID,
+    ) -> list[TelegramSource]:
+        return list(
+            self._session.scalars(
+                select(TelegramSource).where(
+                    TelegramSource.ingress_message_id == ingress_message_id
+                )
+            ).all()
+        )

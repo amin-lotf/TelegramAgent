@@ -2,7 +2,8 @@ from enum import StrEnum
 
 
 class JobKind(StrEnum):
-    TELEGRAM_ATTACHMENT="telegram attachment"
+    TELEGRAM_ATTACHMENT = "telegram attachment"
+    DOWNLOAD_PREPARATION = "download preparation"
 
 
 class JobStatus(StrEnum):
@@ -14,6 +15,12 @@ class JobStatus(StrEnum):
     FAILED = "failed"
     TIMED_OUT = "timed_out"
     CANCELLED = "cancelled"
+
+
+class DownloadMediaType(StrEnum):
+    VIDEO = "video"
+    AUDIO = "audio"
+    DOCUMENT = "document"
 
 
 class JobCompletionExpectationKind(StrEnum):
@@ -37,6 +44,8 @@ class OutboxEventType(StrEnum):
     CONTENT_PROCESSING_JOB_READY = "content_processing.job.ready"
     MEDIA_READY_FOR_TRANSCRIPTION = "content_processing.media.ready_for_transcription"
     CONTENT_PROCESSING_JOB_FINISHED = "content_processing.job.finished"
+    DOWNLOAD_PREPARATION_READY = "content_processing.download_preparation.ready"
+    DOWNLOAD_READY_FOR_DELIVERY = "content_processing.download.ready_for_delivery"
 
 
 class OutboxEventStatus(StrEnum):

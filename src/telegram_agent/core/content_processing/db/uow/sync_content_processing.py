@@ -4,6 +4,9 @@ from types import TracebackType
 
 from sqlalchemy.orm import Session
 
+from telegram_agent.core.content_processing.db.repositories.sync_download_request import (
+    SyncSqlAlchemyDownloadRequestRepository,
+)
 from telegram_agent.core.content_processing.db.repositories.sync_job import SyncSqlAlchemyJobRepository
 from telegram_agent.core.content_processing.db.repositories.sync_job_expectation import (
     SyncSqlAlchemyJobExpectationRepository,
@@ -22,6 +25,7 @@ class SyncSqlAlchemyContentProcessingUnitOfWork:
         self.media_assets = SyncSqlAlchemyMediaAssetRepository(session)
         self.telegram_sources = SyncSqlAlchemyTelegramSourceRepository(session)
         self.transcripts = SyncSqlAlchemyTranscriptRepository(session)
+        self.download_requests = SyncSqlAlchemyDownloadRequestRepository(session)
         self.outbox_events = SyncSqlAlchemyOutboxRepository(session)
 
     def commit(self) -> None:

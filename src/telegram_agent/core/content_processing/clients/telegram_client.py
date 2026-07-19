@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 import httpx
 
@@ -11,9 +12,6 @@ from telegram_agent.core.common.exceptions import (
 )
 from telegram_agent.core.content_processing.common.results import TelegramFile, TelegramFileStream
 from telegram_agent.core.content_processing.common.settings import Settings
-
-
-
 
 
 class TelegramClient:
@@ -28,6 +26,99 @@ class TelegramClient:
             write=settings.media_http_write_timeout_seconds,
             pool=settings.media_http_pool_timeout_seconds,
         )
+
+    def send_video(
+        self,
+        *,
+        chat_id: int,
+        file_path: str,
+        caption: str | None = None,
+    ) -> None:
+        self._send_media(
+            method="sendVideo",
+            field_name="video",
+            chat_id=chat_id,
+            file_path=file_path,
+            caption=caption,
+        )
+
+    def send_audio(
+        self,
+        *,
+        chat_id: int,
+        file_path: str,
+        caption: str | None = None,
+    ) -> None:
+        self._send_media(
+            method="sendAudio",
+            field_name="audio",
+            chat_id=chat_id,
+            file_path=file_path,
+            caption=caption,
+        )
+
+    def send_document(
+        self,
+        *,
+        chat_id: int,
+        file_path: str,
+        caption: str | None = None,
+    ) -> None:
+        self._send_media(
+            method="sendDocument",
+            field_name="document",
+            chat_id=chat_id,
+            file_path=file_path,
+            caption=caption,
+        )
+
+    def _send_media(
+        self,
+        *,
+        method: str,
+        field_name: str,
+        chat_id: int,
+        file_path: str,
+        caption: str | None,
+    ) -> None:
+        path = Path(file_path)
+        if not path.is_file() or path.is_symlink() or path.stat().st_size <= 0:
+            raise TelegramDownloadPermanentError(
+                "Prepared download file is missing or invalid"
+            )
+
+        data: dict[str, str] = {"chat_id": str(chat_id)}
+        if caption:
+            data["caption"] = caption[:1024]
+
+        try:
+            with path.open("rb") as handle:
+                with httpx.Client(timeout=self._timeout) as client:
+                    response = client.post(
+                        f"{self._base_url}/bot{self._token}/{method}",
+                        data=data,
+                        files={field_name: (path.name, handle)},
+                    )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise TelegramDownloadError(
+                "Telegram API is temporarily unavailable while sending media"
+            ) from exc
+        except OSError as exc:
+            raise TelegramDownloadPermanentError(
+                "Unable to read prepared download file"
+            ) from exc
+
+        self._raise_for_telegram_status(response, operation=method)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise TelegramDownloadPermanentError(
+                f"Telegram returned an invalid {method} response"
+            ) from exc
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise TelegramDownloadPermanentError(
+                f"Telegram could not accept the {method} upload"
+            )
 
     def get_file(self, file_id: str) -> TelegramFile:
         try:

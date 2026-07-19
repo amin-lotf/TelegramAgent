@@ -17,6 +17,8 @@ def create_celery_app() -> Celery:
             "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
             "telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback",
             "telegram_agent.core.content_processing.celery.tasks.job_expectation_sweep",
+            "telegram_agent.core.content_processing.celery.tasks.download_preparation",
+            "telegram_agent.core.content_processing.celery.tasks.download_delivery",
         ],
     )
 
@@ -57,6 +59,16 @@ def create_celery_app() -> Celery:
                 Exchange("content_processing", type="direct"),
                 routing_key="telegram_ingress.processing_result",
             ),
+            Queue(
+                "download_preparation",
+                Exchange("content_processing", type="direct"),
+                routing_key="download.prepare",
+            ),
+            Queue(
+                "download_delivery",
+                Exchange("content_processing", type="direct"),
+                routing_key="download.deliver",
+            ),
         ),
 
         task_routes={
@@ -79,6 +91,14 @@ def create_celery_app() -> Celery:
             "telegram_ingress.processing_result": {
                 "queue": "telegram_ingress_callback",
                 "routing_key": "telegram_ingress.processing_result",
+            },
+            "download.prepare": {
+                "queue": "download_preparation",
+                "routing_key": "download.prepare",
+            },
+            "download.deliver": {
+                "queue": "download_delivery",
+                "routing_key": "download.deliver",
             },
         },
 

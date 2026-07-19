@@ -16,6 +16,15 @@ class CreateTelegramJobResult(BaseModel):
     created: bool
 
 
+class CreateDownloadRequestResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    job_id: UUID
+    status: JobStatus
+    created: bool
+    media_type: str
+
+
 @dataclass(frozen=True)
 class OutboxDispatchResult:
     claimed: int = 0

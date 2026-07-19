@@ -22,6 +22,23 @@ class CreateTelegramJobCommand(BaseModel):
     idempotency_key: str
 
 
+class CreateDownloadRequestCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: int
+    telegram_user_id: int
+    group_id: UUID
+    agent_message_id: UUID
+    media_ingress_message_id: UUID
+    media_type: str
+    assistant_text: str
+    requested_subtitle_language: str | None = None
+    requested_dub_language: str | None = None
+    requested_language: str | None = None
+    requested_format: str | None = None
+    idempotency_key: str
+
+
 @dataclass(frozen=True)
 class RecordMediaDownloadCommand:
     job_id: UUID

@@ -74,8 +74,10 @@ CONTENT_PROCESSING_TABLES = (
     "outbox_events",
     "transcript_segments",
     "transcripts",
+    "download_requests",
     "media_assets",
     "telegram_sources",
+    "job_completion_expectations",
     "jobs",
 )
 AGENT_RUNTIME_TABLES = (
