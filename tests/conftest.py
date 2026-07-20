@@ -72,6 +72,9 @@ INGRESS_TABLES = (
 )
 CONTENT_PROCESSING_TABLES = (
     "outbox_events",
+    "translated_segments",
+    "translation_batches",
+    "subtitle_translations",
     "transcript_segments",
     "transcripts",
     "download_requests",

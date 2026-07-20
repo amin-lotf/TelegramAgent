@@ -33,6 +33,9 @@ from telegram_agent.core.content_processing.downloaders.mux import MuxService
 from telegram_agent.core.content_processing.services.subtitle_preparation_service import (
     SubtitlePreparationService,
 )
+from telegram_agent.core.content_processing.services.sync_subtitle_translation_service import (
+    SyncSubtitleTranslationService,
+)
 
 _VIDEO_ATTACHMENT_TYPES = frozenset(
     {
@@ -54,11 +57,11 @@ _DOCUMENT_ATTACHMENT_TYPES = frozenset(
 
 
 class SyncDownloadPreparationService:
-    """Orchestrate plain download preparation (no translation/dubbing yet).
+    """Orchestrate download preparation (subtitles + mux; optional translation).
 
     Extension points:
-    - ``requested_subtitle_language`` / transcript language: later feed a translator
-      before SubtitlePreparationService.
+    - ``requested_subtitle_language`` / transcript language: translated via
+      SyncSubtitleTranslationService before SubtitlePreparationService.
     - ``requested_dub_language``: later produce a dub track and pass it as
       MuxService ``audio_path`` instead of the original audio asset.
     - ``requested_format`` / ``requested_language``: later convert audio/document.
@@ -73,12 +76,21 @@ class SyncDownloadPreparationService:
         ],
         settings: Settings,
         subtitle_service: SubtitlePreparationService | None = None,
+        translation_service: SyncSubtitleTranslationService | None = None,
         mux_service: MuxService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._settings = settings
         self._subtitle_service = subtitle_service or SubtitlePreparationService.from_settings(
             settings
+        )
+        self._translation_service = (
+            translation_service
+            or SyncSubtitleTranslationService(
+                uow_factory=uow_factory,
+                settings=settings,
+                llm_gateway_client=None,
+            )
         )
         self._mux_service = mux_service or MuxService.from_settings(settings)
 
@@ -91,6 +103,7 @@ class SyncDownloadPreparationService:
         return cls(
             uow_factory=sync_content_processing_uow_factory,
             settings=settings,
+            translation_service=SyncSubtitleTranslationService.from_settings(),
         )
 
     def execute(self, *, job_id: UUID, retry_count: int) -> StageExecutionResult:
@@ -311,8 +324,11 @@ class SyncDownloadPreparationService:
             subtitle_language = (
                 request.requested_subtitle_language or transcript.language
             )
-            segments = list(transcript.segments)
 
+        segments = self._translation_service.ensure_translated(
+            source_job_id=source_job_id,
+            target_language=subtitle_language,
+        )
         subtitle_path = self._subtitle_service.prepare(
             job_id=request.job_id,
             segments=segments,

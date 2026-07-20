@@ -54,11 +54,13 @@ class MediaDemuxer:
             raise MediaDemuxPermanentError("ffmpeg binary is not available")
 
         audio_path = self._derived_path(job_id, source_asset_id, "audio", ".ogg")
+        # Never remux to opaque suffixes like .bin — ffmpeg cannot pick a muxer.
+        video_suffix = self._video_output_suffix(source)
         video_path = self._derived_path(
             job_id,
             source_asset_id,
             "video",
-            source.suffix if source.suffix else ".mp4",
+            video_suffix,
         )
 
         if not self._valid_existing_file(audio_path):
@@ -125,22 +127,28 @@ class MediaDemuxer:
         self._create_parent_directory(video_path)
         temporary_path = self._temporary_path(video_path)
         try:
-            self._run_ffmpeg(
-                [
-                    self._ffmpeg_binary,
-                    "-y",
-                    "-i",
-                    str(source),
-                    "-map",
-                    "0:v:0",
-                    "-an",
-                    "-sn",
-                    "-dn",
-                    "-c:v",
-                    "copy",
-                    str(temporary_path),
-                ]
-            )
+            command = [
+                self._ffmpeg_binary,
+                "-y",
+                "-i",
+                str(source),
+                "-map",
+                "0:v:0",
+                "-an",
+                "-sn",
+                "-dn",
+                "-c:v",
+                "copy",
+            ]
+            # Force container when extension alone is ambiguous (e.g. legacy .bin sources).
+            if video_path.suffix.lower() in {".mp4", ".m4v"}:
+                command.extend(["-f", "mp4"])
+            elif video_path.suffix.lower() == ".webm":
+                command.extend(["-f", "webm"])
+            elif video_path.suffix.lower() in {".mkv", ".matroska"}:
+                command.extend(["-f", "matroska"])
+            command.append(str(temporary_path))
+            self._run_ffmpeg(command)
             if temporary_path.stat().st_size <= 0:
                 raise MediaDemuxPermanentError("ffmpeg produced an empty video file")
             temporary_path.replace(video_path)
@@ -172,7 +180,8 @@ class MediaDemuxer:
         if completed.returncode == 0:
             return
 
-        stderr = (completed.stderr or "").lower()
+        stderr_raw = (completed.stderr or "").strip()
+        stderr = stderr_raw.lower()
         if any(
             marker in stderr
             for marker in (
@@ -186,8 +195,13 @@ class MediaDemuxer:
             raise MediaDemuxPermanentError("Media has no usable audio or video stream")
         if "invalid data" in stderr or "error opening input" in stderr:
             raise MediaDemuxPermanentError("Media file is invalid for demux")
+        if "unable to choose an output format" in stderr:
+            raise MediaDemuxPermanentError(
+                "ffmpeg could not determine an output container format for demux"
+            )
+        detail = f": {stderr_raw[-300:]}" if stderr_raw else ""
         raise MediaDemuxError(
-            f"ffmpeg demux failed with exit code {completed.returncode}"
+            f"ffmpeg demux failed with exit code {completed.returncode}{detail}"
         )
 
     def _derived_path(
@@ -224,11 +238,20 @@ class MediaDemuxer:
             return False
 
     @staticmethod
+    def _video_output_suffix(source: Path) -> str:
+        suffix = source.suffix.lower()
+        if suffix in {".mp4", ".m4v", ".webm", ".mkv", ".mov", ".avi"}:
+            return suffix
+        return ".mp4"
+
+    @staticmethod
     def _guess_video_mime(path: Path) -> str | None:
         suffix = path.suffix.lower()
         return {
             ".mp4": "video/mp4",
+            ".m4v": "video/mp4",
             ".webm": "video/webm",
             ".mkv": "video/x-matroska",
             ".mov": "video/quicktime",
+            ".avi": "video/x-msvideo",
         }.get(suffix)

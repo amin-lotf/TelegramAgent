@@ -116,8 +116,10 @@ class TelegramClient:
                 f"Telegram returned an invalid {method} response"
             ) from exc
         if not isinstance(payload, dict) or payload.get("ok") is not True:
+            description = payload.get("description") if isinstance(payload, dict) else None
+            detail = f": {description}" if isinstance(description, str) and description else ""
             raise TelegramDownloadPermanentError(
-                f"Telegram could not accept the {method} upload"
+                f"Telegram could not accept the {method} upload{detail}"
             )
 
     def get_file(self, file_id: str) -> TelegramFile:
@@ -135,7 +137,11 @@ class TelegramClient:
         except ValueError as exc:
             raise TelegramDownloadPermanentError("Telegram returned an invalid getFile response") from exc
         if not isinstance(payload, dict) or payload.get("ok") is not True:
-            raise TelegramDownloadPermanentError("Telegram could not resolve the requested file")
+            description = payload.get("description") if isinstance(payload, dict) else None
+            detail = f": {description}" if isinstance(description, str) and description else ""
+            raise TelegramDownloadPermanentError(
+                f"Telegram could not resolve the requested file{detail}"
+            )
         result = payload.get("result")
         if not isinstance(result, dict):
             raise TelegramDownloadPermanentError("Telegram returned an invalid getFile result")
@@ -152,6 +158,14 @@ class TelegramClient:
         file_path: str,
         chunk_size: int,
     ) -> Iterator[TelegramFileStream]:
+        # Local Bot API (--local) returns absolute paths from getFile. Those files
+        # are already on disk; the HTTP /file/bot... endpoint returns 404 for them.
+        # Read directly when the path is absolute and present.
+        local_path = Path(file_path)
+        if local_path.is_absolute():
+            yield from self._stream_local_file(local_path, chunk_size=chunk_size)
+            return
+
         try:
             with httpx.Client(timeout=self._timeout) as client:
                 with client.stream("GET", self._file_url(file_path)) as response:
@@ -163,6 +177,40 @@ class TelegramClient:
                     )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             raise TelegramDownloadError("Telegram file download was interrupted") from exc
+
+    def _stream_local_file(
+        self,
+        local_path: Path,
+        *,
+        chunk_size: int,
+    ) -> Iterator[TelegramFileStream]:
+        try:
+            if not local_path.is_file() or local_path.is_symlink():
+                raise TelegramDownloadPermanentError(
+                    "Local Bot API file path is missing or not a regular file. "
+                    "Ensure the telegram-bot-api data volume is mounted into this service."
+                )
+            size = local_path.stat().st_size
+            if size <= 0:
+                raise TelegramDownloadPermanentError("Local Bot API file is empty")
+
+            def chunks() -> Iterator[bytes]:
+                with local_path.open("rb") as handle:
+                    while True:
+                        data = handle.read(chunk_size)
+                        if not data:
+                            break
+                        yield data
+
+            yield TelegramFileStream(
+                mime_type=None,
+                content_length=size,
+                chunks=chunks(),
+            )
+        except OSError as exc:
+            raise TelegramDownloadError(
+                "Unable to read file from local Bot API storage"
+            ) from exc
 
     @staticmethod
     def _mime_type(value: str | None) -> str | None:
@@ -178,10 +226,24 @@ class TelegramClient:
             return None
 
     def _raise_for_telegram_status(self, response: httpx.Response, *, operation: str) -> None:
+        if response.status_code < 400:
+            return
+        body_preview = ""
+        try:
+            text = response.text
+            if text:
+                body_preview = f" ({text[:300]})"
+        except Exception:
+            body_preview = ""
         if response.status_code >= 500:
-            raise TelegramDownloadError(f"Telegram {operation} returned a server error")
-        if response.status_code >= 400:
-            raise TelegramDownloadPermanentError(f"Telegram {operation} was rejected")
+            raise TelegramDownloadError(
+                f"Telegram {operation} returned a server error "
+                f"(HTTP {response.status_code}){body_preview}"
+            )
+        raise TelegramDownloadPermanentError(
+            f"Telegram {operation} was rejected "
+            f"(HTTP {response.status_code}){body_preview}"
+        )
 
     def _file_url(self, file_path: str) -> str:
         # This token-bearing URL is never logged or persisted.

@@ -17,6 +17,8 @@ services:
 
     volumes:
       - ../..:/app
+      # Local Bot API (--local) stores downloaded media as absolute paths under this dir.
+      - telegram_bot_api_data:/var/lib/telegram-bot-api:ro
     networks:
       - fatol-net
 
@@ -104,6 +106,9 @@ services:
       - ../..:/app
     networks:
       - fatol-net
+
+volumes:
+  telegram_bot_api_data:
 
 networks:
   fatol-net:

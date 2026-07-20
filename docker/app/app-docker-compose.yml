@@ -36,6 +36,8 @@ services:
     command: python -m uvicorn telegram_agent.core.content_processing.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
     volumes:
       - ../..:/app
+      # Shared with local Bot API for absolute file_path access from getFile (--local).
+      - telegram_bot_api_data:/var/lib/telegram-bot-api:ro
     networks:
       - fatol-net
   agent-runtime:
@@ -80,5 +82,8 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+volumes:
+  telegram_bot_api_data:
+
 networks:
   fatol-net:

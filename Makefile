@@ -5,6 +5,7 @@ COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 
 .PHONY: up up-build down down-v restart ps logs \
         logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx \
+        logs-telegram-bot-api \
         shell-celery \
         migrate-telegram-auth migrate-telegram-ingress migrate-content_processing migrate-agent-runtime \
         heads-telegram-ingress \
@@ -55,6 +56,9 @@ logs-vllm:
 
 logs-whisperx:
 	$(COMPOSE) logs -f --tail=100 whisperx
+
+logs-telegram-bot-api:
+	$(COMPOSE) logs -f --tail=100 telegram-bot-api
 
 
 

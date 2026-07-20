@@ -6,7 +6,18 @@ from alembic import context
 from dotenv import load_dotenv
 
 from telegram_agent.core.common.db.base import Base
-from telegram_agent.core.content_processing.db.models.content_processing import Job,TelegramSource,MediaAsset,OutboxEvent,Transcript,TranscriptSegment # noqa: F401
+from telegram_agent.core.content_processing.db.models.content_processing import (  # noqa: F401
+    Job,
+    TelegramSource,
+    MediaAsset,
+    OutboxEvent,
+    Transcript,
+    TranscriptSegment,
+    DownloadRequest,
+    SubtitleTranslation,
+    TranslationBatch,
+    TranslatedSegment,
+)
 
 load_dotenv()
 

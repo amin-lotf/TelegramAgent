@@ -6,8 +6,14 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from telegram_agent.core.llm_gateway.api.v1.fastapi_app import create_app
+from telegram_agent.core.llm_gateway.api.v1.glossary_extraction.dependencies import (
+    get_glossary_extraction_service,
+)
 from telegram_agent.core.llm_gateway.api.v1.message_grouping.dependencies import (
     get_message_grouping_service,
+)
+from telegram_agent.core.llm_gateway.api.v1.subtitle_translation.dependencies import (
+    get_subtitle_translation_service,
 )
 from telegram_agent.core.llm_gateway.common.commands import GenerateCommand
 from telegram_agent.core.llm_gateway.common.results import GenerateResult, LLMTokenUsage
@@ -86,3 +92,97 @@ async def test_message_grouping_returns_structured_output_and_request_id() -> No
     assert body["request_id"] == response.headers["X-Request-ID"]
     assert service.commands[0].system_prompt == "system"
     assert service.commands[0].user_prompt == "user"
+
+
+@pytest.mark.asyncio
+async def test_glossary_extraction_returns_structured_output() -> None:
+    app = create_app()
+    set_expected_api_token(app, "gateway-token")
+    service = StubGenerationService()
+    service_output = {
+        "entries": [
+            {
+                "source_term": "Alice",
+                "preferred_translation": "آلیس",
+                "category": "person",
+                "expansion": None,
+                "notes": None,
+            }
+        ],
+        "tone_guidance": "Spoken style",
+    }
+
+    class GlossaryStub(StubGenerationService):
+        async def generate(self, command: GenerateCommand) -> GenerateResult:
+            self.commands.append(command)
+            return GenerateResult(
+                request_id=command.request_id,
+                output=service_output,
+                provider="stub",
+                model="stub-model",
+                provider_request_id="provider-request",
+                usage=LLMTokenUsage(input_tokens=5, output_tokens=3, total_tokens=8),
+            )
+
+    glossary_service = GlossaryStub()
+
+    async def override_service() -> GlossaryStub:
+        return glossary_service
+
+    app.dependency_overrides[get_glossary_extraction_service] = override_service
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/v1/glossary-extraction",
+            headers={"Authorization": "Bearer gateway-token"},
+            json=_payload(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["output"] == service_output
+
+
+@pytest.mark.asyncio
+async def test_subtitle_translation_returns_structured_output() -> None:
+    app = create_app()
+    set_expected_api_token(app, "gateway-token")
+    service_output = {
+        "translations": [
+            {"segment_index": 0, "text": "سلام"},
+        ]
+    }
+
+    class TranslateStub(StubGenerationService):
+        async def generate(self, command: GenerateCommand) -> GenerateResult:
+            self.commands.append(command)
+            return GenerateResult(
+                request_id=command.request_id,
+                output=service_output,
+                provider="stub",
+                model="stub-model",
+                provider_request_id="provider-request",
+                usage=LLMTokenUsage(input_tokens=5, output_tokens=3, total_tokens=8),
+            )
+
+    translate_service = TranslateStub()
+
+    async def override_service() -> TranslateStub:
+        return translate_service
+
+    app.dependency_overrides[get_subtitle_translation_service] = override_service
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/v1/subtitle-translation",
+            headers={"Authorization": "Bearer gateway-token"},
+            json=_payload(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["output"] == service_output

@@ -40,8 +40,9 @@ class SubtitlePreparationService:
     render that as a large block. This service reflows text into short cues
     before writing SRT (later converted to styled ASS and muxed into MKV).
 
-    Extension point: accept ``target_language`` and, later, translate segment
-    text before reflow. This version never translates — it only formats.
+    This service is deterministic and never calls an LLM. Callers must pass
+    already-translated (or original) segments. ``target_language`` is retained
+    for metadata/future formatting variants only.
     """
 
     def __init__(
@@ -73,7 +74,7 @@ class SubtitlePreparationService:
         segments: list[TranscriptSegment] | list[SubtitleSegment],
         target_language: str | None,
     ) -> str:
-        # target_language is reserved for future translation; unused for now.
+        # target_language is unused by deterministic reflow/formatting.
         _ = target_language
 
         if not segments:

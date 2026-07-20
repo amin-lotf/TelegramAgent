@@ -17,6 +17,8 @@ from telegram_agent.core.content_processing.common.types import (
     JobKind,
     MediaAssetRole,
     OutboxEventStatus,
+    SubtitleTranslationStatus,
+    TranslationBatchStatus,
 )
 
 
@@ -640,5 +642,302 @@ class TranscriptSegment(Base):
             "transcript_id",
             "start_ms",
             "end_ms",
+        ),
+    )
+
+
+class SubtitleTranslation(Base):
+    __tablename__ = "subtitle_translations"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    job: Mapped[Job] = relationship()
+
+    source_language: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+
+    target_language: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    status: Mapped[SubtitleTranslationStatus] = mapped_column(
+        sa.Enum(
+            SubtitleTranslationStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        default=SubtitleTranslationStatus.PENDING,
+        server_default=SubtitleTranslationStatus.PENDING.value,
+        nullable=False,
+    )
+
+    glossary: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    model_name: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    batches: Mapped[list["TranslationBatch"]] = relationship(
+        back_populates="subtitle_translation",
+        cascade="all, delete-orphan",
+        order_by="TranslationBatch.batch_index",
+    )
+
+    segments: Mapped[list["TranslatedSegment"]] = relationship(
+        back_populates="subtitle_translation",
+        cascade="all, delete-orphan",
+        order_by="TranslatedSegment.segment_index",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "target_language",
+            name="uq_subtitle_translations_job_language",
+        ),
+    )
+
+
+class TranslationBatch(Base):
+    __tablename__ = "translation_batches"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    subtitle_translation_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("subtitle_translations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    batch_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    start_segment_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    end_segment_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    status: Mapped[TranslationBatchStatus] = mapped_column(
+        sa.Enum(
+            TranslationBatchStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        default=TranslationBatchStatus.PENDING,
+        server_default=TranslationBatchStatus.PENDING.value,
+        nullable=False,
+    )
+
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=sa.text("0"),
+        nullable=False,
+    )
+
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    locked_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    provider_request_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    input_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    output_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    subtitle_translation: Mapped["SubtitleTranslation"] = relationship(
+        back_populates="batches",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "subtitle_translation_id",
+            "batch_index",
+            name="uq_translation_batches_translation_index",
+        ),
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_translation_batches_idempotency_key",
+        ),
+        CheckConstraint(
+            "batch_index >= 0",
+            name="ck_translation_batches_batch_index_non_negative",
+        ),
+        CheckConstraint(
+            "start_segment_index >= 0",
+            name="ck_translation_batches_start_segment_non_negative",
+        ),
+        CheckConstraint(
+            "end_segment_index >= start_segment_index",
+            name="ck_translation_batches_end_after_start",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_translation_batches_attempt_count_non_negative",
+        ),
+        Index(
+            "ix_translation_batches_claimable",
+            "subtitle_translation_id",
+            "status",
+            "batch_index",
+        ),
+        Index(
+            "ix_translation_batches_processing_lease",
+            "locked_at",
+            postgresql_where=sa.text("status = 'processing'"),
+        ),
+    )
+
+
+class TranslatedSegment(Base):
+    __tablename__ = "translated_segments"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    subtitle_translation_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("subtitle_translations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    segment_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    start_ms: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    end_ms: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    subtitle_translation: Mapped["SubtitleTranslation"] = relationship(
+        back_populates="segments",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "subtitle_translation_id",
+            "segment_index",
+            name="uq_translated_segments_translation_index",
+        ),
+        CheckConstraint(
+            "segment_index >= 0",
+            name="ck_translated_segments_index_non_negative",
+        ),
+        CheckConstraint(
+            "start_ms >= 0",
+            name="ck_translated_segments_start_ms_non_negative",
+        ),
+        CheckConstraint(
+            "end_ms >= start_ms",
+            name="ck_translated_segments_end_after_start",
         ),
     )

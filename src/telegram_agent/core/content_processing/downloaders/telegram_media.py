@@ -46,7 +46,12 @@ class TelegramMediaDownloader:
         if telegram_file.size_bytes is not None and telegram_file.size_bytes > self._max_bytes:
             raise TelegramDownloadPermanentError("Telegram file exceeds configured download size")
 
-        final_path = self._final_path(context.job_id, context.media_asset_id, telegram_file.path)
+        final_path = self._final_path(
+            context.job_id,
+            context.media_asset_id,
+            telegram_file.path,
+            media_type=context.media_type,
+        )
         if self._valid_existing_file(final_path):
             return MediaDownloadResult(str(final_path), final_path.stat().st_size, None)
         return self._store_stream(file_path=telegram_file.path, final_path=final_path)
@@ -89,16 +94,47 @@ class TelegramMediaDownloader:
         except OSError as exc:
             self._raise_storage_error(exc, "Unable to create media storage directory")
 
-    def _final_path(self, job_id: UUID, asset_id: UUID, remote_path: str) -> Path:
-        suffix = Path(remote_path).suffix.lower()
-        if not suffix or len(suffix) > 16 or not suffix.replace(".", "").isalnum():
-            suffix = ".bin"
+    def _final_path(
+        self,
+        job_id: UUID,
+        asset_id: UUID,
+        remote_path: str,
+        *,
+        media_type: str,
+    ) -> Path:
+        suffix = self._resolve_suffix(remote_path, media_type=media_type)
         path = (self._storage_root / str(job_id) / f"{asset_id}{suffix}").resolve()
         try:
             path.relative_to(self._storage_root)
         except ValueError as exc:
             raise StorageError("Resolved media path is outside storage root") from exc
         return path
+
+    @staticmethod
+    def _resolve_suffix(remote_path: str, *, media_type: str) -> str:
+        """Pick a container extension ffmpeg and downstream tools can handle.
+
+        Local Bot API (--local) often returns absolute paths without an extension
+        (e.g. .../videos/file_1). Saving those as .bin makes video remux fail.
+        """
+        suffix = Path(remote_path).suffix.lower()
+        if suffix and len(suffix) <= 16 and suffix.replace(".", "").isalnum():
+            # Treat opaque placeholders as missing so we can map from media type.
+            if suffix not in {".bin", ".dat", ".tmp", ".part"}:
+                return suffix
+
+        media = media_type.lower()
+        if media in {"video", "video_note"}:
+            return ".mp4"
+        if media == "voice":
+            return ".ogg"
+        if media == "audio":
+            return ".mp3"
+        if media == "photo":
+            return ".jpg"
+        if media == "animation":
+            return ".mp4"
+        return ".bin"
 
     def _validate_content_length(self, stream: TelegramFileStream) -> None:
         if stream.content_length is not None and stream.content_length > self._max_bytes:

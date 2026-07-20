@@ -3,6 +3,7 @@ name: fatol
 
 include:
   - path: ./docker/storage/storage-docker-compose.yml
+  - path: ./docker/telegram_bot_api/telegram-bot-api-docker-compose.yml
   - path: ./docker/n8n/n8n-docker-compose.yml
   - path: ./docker/app/app-docker-compose.yml
   - path: ./docker/app/celery-docker-compose.yml

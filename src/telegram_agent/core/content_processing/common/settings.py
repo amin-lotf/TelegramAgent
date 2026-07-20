@@ -26,6 +26,20 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_JOB_EXPECTATION_SWEEP_INTERVAL_SECONDS,
     DEFAULT_JOB_EXPECTATION_SWEEP_LEASE_SECONDS,
     DEFAULT_JOB_EXPECTATION_VOICE_VIDEO_NOTE_SECONDS,
+    DEFAULT_LLM_GATEWAY_BASE_URL,
+    DEFAULT_LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_SUBTITLE_GLOSSARY_MAX_ENTRIES,
+    DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS,
+    DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS_LONG,
+    DEFAULT_SUBTITLE_GLOSSARY_OVERLAP_RATIO,
+    DEFAULT_SUBTITLE_GLOSSARY_WINDOW_TOKEN_BUDGET,
+    DEFAULT_SUBTITLE_TRANSLATION_BATCH_LEASE_SECONDS,
+    DEFAULT_SUBTITLE_TRANSLATION_ENABLED,
+    DEFAULT_SUBTITLE_TRANSLATION_LOOKAHEAD,
+    DEFAULT_SUBTITLE_TRANSLATION_MAX_BATCH_ATTEMPTS,
+    DEFAULT_SUBTITLE_TRANSLATION_MAX_SEGMENTS_PER_BATCH,
+    DEFAULT_SUBTITLE_TRANSLATION_MAX_SOURCE_TOKENS,
+    DEFAULT_SUBTITLE_TRANSLATION_PREVIOUS_CONTEXT,
     DEFAULT_TELEGRAM_INGRESS_BASE_URL,
     DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
 )
@@ -260,8 +274,123 @@ class Settings(BaseSettings):
         description="Logging level for the application.",
     )
 
-
-
+    llm_gateway_base_url: str = Field(
+        default=DEFAULT_LLM_GATEWAY_BASE_URL,
+        validation_alias=AliasChoices("LLM_GATEWAY_BASE_URL", "llm_gateway_base_url"),
+        description="Base URL for the LLM gateway service API.",
+    )
+    llm_gateway_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LLM_GATEWAY_SERVICE_TOKEN",
+            "llm_gateway_service_token",
+        ),
+        description="API token for accessing the LLM gateway service.",
+    )
+    llm_gateway_request_timeout_seconds: float = Field(
+        default=DEFAULT_LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS",
+            "llm_gateway_request_timeout_seconds",
+        ),
+        gt=0,
+    )
+    subtitle_translation_enabled: bool = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_ENABLED,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_ENABLED",
+            "subtitle_translation_enabled",
+        ),
+    )
+    subtitle_translation_max_source_tokens: int = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_MAX_SOURCE_TOKENS,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_MAX_SOURCE_TOKENS",
+            "subtitle_translation_max_source_tokens",
+        ),
+        gt=0,
+    )
+    subtitle_translation_max_segments_per_batch: int = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_MAX_SEGMENTS_PER_BATCH,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_MAX_SEGMENTS_PER_BATCH",
+            "subtitle_translation_max_segments_per_batch",
+        ),
+        gt=0,
+    )
+    subtitle_translation_previous_context: int = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_PREVIOUS_CONTEXT,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_PREVIOUS_CONTEXT",
+            "subtitle_translation_previous_context",
+        ),
+        ge=0,
+    )
+    subtitle_translation_lookahead: int = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_LOOKAHEAD,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_LOOKAHEAD",
+            "subtitle_translation_lookahead",
+        ),
+        ge=0,
+    )
+    subtitle_glossary_max_windows: int = Field(
+        default=DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS,
+        validation_alias=AliasChoices(
+            "SUBTITLE_GLOSSARY_MAX_WINDOWS",
+            "subtitle_glossary_max_windows",
+        ),
+        gt=0,
+    )
+    subtitle_glossary_max_windows_long: int = Field(
+        default=DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS_LONG,
+        validation_alias=AliasChoices(
+            "SUBTITLE_GLOSSARY_MAX_WINDOWS_LONG",
+            "subtitle_glossary_max_windows_long",
+        ),
+        gt=0,
+    )
+    subtitle_glossary_window_token_budget: int = Field(
+        default=DEFAULT_SUBTITLE_GLOSSARY_WINDOW_TOKEN_BUDGET,
+        validation_alias=AliasChoices(
+            "SUBTITLE_GLOSSARY_WINDOW_TOKEN_BUDGET",
+            "subtitle_glossary_window_token_budget",
+        ),
+        gt=0,
+    )
+    subtitle_glossary_overlap_ratio: float = Field(
+        default=DEFAULT_SUBTITLE_GLOSSARY_OVERLAP_RATIO,
+        validation_alias=AliasChoices(
+            "SUBTITLE_GLOSSARY_OVERLAP_RATIO",
+            "subtitle_glossary_overlap_ratio",
+        ),
+        ge=0,
+        lt=0.5,
+    )
+    subtitle_glossary_max_entries: int = Field(
+        default=DEFAULT_SUBTITLE_GLOSSARY_MAX_ENTRIES,
+        validation_alias=AliasChoices(
+            "SUBTITLE_GLOSSARY_MAX_ENTRIES",
+            "subtitle_glossary_max_entries",
+        ),
+        gt=0,
+    )
+    subtitle_translation_batch_lease_seconds: int = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_BATCH_LEASE_SECONDS,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_BATCH_LEASE_SECONDS",
+            "subtitle_translation_batch_lease_seconds",
+        ),
+        gt=0,
+    )
+    subtitle_translation_max_batch_attempts: int = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_MAX_BATCH_ATTEMPTS,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_MAX_BATCH_ATTEMPTS",
+            "subtitle_translation_max_batch_attempts",
+        ),
+        gt=0,
+    )
 
     @model_validator(mode="before")
     @classmethod

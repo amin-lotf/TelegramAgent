@@ -1,0 +1,26 @@
+services:
+  telegram-bot-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram_bot_api
+    env_file:
+      - .env.telegram_bot_api.docker
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    networks:
+      - fatol-net
+    restart: unless-stopped
+    healthcheck:
+      # Any TCP/HTTP response means the process is listening (404/401 is fine).
+      test: ["CMD", "curl", "-sS", "-o", "/dev/null", "http://127.0.0.1:8081/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  telegram_bot_api_data:
+
+networks:
+  fatol-net:

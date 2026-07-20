@@ -53,3 +53,18 @@ class OutboxEventStatus(StrEnum):
     PROCESSING = "processing"
     PUBLISHED = "published"
     FAILED = "failed"
+
+
+class SubtitleTranslationStatus(StrEnum):
+    PENDING = "pending"
+    BUILDING_GLOSSARY = "building_glossary"
+    TRANSLATING = "translating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class TranslationBatchStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"

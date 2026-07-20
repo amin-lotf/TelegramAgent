@@ -84,3 +84,50 @@ class DownloadAgentResponse(BaseModel):
     requested_dub_language: str | None = None
     requested_language: str | None = None
     requested_format: str | None = None
+
+
+class GlossaryTermCategory(StrEnum):
+    PERSON = "person"
+    ORGANIZATION = "organization"
+    PRODUCT = "product"
+    ABBREVIATION = "abbreviation"
+    TECHNICAL = "technical"
+    OTHER = "other"
+
+
+class GlossaryEntry(BaseModel):
+    """One glossary term with preferred target-language rendering."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_term: str = Field(min_length=1, max_length=200)
+    preferred_translation: str = Field(min_length=1, max_length=200)
+    category: GlossaryTermCategory = GlossaryTermCategory.OTHER
+    expansion: str | None = Field(default=None, max_length=300)
+    notes: str | None = Field(default=None, max_length=300)
+
+
+class GlossaryExtractionResponse(BaseModel):
+    """Structured glossary extraction for subtitle translation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    entries: list[GlossaryEntry] = Field(default_factory=list, max_length=200)
+    tone_guidance: str | None = Field(default=None, max_length=500)
+
+
+class SubtitleTranslationItem(BaseModel):
+    """One translated subtitle segment (text only; timings are never model-owned)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    segment_index: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=4_000)
+
+
+class SubtitleBatchTranslationResponse(BaseModel):
+    """Structured batch translation output for subtitle segments."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    translations: list[SubtitleTranslationItem] = Field(min_length=1, max_length=50)
