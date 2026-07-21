@@ -4196,7 +4196,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'apps'", specifier = ">=0.50.1" },
     { name = "whisperx", marker = "extra == 'whisperx'", specifier = ">=3.8.6" },
 ]
-provides-extras = ["apps", "dev", "agent-runtime", "llm-gateway", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "admin-dashboard", "admin-dashboard-v2", "migration"]
+provides-extras = ["apps", "dev", "agent-runtime", "llm-gateway", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "chunking", "admin-dashboard", "admin-dashboard-v2", "migration"]
 
 [[package]]
 name = "tenacity"

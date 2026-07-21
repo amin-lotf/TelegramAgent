@@ -8,7 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, \
     DEFAULT_ALLOWED_ORIGINS, \
     DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_REDIS_URL, DEFAULT_MEDIA_STORAGE_ROOT, \
-    DEFAULT_TELEGRAM_API_BASE_URL, DEFAULT_WHISPERX_BASE_URL, DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, \
+    DEFAULT_TELEGRAM_API_BASE_URL, DEFAULT_WHISPERX_BASE_URL, DEFAULT_CHUNKING_BASE_URL, \
+    DEFAULT_CHUNKING_REQUEST_TIMEOUT_SECONDS, DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, \
     DEFAULT_MEDIA_DOWNLOAD_CHUNK_SIZE, DEFAULT_MEDIA_HTTP_CONNECT_TIMEOUT_SECONDS, \
     DEFAULT_MEDIA_HTTP_READ_TIMEOUT_SECONDS, DEFAULT_MEDIA_HTTP_WRITE_TIMEOUT_SECONDS, \
     DEFAULT_MEDIA_HTTP_POOL_TIMEOUT_SECONDS, DEFAULT_MEDIA_PROCESSING_LEASE_SECONDS, \
@@ -91,6 +92,12 @@ class Settings(BaseSettings):
         description="API token for accessing the whisperx service API.",
     )
 
+    chunking_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CHUNKING_SERVICE_TOKEN", "chunking_service_token"),
+        description="API token for accessing the chunking service API.",
+    )
+
     telegram_api_base_url: str = Field(default=DEFAULT_TELEGRAM_API_BASE_URL, validation_alias=AliasChoices("TELEGRAM_API_BASE_URL", "telegram_api_base_url"))
     media_storage_root: str = Field(default=DEFAULT_MEDIA_STORAGE_ROOT, validation_alias=AliasChoices("MEDIA_STORAGE_ROOT", "media_storage_root"))
     media_download_max_bytes: int = Field(default=DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, validation_alias=AliasChoices("MEDIA_DOWNLOAD_MAX_BYTES", "media_download_max_bytes"), gt=0)
@@ -113,6 +120,19 @@ class Settings(BaseSettings):
         gt=0,
     )
     whisperx_base_url: str = Field(default=DEFAULT_WHISPERX_BASE_URL, validation_alias=AliasChoices("WHISPERX_BASE_URL", "whisperx_base_url"))
+    chunking_base_url: str = Field(
+        default=DEFAULT_CHUNKING_BASE_URL,
+        validation_alias=AliasChoices("CHUNKING_BASE_URL", "chunking_base_url"),
+        description="Base URL for the chunking service API.",
+    )
+    chunking_request_timeout_seconds: float = Field(
+        default=DEFAULT_CHUNKING_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "CHUNKING_REQUEST_TIMEOUT_SECONDS",
+            "chunking_request_timeout_seconds",
+        ),
+        gt=0,
+    )
     telegram_ingress_base_url: str = Field(
         default=DEFAULT_TELEGRAM_INGRESS_BASE_URL,
         validation_alias=AliasChoices(

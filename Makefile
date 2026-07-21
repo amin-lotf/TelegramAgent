@@ -37,7 +37,10 @@ logs-storage:
 	$(COMPOSE) logs -f --tail=100 telegram-ingress-migrate  telegram-auth-migrate n8n_postgres telegram_auth_postgres telegram_ingress_postgres  agent_runtime_postgres redis
 
 logs-app:
-	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime llm_gateway
+	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime llm_gateway chunking
+
+logs-chunking:
+	$(COMPOSE) logs -f --tail=100 chunking
 
 logs-admin-dashboard:
 	$(COMPOSE) logs -f --tail=100 admin-dashboard

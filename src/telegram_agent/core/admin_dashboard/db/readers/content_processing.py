@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telegram_agent.core.admin_dashboard.db.mappings import content_processing as tables
 from telegram_agent.core.admin_dashboard.services.view_models import (
+    ContentChunkRow,
     JobRow,
     MediaAssetRow,
     OutboxRow,
@@ -142,6 +143,43 @@ class ContentProcessingReader:
             duration_ms=row.duration_ms,
             segments=segments,
         )
+
+    async def list_chunks(self, job_id: UUID) -> list[ContentChunkRow]:
+        tbl = tables.content_chunks
+        result = await self._session.execute(
+            select(tbl)
+            .where(tbl.c.job_id == job_id)
+            .order_by(tbl.c.chunk_index.asc())
+        )
+        chunks: list[ContentChunkRow] = []
+        for row in result:
+            speakers_raw = row.speakers
+            speakers: tuple[str, ...] | None
+            if speakers_raw is None:
+                speakers = None
+            elif isinstance(speakers_raw, list):
+                speakers = tuple(str(item) for item in speakers_raw)
+            else:
+                speakers = (str(speakers_raw),)
+            chunks.append(
+                ContentChunkRow(
+                    id=row.id,
+                    job_id=row.job_id,
+                    content_type=row.content_type,
+                    chunk_index=row.chunk_index,
+                    text=row.text,
+                    start_ms=row.start_ms,
+                    end_ms=row.end_ms,
+                    char_count=row.char_count,
+                    token_count=row.token_count,
+                    segment_index_start=row.segment_index_start,
+                    segment_index_end=row.segment_index_end,
+                    speakers=speakers,
+                    strategy=row.strategy,
+                    created_at=row.created_at,
+                )
+            )
+        return chunks
 
     async def list_job_status_by_ingress_ids(
         self,

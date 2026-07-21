@@ -11,6 +11,7 @@ from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import get_enum_values
 from telegram_agent.core.content_processing.common.types import (
+    ContentChunkType,
     JobCompletionExpectationKind,
     JobCompletionExpectationStatus,
     JobStatus,
@@ -642,6 +643,129 @@ class TranscriptSegment(Base):
             "transcript_id",
             "start_ms",
             "end_ms",
+        ),
+    )
+
+
+class ContentChunk(Base):
+    __tablename__ = "content_chunks"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    job: Mapped[Job] = relationship()
+
+    content_type: Mapped[ContentChunkType] = mapped_column(
+        sa.Enum(
+            ContentChunkType,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=ContentChunkType.TRANSCRIPT,
+        server_default=ContentChunkType.TRANSCRIPT.value,
+    )
+
+    chunk_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    start_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    end_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    char_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    token_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    segment_index_start: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    segment_index_end: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    speakers: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    strategy: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+
+    chunk_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "content_type",
+            "chunk_index",
+            name="uq_content_chunks_job_type_index",
+        ),
+        CheckConstraint(
+            "chunk_index >= 0",
+            name="ck_content_chunks_chunk_index_non_negative",
+        ),
+        CheckConstraint(
+            "char_count >= 0",
+            name="ck_content_chunks_char_count_non_negative",
+        ),
+        CheckConstraint(
+            "start_ms IS NULL OR start_ms >= 0",
+            name="ck_content_chunks_start_ms_non_negative",
+        ),
+        CheckConstraint(
+            "end_ms IS NULL OR start_ms IS NULL OR end_ms >= start_ms",
+            name="ck_content_chunks_end_after_start",
+        ),
+        Index(
+            "ix_content_chunks_job_type",
+            "job_id",
+            "content_type",
         ),
     )
 

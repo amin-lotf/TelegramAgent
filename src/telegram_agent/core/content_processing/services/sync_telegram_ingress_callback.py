@@ -70,6 +70,7 @@ class SyncTelegramIngressCallbackService:
             if job is None or not job.callback_required:
                 return None
             if job.status not in (
+                JobStatus.CHUNKED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,
@@ -85,9 +86,10 @@ class SyncTelegramIngressCallbackService:
                 )
             source = sources[0]
 
+            success_statuses = (JobStatus.CHUNKED, JobStatus.COMPLETED)
             transcribed_text: str | None = None
             if (
-                job.status == JobStatus.COMPLETED
+                job.status in success_statuses
                 and source.attachment_type in _MESSAGE_ATTACHMENT_TYPES
             ):
                 transcript = uow.transcripts.get_by_job_id(job_id)
@@ -97,7 +99,7 @@ class SyncTelegramIngressCallbackService:
                     )
                 transcribed_text = transcript.text
 
-            if job.status == JobStatus.COMPLETED:
+            if job.status in success_statuses:
                 result_status = AttachmentProcessingResultStatus.COMPLETED
             elif job.status == JobStatus.TIMED_OUT:
                 result_status = AttachmentProcessingResultStatus.TIMED_OUT

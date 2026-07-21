@@ -75,6 +75,7 @@ CONTENT_PROCESSING_TABLES = (
     "translated_segments",
     "translation_batches",
     "subtitle_translations",
+    "content_chunks",
     "transcript_segments",
     "transcripts",
     "download_requests",
