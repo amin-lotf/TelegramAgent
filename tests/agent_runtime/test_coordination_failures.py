@@ -425,7 +425,7 @@ async def test_vague_messages_excluded_from_recent_window(
 
 
 @pytest.mark.asyncio
-async def test_recent_window_is_chronological_oldest_to_newest(
+async def test_latest_group_before_is_chronological_oldest_to_newest(
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
@@ -447,23 +447,31 @@ async def test_recent_window_is_chronological_oldest_to_newest(
         ),
     )
 
-    # Group first three so the fourth sees a multi-message window.
-    class AlwaysNew:
+    # Put first three into one group so the fourth sees the full latest group.
+    class SameGroupThenStop:
+        def __init__(self) -> None:
+            self.step = 0
+
         def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+            self.step += 1
+            if self.step == 1:
+                return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+            return CoordinatorDecision(
+                kind=CoordinatorDecisionKind.EXISTING,
+                group_number=1,
+            )
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(AlwaysNew()),
+        llm_gateway_client=coordinator_gateway(SameGroupThenStop()),
         settings=_settings(coordination_message_batch_size=3),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
     with agent_runtime_sync_sessionmaker() as session:
         repo = SyncSqlAlchemyRuntimeMessageRepository(session)
-        window = repo.list_recent_before(
+        window = repo.list_latest_group_before(
             chat_id=chat_id,
             before_message_id=40,
-            limit=10,
         )
     assert [m.message_id for m in window] == [10, 20, 30]
 

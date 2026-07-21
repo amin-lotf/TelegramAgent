@@ -18,13 +18,13 @@ from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.llm_gateway.common.schemas import MessageGroupingResponse
 
 
-def test_prompt_contains_current_message_chronological_window_and_allowed_groups() -> None:
-    recent = (
+def test_prompt_contains_current_message_latest_group_and_allowed_groups() -> None:
+    latest_group = (
         CoordinatorMessageView(
             ingress_message_id=uuid4(),
             message_id=10,
             text="first topic",
-            group_number=2,
+            group_number=3,
         ),
         CoordinatorMessageView(
             ingress_message_id=uuid4(),
@@ -43,14 +43,19 @@ def test_prompt_contains_current_message_chronological_window_and_allowed_groups
 
     prompts = build_message_grouping_prompts(
         current=current,
-        recent_window=recent,
+        latest_group_messages=latest_group,
     )
     payload = json.loads(prompts.user_prompt)
 
-    assert "Never invent a group number" in prompts.system_prompt
+    assert "Prefer new when continuity is weak" in prompts.system_prompt
+    assert "Users do not need to say" in prompts.system_prompt
     assert payload["current_message"]["message_id"] == 30
-    assert [item["message_id"] for item in payload["recent_messages_oldest_to_newest"]] == [10, 20]
-    assert payload["allowed_existing_group_numbers"] == [2, 3]
+    assert [
+        item["message_id"]
+        for item in payload["latest_group_messages_oldest_to_newest"]
+    ] == [10, 20]
+    assert payload["allowed_existing_group_numbers"] == [3]
+    assert "recent_messages_oldest_to_newest" not in payload
 
 
 def test_shared_decision_schema_requires_kind_and_nullable_group_number() -> None:

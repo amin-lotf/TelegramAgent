@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from datetime import timedelta
 from uuid import UUID, uuid4
@@ -671,3 +672,396 @@ async def test_does_not_coordinate_same_message_twice(
     assert coordination_events[0].status == OutboxEventStatus.PUBLISHED
     assert len(intent_events) == 1
     assert intent_events[0].status == OutboxEventStatus.PENDING
+
+
+class RecordingAlwaysNew:
+    """Records gateway calls; always returns NEW (used to prove deterministic skips)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
+        self.calls += 1
+        return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+
+
+@pytest.mark.asyncio
+async def test_reply_assigns_target_group_without_llm(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 5101
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="reply-assign",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=10,
+                text="older topic",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=20,
+                text="newer topic",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=30,
+                text="reply to older",
+                reply_message_id=10,
+            ),
+        ),
+    )
+
+    script = RecordingAlwaysNew()
+    gateway = coordinator_gateway(script)
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    # First two create separate groups via LLM; third is reply → deterministic.
+    assert result.results[0].group_number == 1
+    assert result.results[1].group_number == 2
+    assert result.results[2].group_number == 1
+    assert script.calls == 2
+    assert len(gateway.calls) == 2
+
+    with agent_runtime_sync_sessionmaker() as session:
+        messages = list(
+            session.scalars(
+                select(RuntimeMessage)
+                .where(RuntimeMessage.chat_id == chat_id)
+                .order_by(RuntimeMessage.message_id)
+            ).all()
+        )
+    assert messages[2].group_id == messages[0].group_id
+    assert messages[2].group_id != messages[1].group_id
+
+
+@pytest.mark.asyncio
+async def test_reply_to_missing_message_starts_new_group(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 5102
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="reply-missing",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text="hello",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=2,
+                text="reply to nowhere",
+                reply_message_id=9999,
+            ),
+        ),
+    )
+
+    script = RecordingAlwaysNew()
+    gateway = coordinator_gateway(script)
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    assert result.results[0].group_number == 1
+    assert result.results[1].group_number == 2
+    # Second decision is deterministic NEW (no gateway call).
+    assert script.calls == 1
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_second_exclusive_attachment_forces_new_group(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 5103
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="exclusive-second",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=10,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VIDEO,
+                    status="ready",
+                    file_id="vid1",
+                ),
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=20,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.DOCUMENT,
+                    status="ready",
+                    file_id="doc1",
+                ),
+            ),
+        ),
+    )
+
+    class AlwaysExistingLatest:
+        def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
+            if not recent_window:
+                return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+            return CoordinatorDecision(
+                kind=CoordinatorDecisionKind.EXISTING,
+                group_number=recent_window[-1].group_number,
+            )
+
+    script = AlwaysExistingLatest()
+    gateway = coordinator_gateway(script)
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    assert result.results[0].group_number == 1
+    assert result.results[1].group_number == 2
+    # Second message never hits the LLM.
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_photo_after_video_forces_new_group(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 5104
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="photo-after-video",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VIDEO,
+                    status="ready",
+                    file_id="vid",
+                ),
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=2,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.PHOTO,
+                    status="ready",
+                    file_id="photo",
+                ),
+            ),
+        ),
+    )
+
+    gateway = coordinator_gateway(AlwaysNew())
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    assert [item.group_number for item in result.results] == [1, 2]
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_voice_after_exclusive_can_join_via_llm(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 5105
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="voice-after-video",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VIDEO,
+                    status="ready",
+                    file_id="vid",
+                ),
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=2,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VOICE,
+                    status="ready",
+                    file_id="voice",
+                ),
+            ),
+        ),
+    )
+
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=coordinator_gateway(AdaptiveCoordinator()),
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    assert result.results[0].group_number == 1
+    assert result.results[1].group_number == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_prompt_only_includes_latest_group(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+) -> None:
+    chat_id = 5106
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="latest-only-prompt",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text="group one",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=2,
+                text="group two",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=3,
+                text="continue?",
+            ),
+        ),
+    )
+
+    script = AlwaysNew()
+    gateway = coordinator_gateway(script)
+    SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    third_prompt = json.loads(gateway.calls[2]["user_prompt"])
+    message_ids = [
+        item["message_id"]
+        for item in third_prompt["latest_group_messages_oldest_to_newest"]
+    ]
+    # AlwaysNew → each message is its own group; only message 2 is in the latest group.
+    assert message_ids == [2]
+    assert third_prompt["allowed_existing_group_numbers"] == [2]
+
+
+@pytest.mark.asyncio
+async def test_reply_exclusive_conflict_forces_new_group(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 5107
+    claim_token = await _ingest_and_claim(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="reply-exclusive",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=10,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VIDEO,
+                    status="ready",
+                    file_id="vid",
+                ),
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=20,
+                text="later",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=30,
+                text=None,
+                reply_message_id=10,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.AUDIO,
+                    status="ready",
+                    file_id="audio",
+                ),
+            ),
+        ),
+    )
+
+    gateway = coordinator_gateway(AlwaysNew())
+    result = SyncMessageGroupCoordinationService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    # First two via LLM (NEW each); third is reply+exclusive conflict → NEW without LLM.
+    assert result.results[0].group_number == 1
+    assert result.results[1].group_number == 2
+    assert result.results[2].group_number == 3
+    assert len(gateway.calls) == 2

@@ -45,33 +45,62 @@ class SyncSqlAlchemyRuntimeMessageRepository:
         )
         return list(self._session.scalars(statement).all())
 
-    def list_recent_before(
+    def get_by_chat_and_message_id(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+    ) -> RuntimeMessage | None:
+        statement = (
+            select(RuntimeMessage)
+            .where(
+                RuntimeMessage.chat_id == chat_id,
+                RuntimeMessage.message_id == message_id,
+            )
+            .options(joinedload(RuntimeMessage.group))
+        )
+        return self._session.scalars(statement).unique().one_or_none()
+
+    def list_latest_group_before(
         self,
         *,
         chat_id: int,
         before_message_id: int,
-        limit: int,
     ) -> list[RuntimeMessage]:
-        """Return up to ``limit`` successfully grouped messages before ``before_message_id``.
+        """Return all GROUPED messages in the latest group before ``before_message_id``.
 
-        Selection uses descending ``message_id`` for efficiency, then reverses so the
-        returned list is chronological (oldest → newest). Vague and pending messages
-        are excluded so they cannot influence later grouping decisions.
+        The latest group is the group of the newest successfully grouped message with
+        ``message_id < before_message_id``. Vague and pending messages are excluded
+        from both the latest-group discovery and the returned membership list.
+        Returns an empty list when no prior grouped message exists.
         """
-        statement = (
+        latest_statement = (
             select(RuntimeMessage)
             .where(
                 RuntimeMessage.chat_id == chat_id,
                 RuntimeMessage.message_id < before_message_id,
                 RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
+                RuntimeMessage.group_id.is_not(None),
             )
             .options(joinedload(RuntimeMessage.group))
             .order_by(RuntimeMessage.message_id.desc())
-            .limit(limit)
+            .limit(1)
         )
-        messages = list(self._session.scalars(statement).unique().all())
-        messages.reverse()
-        return messages
+        latest = self._session.scalars(latest_statement).unique().one_or_none()
+        if latest is None or latest.group_id is None:
+            return []
+
+        group_statement = (
+            select(RuntimeMessage)
+            .where(
+                RuntimeMessage.chat_id == chat_id,
+                RuntimeMessage.group_id == latest.group_id,
+                RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
+            )
+            .options(joinedload(RuntimeMessage.group))
+            .order_by(RuntimeMessage.message_id.asc())
+        )
+        return list(self._session.scalars(group_statement).unique().all())
 
     def list_for_chat_group(
         self,

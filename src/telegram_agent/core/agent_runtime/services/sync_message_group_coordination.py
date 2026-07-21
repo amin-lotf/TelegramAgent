@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from uuid import UUID
@@ -9,6 +9,9 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from telegram_agent.core.agent_runtime.clients.llm_gateway import LlmGatewayClient
+from telegram_agent.core.agent_runtime.common.const import (
+    GROUP_EXCLUSIVE_ATTACHMENT_TYPES,
+)
 from telegram_agent.core.agent_runtime.common.results import (
     ConversationCoordinationResult,
     MessageCoordinationResult,
@@ -37,6 +40,7 @@ from telegram_agent.core.common.exceptions import (
     PermanentAgentRuntimeCoordinationError,
     RetryableAgentRuntimeCoordinationError,
 )
+from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -195,34 +199,96 @@ class SyncMessageGroupCoordinationService:
             if coordinating is None:
                 return None
 
-            recent = uow.messages.list_recent_before(
+            current_view = self._to_view(message)
+            reply_target: RuntimeMessage | None = None
+            reply_target_group_messages: tuple[RuntimeMessage, ...] = ()
+            if message.reply_message_id is not None:
+                reply_target = uow.messages.get_by_chat_and_message_id(
+                    chat_id=chat_id,
+                    message_id=message.reply_message_id,
+                )
+                if (
+                    reply_target is not None
+                    and reply_target.coordination_status == CoordinationStatus.GROUPED
+                    and reply_target.group_id is not None
+                ):
+                    reply_target_group_messages = tuple(
+                        uow.messages.list_for_chat_group(
+                            chat_id=chat_id,
+                            group_id=reply_target.group_id,
+                        )
+                    )
+
+            latest_group_messages = uow.messages.list_latest_group_before(
                 chat_id=chat_id,
                 before_message_id=message.message_id,
-                limit=self._settings.coordination_recent_window_size,
             )
-            current_view = self._to_view(message)
-            recent_views = tuple(self._to_view(item) for item in recent)
+            # Optional prompt-size bound: keep the most recent messages in the group.
+            window_limit = self._settings.coordination_recent_window_size
+            if len(latest_group_messages) > window_limit:
+                latest_group_messages = latest_group_messages[-window_limit:]
+
+            latest_group_views = tuple(
+                self._to_view(item) for item in latest_group_messages
+            )
             allowed_group_numbers = {
                 view.group_number
-                for view in recent_views
+                for view in latest_group_views
                 if view.group_number is not None
             }
 
+            # Snapshot fields needed after the unit of work closes (detached ORM).
+            current_attachment_type = message.attachment_type
+            current_reply_message_id = message.reply_message_id
+            reply_target_status = (
+                None if reply_target is None else reply_target.coordination_status
+            )
+            reply_target_group_id = None if reply_target is None else reply_target.group_id
+            reply_target_group_number = (
+                None
+                if reply_target is None or reply_target.group is None
+                else reply_target.group.group_number
+            )
+            reply_group_has_exclusive = self._group_has_exclusive_attachment(
+                reply_target_group_messages
+            )
+            latest_group_has_exclusive = self._group_has_exclusive_attachment(
+                latest_group_messages
+            )
+
+        deterministic = self._resolve_deterministic_decision(
+            current_attachment_type=current_attachment_type,
+            current_reply_message_id=current_reply_message_id,
+            reply_target_status=reply_target_status,
+            reply_target_group_id=reply_target_group_id,
+            reply_target_group_number=reply_target_group_number,
+            reply_group_has_exclusive=reply_group_has_exclusive,
+            latest_group_has_exclusive=latest_group_has_exclusive,
+        )
+        if deterministic is not None and deterministic.kind == CoordinatorDecisionKind.EXISTING:
+            # Reply may target an older group not present in latest-group views.
+            if deterministic.group_number is not None:
+                allowed_group_numbers = {deterministic.group_number}
+
         try:
-            prompts = build_message_grouping_prompts(
-                current=current_view,
-                recent_window=recent_views,
-            )
-            generation = self._llm_gateway_client.coordinate_message_group(
-                system_prompt=prompts.system_prompt,
-                user_prompt=prompts.user_prompt,
-            )
-            try:
-                decision = CoordinatorDecision.model_validate(generation.output)
-            except ValidationError as exc:
-                raise RetryableAgentRuntimeCoordinationError(
-                    "LLM gateway returned an invalid coordination decision"
-                ) from exc
+            if deterministic is not None:
+                decision = deterministic
+            else:
+                prompts = build_message_grouping_prompts(
+                    current=current_view,
+                    latest_group_messages=latest_group_views,
+                )
+                generation = self._llm_gateway_client.coordinate_message_group(
+                    system_prompt=prompts.system_prompt,
+                    user_prompt=prompts.user_prompt,
+                )
+                try:
+                    decision = CoordinatorDecision.model_validate(generation.output)
+                except ValidationError as exc:
+                    raise RetryableAgentRuntimeCoordinationError(
+                        "LLM gateway returned an invalid coordination decision"
+                    ) from exc
+
             return self._apply_decision(
                 chat_id=chat_id,
                 runtime_message_id=runtime_message_id,
@@ -595,6 +661,65 @@ class SyncMessageGroupCoordinationService:
         maximum = timedelta(seconds=self._settings.outbox_retry_max_seconds)
         delay = base * (2 ** max(attempt_count, 0))
         return min(delay, maximum)
+
+    @staticmethod
+    def _is_exclusive_attachment(
+        attachment_type: TelegramAttachmentType | None,
+    ) -> bool:
+        return (
+            attachment_type is not None
+            and attachment_type in GROUP_EXCLUSIVE_ATTACHMENT_TYPES
+        )
+
+    @classmethod
+    def _group_has_exclusive_attachment(
+        cls,
+        messages: Sequence[RuntimeMessage],
+    ) -> bool:
+        return any(
+            cls._is_exclusive_attachment(message.attachment_type)
+            for message in messages
+        )
+
+    @classmethod
+    def _resolve_deterministic_decision(
+        cls,
+        *,
+        current_attachment_type: TelegramAttachmentType | None,
+        current_reply_message_id: int | None,
+        reply_target_status: CoordinationStatus | None,
+        reply_target_group_id: UUID | None,
+        reply_target_group_number: int | None,
+        reply_group_has_exclusive: bool,
+        latest_group_has_exclusive: bool,
+    ) -> CoordinatorDecision | None:
+        """Return a hard decision that must not call the LLM, or None to use LLM."""
+        if current_reply_message_id is not None:
+            if (
+                reply_target_status != CoordinationStatus.GROUPED
+                or reply_target_group_id is None
+                or reply_target_group_number is None
+            ):
+                return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+
+            if (
+                cls._is_exclusive_attachment(current_attachment_type)
+                and reply_group_has_exclusive
+            ):
+                return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+
+            return CoordinatorDecision(
+                kind=CoordinatorDecisionKind.EXISTING,
+                group_number=reply_target_group_number,
+            )
+
+        if (
+            cls._is_exclusive_attachment(current_attachment_type)
+            and latest_group_has_exclusive
+        ):
+            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
+
+        return None
 
     @staticmethod
     def _to_view(message: RuntimeMessage) -> CoordinatorMessageView:

@@ -20,14 +20,20 @@ class CoordinatorGatewayAdapter:
     def coordinate_message_group(self, **request: Any) -> LlmGatewayGeneration:
         self.calls.append(request)
         prompt = json.loads(request["user_prompt"])
+        if "latest_group_messages_oldest_to_newest" not in prompt:
+            raise AssertionError(
+                "Expected latest_group_messages_oldest_to_newest in user_prompt payload"
+            )
         current = CoordinatorMessageView.model_validate(prompt["current_message"])
-        recent_window = tuple(
+        latest_group_messages = tuple(
             CoordinatorMessageView.model_validate(item)
-            for item in prompt["recent_messages_oldest_to_newest"]
+            for item in prompt["latest_group_messages_oldest_to_newest"]
         )
+        # Decision scripts historically accept recent_window; it now holds only the
+        # latest group's messages (oldest → newest).
         decision = self._decision_script.assign_group(
             current=current,
-            recent_window=recent_window,
+            recent_window=latest_group_messages,
         )
         return LlmGatewayGeneration(
             request_id="gateway-request",

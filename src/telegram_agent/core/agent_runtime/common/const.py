@@ -1,8 +1,21 @@
 """Default (non-secret) configuration values used by BaseSettings."""
 from __future__ import annotations
 
+from telegram_agent.core.common.types import TelegramAttachmentType
+
 DEFAULT_SQLALCHEMY_DATABASE_URL = (
     "postgresql+asyncpg://postgres:postgres@localhost:5432/telegram_agent"
+)
+
+# One of these attachment types per conversation group. Voice/video_note are excluded
+# (they are typically transcribed into text). Distinct from download-handler media types.
+GROUP_EXCLUSIVE_ATTACHMENT_TYPES = frozenset(
+    {
+        TelegramAttachmentType.VIDEO,
+        TelegramAttachmentType.AUDIO,
+        TelegramAttachmentType.DOCUMENT,
+        TelegramAttachmentType.PHOTO,
+    }
 )
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:5678,"
