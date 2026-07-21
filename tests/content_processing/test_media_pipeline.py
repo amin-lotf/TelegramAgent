@@ -110,7 +110,22 @@ def test_non_transcribable_download_creates_completion_event(
     job_id, asset_id = _seed_job(
         content_sync_sessionmaker, TelegramAttachmentType.DOCUMENT
     )
-    _stub_telegram_downloader(monkeypatch, asset_id)
+
+    class FakeTelegramMediaDownloader:
+        @classmethod
+        def from_settings(cls, _settings):
+            return cls()
+
+        def download(self, _context):
+            # Plain document (not a video/audio container) completes without
+            # demux/transcription.
+            return MediaDownloadResult(f"/tmp/{asset_id}.pdf", 17, "application/pdf")
+
+    monkeypatch.setattr(
+        sync_telegram_media_download,
+        "TelegramMediaDownloader",
+        FakeTelegramMediaDownloader,
+    )
 
     SyncTelegramMediaDownloadService(
         uow_factory=content_sync_uow_factory, settings=settings
@@ -129,6 +144,62 @@ def test_non_transcribable_download_creates_completion_event(
         OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
     ]
     assert events[0].payload == {}
+
+
+def test_video_document_download_demuxes_and_queues_transcription(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    """MKV/etc. sent as Telegram document still demux + transcribe."""
+    job_id, asset_id = _seed_job(
+        content_sync_sessionmaker, TelegramAttachmentType.DOCUMENT
+    )
+
+    class FakeTelegramMediaDownloader:
+        @classmethod
+        def from_settings(cls, _settings):
+            return cls()
+
+        def download(self, _context):
+            return MediaDownloadResult(
+                f"/tmp/{asset_id}.mkv",
+                100,
+                "video/x-matroska",
+            )
+
+    monkeypatch.setattr(
+        sync_telegram_media_download,
+        "TelegramMediaDownloader",
+        FakeTelegramMediaDownloader,
+    )
+    _stub_media_demuxer(monkeypatch, asset_id)
+
+    result = SyncTelegramMediaDownloadService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+    ).execute(job_id=job_id, retry_count=0)
+
+    with content_sync_sessionmaker() as session:
+        job = session.get(Job, job_id)
+        assets = list(
+            session.scalars(select(MediaAsset).where(MediaAsset.job_id == job_id))
+        )
+        events = list(
+            session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id))
+        )
+
+    assert result.retryable is False
+    assert job is not None and job.status == JobStatus.DOWNLOADED
+    roles = {item.role for item in assets}
+    assert roles == {
+        MediaAssetRole.SOURCE,
+        MediaAssetRole.AUDIO,
+        MediaAssetRole.VIDEO,
+    }
+    assert [event.event_type for event in events] == [
+        OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value
+    ]
 
 
 def test_download_service_claims_once_and_returns_detached_source_context(
@@ -224,6 +295,68 @@ def test_transcription_service_persists_complete_supported_result(
     assert [event.event_type for event in events] == [
         OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
     ]
+
+
+def test_transcription_service_accepts_document_video_audio(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    """Video-as-document keeps media_type=document on demuxed audio assets."""
+    job_id, source_id = _seed_job(
+        content_sync_sessionmaker,
+        TelegramAttachmentType.DOCUMENT,
+        status=JobStatus.DOWNLOADED,
+        local_path="/tmp/source.mkv",
+    )
+    with content_sync_sessionmaker() as session:
+        session.add(
+            MediaAsset(
+                job_id=job_id,
+                role=MediaAssetRole.AUDIO,
+                parent_asset_id=source_id,
+                media_type=TelegramAttachmentType.DOCUMENT.value,
+                local_path="/tmp/source.audio.ogg",
+                mime_type="audio/ogg",
+                duration_ms=None,
+                size_bytes=11,
+            )
+        )
+        session.commit()
+
+    class FakeWhisperXClient:
+        def __init__(self, _settings) -> None:
+            pass
+
+        def transcribe(self, **_kwargs):
+            return TranscriptionResult(
+                text="from document video",
+                language="en",
+                language_probability=0.9,
+                duration_ms=1000,
+                segments=(
+                    TranscriptionSegmentResult(
+                        0, 1000, "from document video", "en", 0.9, None, None
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(sync_transcription_service, "WhisperXClient", FakeWhisperXClient)
+    result = SyncTranscriptionService(
+        uow_factory=content_sync_uow_factory, settings=settings
+    ).execute(job_id=job_id, retry_count=0)
+
+    with content_sync_sessionmaker() as session:
+        job = session.get(Job, job_id)
+        transcript = session.scalar(
+            select(Transcript).where(Transcript.job_id == job_id)
+        )
+
+    assert result.retryable is False
+    assert result.error_message is None
+    assert job is not None and job.status == JobStatus.COMPLETED
+    assert transcript is not None
+    assert transcript.text == "from document video"
 
 
 def test_transcription_service_prefers_audio_role_for_video(

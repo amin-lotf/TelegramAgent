@@ -283,7 +283,12 @@ class SyncDownloadPreparationService:
     def _source_matches_media_type(source: TelegramSource, media_type: str) -> bool:
         attachment = source.attachment_type.value
         if media_type == DownloadMediaType.VIDEO.value:
-            return attachment in _VIDEO_ATTACHMENT_TYPES
+            # Telegram frequently sends MKV/large video as document; those jobs
+            # still demux/transcribe and must match video download requests.
+            return (
+                attachment in _VIDEO_ATTACHMENT_TYPES
+                or attachment in _DOCUMENT_ATTACHMENT_TYPES
+            )
         if media_type == DownloadMediaType.AUDIO.value:
             return attachment in _AUDIO_ATTACHMENT_TYPES
         if media_type == DownloadMediaType.DOCUMENT.value:
@@ -422,10 +427,11 @@ class SyncDownloadPreparationService:
         retry_count: int,
         error_message: str,
     ) -> StageExecutionResult:
-        # Allow a longer retry budget when waiting for the source attachment job.
+        # Allow a longer retry budget when waiting for the source attachment job
+        # (long video transcription on CPU can take hours).
         waiting_for_source = "waiting" in error_message.lower()
         max_retries = (
-            36 if waiting_for_source else self._settings.media_task_max_retries
+            720 if waiting_for_source else self._settings.media_task_max_retries
         )
         if retry_count >= max_retries:
             message = "Download preparation retry limit exhausted"

@@ -279,10 +279,21 @@ class SyncContentProcessingHandoffService:
                     requested_language=_optional_str(payload.get("requested_language")),
                 )
             elif media_type == "document":
-                self._content_processing_client.submit_document_download(
-                    **common,
-                    requested_format=_optional_str(payload.get("requested_format")),
-                )
+                # When the user asks for subtitles/translation on a Telegram
+                # document (common for MKV), use the video download pipeline.
+                subtitle = _optional_str(payload.get("requested_subtitle_language"))
+                dub = _optional_str(payload.get("requested_dub_language"))
+                if subtitle or dub:
+                    self._content_processing_client.submit_video_download(
+                        **common,
+                        requested_subtitle_language=subtitle,
+                        requested_dub_language=dub,
+                    )
+                else:
+                    self._content_processing_client.submit_document_download(
+                        **common,
+                        requested_format=_optional_str(payload.get("requested_format")),
+                    )
             else:
                 raise PermanentAgentRuntimeCoordinationError(
                     f"Unsupported download media_type for handoff: {media_type}"

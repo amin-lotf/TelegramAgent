@@ -36,6 +36,18 @@ _TERMINAL_JOB_STATUSES = frozenset(
     }
 )
 
+# Jobs in these states may legitimately run longer than the initial SLA
+# (e.g. WhisperX on hour-long media on CPU). Extend rather than time out while
+# the stage lease is still fresh.
+_ACTIVE_JOB_STATUSES = frozenset(
+    {
+        JobStatus.QUEUED,
+        JobStatus.RUNNING,
+        JobStatus.DOWNLOADED,
+        JobStatus.TRANSCRIBING,
+    }
+)
+
 _TIMEOUT_ERROR_MESSAGE = "Job completion expectation timed out"
 
 
@@ -50,16 +62,24 @@ class SyncJobExpectationSweeper:
         batch_size: int,
         lease_timeout: timedelta,
         resolved_retention: timedelta,
+        active_grace: timedelta,
         lease_owner: str | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._batch_size = batch_size
         self._lease_timeout = lease_timeout
         self._resolved_retention = resolved_retention
+        self._active_grace = active_grace
         self._lease_owner = lease_owner or self._default_lease_owner()
 
     @classmethod
     def from_settings(cls) -> "SyncJobExpectationSweeper":
+        # Grace must cover the longest in-flight stage (WhisperX or media lease).
+        grace_seconds = max(
+            settings.media_processing_lease_seconds,
+            int(settings.whisperx_request_timeout_seconds),
+            settings.job_expectation_default_seconds,
+        )
         return cls(
             uow_factory=sync_content_processing_uow_factory,
             batch_size=settings.job_expectation_sweep_batch_size,
@@ -69,6 +89,7 @@ class SyncJobExpectationSweeper:
             resolved_retention=timedelta(
                 seconds=settings.job_expectation_resolved_retention_seconds
             ),
+            active_grace=timedelta(seconds=grace_seconds),
         )
 
     def sweep_once(self) -> JobExpectationSweepResult:
@@ -90,12 +111,15 @@ class SyncJobExpectationSweeper:
 
         timed_out = 0
         satisfied = 0
+        extended = 0
         for expectation in claimed:
             outcome = self._resolve_claimed(expectation)
             if outcome == "timed_out":
                 timed_out += 1
             elif outcome == "satisfied":
                 satisfied += 1
+            elif outcome == "extended":
+                extended += 1
 
         with self._uow_factory() as uow:
             deleted = uow.job_expectations.delete_resolved(
@@ -113,6 +137,7 @@ class SyncJobExpectationSweeper:
             claimed=len(claimed),
             timed_out=timed_out,
             satisfied=satisfied,
+            extended=extended,
             recovered_leases=recovered_count,
             deleted=deleted,
         )
@@ -135,6 +160,30 @@ class SyncJobExpectationSweeper:
                     )
                     return "skipped"
                 return "satisfied"
+
+            # Still actively processing: push the deadline instead of killing work.
+            if job.status in _ACTIVE_JOB_STATUSES:
+                last_touch = job.updated_at or job.created_at
+                if last_touch is not None and last_touch + self._active_grace >= utcnow():
+                    new_due = utcnow() + self._active_grace
+                    reopened = uow.job_expectations.reopen_with_due_at(
+                        expectation_id=expectation.id,
+                        lease_owner=self._lease_owner,
+                        due_at=new_due,
+                    )
+                    if reopened is not None:
+                        # Heartbeat so the next due sweep still sees a fresh lease.
+                        uow.jobs.touch(job_id=expectation.job_id)
+                        logger.info(
+                            "Extended job completion expectation for active job",
+                            extra={
+                                "expectation_id": str(expectation.id),
+                                "job_id": str(expectation.job_id),
+                                "job_status": job.status.value,
+                                "new_due_at": new_due.isoformat(),
+                            },
+                        )
+                        return "extended"
 
             if not uow.jobs.mark_timed_out(
                 job_id=expectation.job_id,

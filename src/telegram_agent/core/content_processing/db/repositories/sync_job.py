@@ -112,6 +112,26 @@ class SyncSqlAlchemyJobRepository:
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
 
+    def touch(self, *, job_id: UUID) -> bool:
+        """Refresh updated_at for a non-terminal job (heartbeat for long stages)."""
+        statement = (
+            update(Job)
+            .where(
+                Job.id == job_id,
+                Job.status.not_in(
+                    (
+                        JobStatus.COMPLETED,
+                        JobStatus.FAILED,
+                        JobStatus.TIMED_OUT,
+                        JobStatus.CANCELLED,
+                    )
+                ),
+            )
+            .values(updated_at=func.now())
+            .returning(Job.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
     def mark_timed_out(self, *, job_id: UUID, error_message: str) -> bool:
         statement = (
             update(Job)

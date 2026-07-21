@@ -21,11 +21,15 @@ Return only structured fields:
 Do not invent languages the user did not ask for. Keep assistant_text concise."""
 
 _DOCUMENT_SYSTEM_PROMPT = """Extract a download request for a document attachment.
+Telegram often delivers video files (especially MKV) as documents.
 Return only structured fields:
-- requested_format: preferred format if the user requested one, else null
+- requested_subtitle_language: language code/name for subtitles/translation, or null if unspecified
+- requested_dub_language: language code/name for dubbing/audio track, or null if unspecified
+- requested_format: preferred container/format if the user requested one, else null
 - assistant_text: short user-facing confirmation that the request is being prepared
 
-Do not invent formats the user did not ask for. Keep assistant_text concise."""
+Do not invent languages or formats the user did not ask for. Keep assistant_text concise.
+If the user asks for translation or subtitles, populate requested_subtitle_language."""
 
 
 @dataclass(frozen=True, slots=True)

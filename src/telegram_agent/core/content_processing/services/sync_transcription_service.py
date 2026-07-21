@@ -40,6 +40,9 @@ _TRANSCRIBABLE_ATTACHMENT_TYPES = frozenset(
         TelegramAttachmentType.VIDEO.value,
         TelegramAttachmentType.VIDEO_NOTE.value,
         TelegramAttachmentType.VOICE.value,
+        # Telegram often delivers MKV/large video as document. Download demuxes
+        # those and stores derived audio with media_type=document; still transcribe.
+        TelegramAttachmentType.DOCUMENT.value,
     }
 )
 
@@ -138,6 +141,14 @@ class SyncTranscriptionService:
                 uow.job_expectations.mark_satisfied(job_id=job_id)
                 self._enqueue_terminal_callback_in_uow(uow, job_id)
                 return None
+            # Long media on CPU WhisperX can exceed the initial SLA; keep the
+            # completion expectation open for at least one full request timeout.
+            uow.job_expectations.extend_due_at(
+                job_id=job_id,
+                extra=timedelta(
+                    seconds=int(self._settings.whisperx_request_timeout_seconds) + 120
+                ),
+            )
             return TranscriptionContext(
                 job_id=job_id,
                 media_asset_id=asset.id,

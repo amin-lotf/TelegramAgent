@@ -71,12 +71,15 @@ def build_lifecycle_and_timeline(
         download_status = _download_stage_status(job_status, content.status)
         stages.append(_stage("media_download", "Media downloaded", "content_processing", download_status, _job_detail(best)))
 
-        if attachment_type in _DEMUXED:
-            assets = best.get("assets", []) if best else []
-            roles = {str(asset.get("role")) for asset in assets}
+        assets = best.get("assets", []) if best else []
+        roles = {str(asset.get("role")) for asset in assets}
+        has_demux_assets = {"audio", "video"}.issubset(roles)
+        # Documents may still demux when the payload is a video container (MKV).
+        demux_expected = attachment_type in _DEMUXED or has_demux_assets
+        if demux_expected:
             demux_status = (
                 StageStatus.COMPLETED
-                if {"audio", "video"}.issubset(roles)
+                if has_demux_assets
                 else StageStatus.FAILED
                 if job_status == "failed"
                 else StageStatus.PENDING
@@ -87,8 +90,13 @@ def build_lifecycle_and_timeline(
         else:
             stages.append(_stage("media_demux", "Audio/video demultiplexed", "content_processing", StageStatus.NOT_APPLICABLE))
 
-        if attachment_type in _TRANSCRIBABLE:
-            transcript = best.get("transcript") if best else None
+        transcript = best.get("transcript") if best else None
+        transcription_expected = (
+            attachment_type in _TRANSCRIBABLE
+            or has_demux_assets
+            or transcript is not None
+        )
+        if transcription_expected:
             transcription_status = (
                 StageStatus.COMPLETED
                 if transcript

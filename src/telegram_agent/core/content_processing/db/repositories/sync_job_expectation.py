@@ -61,6 +61,65 @@ class SyncSqlAlchemyJobExpectationRepository:
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
 
+    def extend_due_at(self, *, job_id: UUID, extra: timedelta) -> bool:
+        """Push the SLA deadline forward for a still-open expectation.
+
+        Used when a long stage (e.g. WhisperX on multi-hour media) is claimed so
+        the sweeper does not kill in-flight work.
+        """
+        if extra.total_seconds() <= 0:
+            return False
+        now = utcnow()
+        statement = (
+            update(JobCompletionExpectation)
+            .where(
+                JobCompletionExpectation.job_id == job_id,
+                JobCompletionExpectation.status.in_(
+                    (
+                        JobCompletionExpectationStatus.OPEN,
+                        JobCompletionExpectationStatus.PROCESSING,
+                    )
+                ),
+            )
+            .values(
+                # Never move due_at backwards; keep the farther of (now+extra, current).
+                due_at=func.greatest(
+                    JobCompletionExpectation.due_at,
+                    now + extra,
+                ),
+                last_error=None,
+            )
+            .returning(JobCompletionExpectation.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def reopen_with_due_at(
+        self,
+        *,
+        expectation_id: UUID,
+        lease_owner: str,
+        due_at: datetime,
+    ) -> JobCompletionExpectation | None:
+        """Release a claimed expectation back to open with a later due_at."""
+        statement = (
+            update(JobCompletionExpectation)
+            .where(
+                JobCompletionExpectation.id == expectation_id,
+                JobCompletionExpectation.status
+                == JobCompletionExpectationStatus.PROCESSING,
+                JobCompletionExpectation.locked_by == lease_owner,
+            )
+            .values(
+                status=JobCompletionExpectationStatus.OPEN,
+                due_at=due_at,
+                locked_at=None,
+                locked_by=None,
+                last_error=None,
+            )
+            .returning(JobCompletionExpectation)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
     def mark_timed_out(
         self,
         *,

@@ -203,7 +203,9 @@ def build_timeline(
                 events.append(_event(StageKey.MEDIA_DOWNLOADED, StageStatus.NOT_STARTED))
 
             has_demux = any(a.role in {"audio", "video"} for a in content.assets)
-            if att.type in {"video", "video_note"}:
+            # Documents may demux when Telegram delivers a video container (MKV).
+            demux_expected = att.type in {"video", "video_note"} or has_demux
+            if demux_expected:
                 if has_demux:
                     events.append(
                         _event(
@@ -230,6 +232,11 @@ def build_timeline(
             else:
                 events.append(_event(StageKey.MEDIA_DEMUXED, StageStatus.NOT_APPLICABLE))
 
+            transcription_expected = (
+                att.type in {"voice", "video_note", "audio", "video"}
+                or has_demux
+                or content.transcript is not None
+            )
             if content.transcript is not None:
                 events.append(
                     _event(
@@ -239,7 +246,7 @@ def build_timeline(
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
-            elif att.type in {"voice", "video_note", "audio", "video"}:
+            elif transcription_expected:
                 if job.status == "transcribing":
                     events.append(
                         _event(StageKey.TRANSCRIPTION_DONE, StageStatus.PENDING, source_db=DbName.CONTENT_PROCESSING)

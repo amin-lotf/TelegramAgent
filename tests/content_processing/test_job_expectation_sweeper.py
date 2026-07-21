@@ -28,12 +28,18 @@ from telegram_agent.core.content_processing.services.sync_job_expectation_sweepe
 )
 
 
-def _sweeper(content_sync_uow_factory, *, retention: timedelta = timedelta(0)):
+def _sweeper(
+    content_sync_uow_factory,
+    *,
+    retention: timedelta = timedelta(0),
+    active_grace: timedelta = timedelta(0),
+):
     return SyncJobExpectationSweeper(
         uow_factory=content_sync_uow_factory,
         batch_size=50,
         lease_timeout=timedelta(seconds=60),
         resolved_retention=retention,
+        active_grace=active_grace,
         lease_owner="test-sweeper",
     )
 
@@ -118,6 +124,39 @@ def test_sweeper_satisfies_expectation_when_job_already_terminal(
     assert expectation is not None
     assert expectation.status == JobCompletionExpectationStatus.SATISFIED
     assert finished_count == 0
+
+
+def test_sweeper_extends_active_transcribing_job(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+) -> None:
+    job_id = _seed_job_with_expectation(
+        content_sync_sessionmaker,
+        job_status=JobStatus.TRANSCRIBING,
+        due_at=utcnow() - timedelta(seconds=5),
+    )
+
+    result = _sweeper(
+        content_sync_uow_factory,
+        retention=timedelta(hours=1),
+        active_grace=timedelta(hours=1),
+    ).sweep_once()
+
+    with content_sync_sessionmaker() as session:
+        job = session.get(Job, job_id)
+        expectation = session.scalar(
+            select(JobCompletionExpectation).where(
+                JobCompletionExpectation.job_id == job_id
+            )
+        )
+
+    assert result.claimed == 1
+    assert result.extended == 1
+    assert result.timed_out == 0
+    assert job is not None and job.status == JobStatus.TRANSCRIBING
+    assert expectation is not None
+    assert expectation.status == JobCompletionExpectationStatus.OPEN
+    assert expectation.due_at > utcnow()
 
 
 def test_sweeper_ignores_not_yet_due_expectations(

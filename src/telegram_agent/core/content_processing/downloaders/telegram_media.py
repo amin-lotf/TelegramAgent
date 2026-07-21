@@ -13,9 +13,14 @@ from telegram_agent.core.content_processing.clients.telegram_client import Teleg
 
 from telegram_agent.core.content_processing.common.results import (
     MediaDownloadResult,
-    TelegramDownloadContext, TelegramFileStream,
+    TelegramDownloadContext,
+    TelegramFileStream,
 )
 from telegram_agent.core.content_processing.common.settings import Settings
+from telegram_agent.core.content_processing.downloaders.media_container import (
+    is_opaque_suffix,
+    sniff_media_container,
+)
 
 
 class TelegramMediaDownloader:
@@ -53,7 +58,15 @@ class TelegramMediaDownloader:
             media_type=context.media_type,
         )
         if self._valid_existing_file(final_path):
-            return MediaDownloadResult(str(final_path), final_path.stat().st_size, None)
+            resolved_path, resolved_mime = self._normalize_downloaded_file(
+                final_path,
+                mime_type=None,
+            )
+            return MediaDownloadResult(
+                str(resolved_path),
+                resolved_path.stat().st_size,
+                resolved_mime,
+            )
         return self._store_stream(file_path=telegram_file.path, final_path=final_path)
 
     def _store_stream(self, *, file_path: str, final_path: Path) -> MediaDownloadResult:
@@ -79,7 +92,15 @@ class TelegramMediaDownloader:
             if bytes_written <= 0:
                 raise TelegramDownloadPermanentError("Telegram returned an empty file")
             os.replace(temporary_path, final_path)
-            return MediaDownloadResult(str(final_path), bytes_written, stream.mime_type)
+            resolved_path, resolved_mime = self._normalize_downloaded_file(
+                final_path,
+                mime_type=stream.mime_type,
+            )
+            return MediaDownloadResult(
+                str(resolved_path),
+                resolved_path.stat().st_size,
+                resolved_mime,
+            )
         except OSError as exc:
             self._raise_storage_error(exc, "Unable to write downloaded media")
         finally:
@@ -87,6 +108,35 @@ class TelegramMediaDownloader:
                 temporary_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def _normalize_downloaded_file(
+        self,
+        path: Path,
+        *,
+        mime_type: str | None,
+    ) -> tuple[Path, str | None]:
+        """Rename opaque extensions using container magic (e.g. MKV → .mkv).
+
+        Local Bot API often yields extension-less document paths. Leaving those
+        as ``.bin`` makes ffmpeg demux brittle and delivers a useless filename.
+        """
+        if not is_opaque_suffix(path.suffix):
+            return path, mime_type
+
+        info = sniff_media_container(path)
+        if info is None:
+            return path, mime_type
+
+        target = path.with_suffix(info.suffix)
+        if target == path:
+            return path, mime_type or info.mime_type
+        try:
+            if target.exists():
+                target.unlink()
+            os.replace(path, target)
+        except OSError as exc:
+            self._raise_storage_error(exc, "Unable to normalize downloaded media path")
+        return target, mime_type or info.mime_type
 
     def _create_parent_directory(self, path: Path) -> None:
         try:

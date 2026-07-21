@@ -62,10 +62,16 @@ class DownloadAgentAudioResponse(BaseModel):
 
 
 class DownloadAgentDocumentResponse(BaseModel):
-    """Structured output for document download requests."""
+    """Structured output for document download requests.
+
+    Subtitle/dub fields are included because Telegram often classifies video
+    containers (MKV, large files) as documents rather than video attachments.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    requested_subtitle_language: str | None = None
+    requested_dub_language: str | None = None
     requested_format: str | None = None
     assistant_text: str = Field(min_length=1, max_length=2_000)
 

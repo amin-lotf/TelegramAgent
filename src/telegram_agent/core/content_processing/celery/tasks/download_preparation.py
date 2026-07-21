@@ -14,9 +14,10 @@ logger = get_task_logger(__name__)
 
 
 # Waiting for the original attachment job (download + transcription) can take
-# longer than a normal media stage. Prefer many short waits over failing early.
-_DOWNLOAD_PREPARE_MAX_RETRIES = 36
-_DOWNLOAD_PREPARE_WAIT_COUNTDOWN_SECONDS = 10
+# much longer than a normal media stage — long video on CPU WhisperX may need
+# hours. Prefer many short waits over failing early.
+_DOWNLOAD_PREPARE_MAX_RETRIES = 720  # 720 * 30s ≈ 6 hours
+_DOWNLOAD_PREPARE_WAIT_COUNTDOWN_SECONDS = 30
 
 
 @celery_app.task(name="download.prepare", bind=True)

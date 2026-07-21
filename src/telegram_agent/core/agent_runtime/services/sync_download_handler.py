@@ -729,5 +729,9 @@ class SyncDownloadHandlerService:
         elif media_type == TelegramAttachmentType.AUDIO:
             payload["requested_language"] = decision.requested_language
         elif media_type == TelegramAttachmentType.DOCUMENT:
+            # Video containers often arrive as documents; keep subtitle/dub fields
+            # so handoff can route translation requests onto the video pipeline.
+            payload["requested_subtitle_language"] = decision.requested_subtitle_language
+            payload["requested_dub_language"] = decision.requested_dub_language
             payload["requested_format"] = decision.requested_format
         return payload

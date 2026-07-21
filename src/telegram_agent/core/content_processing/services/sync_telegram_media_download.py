@@ -36,6 +36,10 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
     SyncSqlAlchemyContentProcessingUnitOfWork,
 )
+from telegram_agent.core.content_processing.downloaders.media_container import (
+    path_looks_like_audio,
+    path_looks_like_video,
+)
 from telegram_agent.core.content_processing.downloaders.media_demuxer import MediaDemuxer
 from telegram_agent.core.content_processing.downloaders.telegram_media import (
     TelegramMediaDownloader,
@@ -57,6 +61,10 @@ _DEMUX_ATTACHMENT_TYPES = frozenset(
         TelegramAttachmentType.VIDEO_NOTE.value,
     }
 )
+
+# Telegram often sends MKV/large video as ``document``. Those still need demux
+# + transcription so download/translation can build subtitled outputs.
+_DOCUMENT_ATTACHMENT_TYPE = TelegramAttachmentType.DOCUMENT.value
 
 
 class SyncTelegramMediaDownloadService:
@@ -93,7 +101,10 @@ class SyncTelegramMediaDownloadService:
                     self._settings
                 ).download(context)
                 demux_result: MediaDemuxResult | None = None
-                if context.media_type in _DEMUX_ATTACHMENT_TYPES:
+                if self._should_demux(
+                    media_type=context.media_type,
+                    local_path=download_result.local_path,
+                ):
                     demux_result = MediaDemuxer.from_settings(self._settings).demux(
                         job_id=context.job_id,
                         source_asset_id=context.media_asset_id,
@@ -179,6 +190,29 @@ class SyncTelegramMediaDownloadService:
             return "Telegram source has no file identifier"
         return None
 
+    @staticmethod
+    def _should_demux(*, media_type: str, local_path: str) -> bool:
+        if media_type in _DEMUX_ATTACHMENT_TYPES:
+            return True
+        if media_type == _DOCUMENT_ATTACHMENT_TYPE:
+            return path_looks_like_video(local_path)
+        return False
+
+    @staticmethod
+    def _requires_transcription(
+        *,
+        media_type: str,
+        local_path: str,
+        demux_result: MediaDemuxResult | None,
+    ) -> bool:
+        if media_type in _TRANSCRIBABLE_ATTACHMENT_TYPES:
+            return True
+        if demux_result is not None:
+            return True
+        if media_type == _DOCUMENT_ATTACHMENT_TYPE:
+            return path_looks_like_audio(local_path)
+        return False
+
     def _record_success(
         self,
         *,
@@ -186,7 +220,11 @@ class SyncTelegramMediaDownloadService:
         download_result: MediaDownloadResult,
         demux_result: MediaDemuxResult | None,
     ) -> None:
-        requires_transcription = context.media_type in _TRANSCRIBABLE_ATTACHMENT_TYPES
+        requires_transcription = self._requires_transcription(
+            media_type=context.media_type,
+            local_path=download_result.local_path,
+            demux_result=demux_result,
+        )
         with self._uow_factory() as uow:
             if not uow.media_assets.record_download(
                 RecordMediaDownloadCommand(

@@ -38,6 +38,7 @@ class JobExpectationSweepResult:
     claimed: int = 0
     timed_out: int = 0
     satisfied: int = 0
+    extended: int = 0
     recovered_leases: int = 0
     deleted: int = 0
 
