@@ -103,7 +103,14 @@ def build_lifecycle_and_timeline(
                 else StageStatus.FAILED
                 if job_status == "failed"
                 else StageStatus.PENDING
-                if job_status in {"queued", "running", "downloaded", "transcribing"}
+                if job_status in {
+                    "queued",
+                    "running",
+                    "downloaded",
+                    "transcribing",
+                    "transcribed",
+                    "chunking",
+                }
                 else StageStatus.UNKNOWN
             )
             stages.append(_stage("transcription", "Transcription performed", "content_processing", transcription_status, "Exact transcript timestamp unavailable"))
@@ -122,7 +129,14 @@ def build_lifecycle_and_timeline(
             else StageStatus.FAILED
             if job_status == "failed" and not callback_events
             else StageStatus.PENDING
-            if job_status in {"queued", "running", "downloaded", "transcribing"}
+            if job_status in {
+                "queued",
+                "running",
+                "downloaded",
+                "transcribing",
+                "transcribed",
+                "chunking",
+            }
             else StageStatus.NOT_STARTED
         )
         stages.append(_stage("callback_enqueued", "Ingress callback task enqueued", "content_processing", callback_status))
@@ -565,7 +579,14 @@ def _downstream_missing(source_status: DataSourceStatus, *, failed: bool = False
 
 
 def _download_stage_status(job_status: str | None, source_status: DataSourceStatus) -> StageStatus:
-    if job_status in {"downloaded", "transcribing", "completed"}:
+    if job_status in {
+        "downloaded",
+        "transcribing",
+        "transcribed",
+        "chunking",
+        "chunked",
+        "completed",
+    }:
         return StageStatus.COMPLETED
     if job_status == "failed":
         return StageStatus.FAILED

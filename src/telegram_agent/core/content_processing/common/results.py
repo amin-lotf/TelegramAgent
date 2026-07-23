@@ -136,6 +136,29 @@ class ChunkingResult:
 
 
 @dataclass(frozen=True)
+class EmbeddingChunkInput:
+    chunk_id: str
+    text: str
+
+
+@dataclass(frozen=True)
+class EmbeddingItemResult:
+    chunk_id: str
+    index: int
+    embedding: tuple[float, ...]
+    dimensions: int
+
+
+@dataclass(frozen=True)
+class EmbeddingResult:
+    provider: str
+    model: str
+    dimensions: int
+    count: int
+    embeddings: tuple[EmbeddingItemResult, ...]
+
+
+@dataclass(frozen=True)
 class StageExecutionResult:
     retryable: bool = False
     error_message: str | None = None

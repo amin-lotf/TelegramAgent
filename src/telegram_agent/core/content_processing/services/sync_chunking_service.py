@@ -117,8 +117,12 @@ class SyncChunkingService:
                     raise RetryableContentProcessingError(
                         "Existing chunks could not be applied to job state"
                     )
-                uow.job_expectations.mark_satisfied(job_id=job_id)
-                self._enqueue_terminal_callback_in_uow(uow, job_id)
+                if uow.chunk_embeddings.count_for_job(job_id=job_id) > 0:
+                    self._promote_to_embedded_if_needed(uow, job_id)
+                    uow.job_expectations.mark_satisfied(job_id=job_id)
+                    self._enqueue_terminal_callback_in_uow(uow, job_id)
+                else:
+                    self._enqueue_ready_for_embedding_in_uow(uow, job_id)
                 return None
 
             transcript = uow.transcripts.get_by_job_id_with_segments(job_id)
@@ -178,12 +182,45 @@ class SyncChunkingService:
                 raise RetryableContentProcessingError(
                     "Chunking result could not be applied to job state"
                 )
-            uow.job_expectations.mark_satisfied(job_id=job_id)
-            self._enqueue_terminal_callback_in_uow(uow, job_id)
+            # Next stage: embedding. Do not satisfy expectation or fire job.finished yet.
+            self._enqueue_ready_for_embedding_in_uow(uow, job_id)
 
     def _enqueue_terminal_callback(self, job_id: UUID) -> None:
         with self._uow_factory() as uow:
             self._enqueue_terminal_callback_in_uow(uow, job_id)
+
+    @staticmethod
+    def _enqueue_ready_for_embedding_in_uow(
+        uow: SyncSqlAlchemyContentProcessingUnitOfWork,
+        job_id: UUID,
+    ) -> None:
+        event_type = OutboxEventType.CHUNKS_READY_FOR_EMBEDDING
+        idempotency_key = f"{event_type.value}:{job_id}"
+        if uow.outbox_events.get_by_idempotency_key(idempotency_key) is None:
+            uow.outbox_events.add(
+                OutboxEvent(
+                    event_type=event_type,
+                    job_id=job_id,
+                    idempotency_key=idempotency_key,
+                    payload={},
+                )
+            )
+
+    @staticmethod
+    def _promote_to_embedded_if_needed(
+        uow: SyncSqlAlchemyContentProcessingUnitOfWork,
+        job_id: UUID,
+    ) -> None:
+        """When embeddings already exist, advance job to EMBEDDED from CHUNKED/EMBEDDING."""
+        job = uow.jobs.get_by_id(job_id)
+        if job is None or job.status == JobStatus.EMBEDDED:
+            return
+        if job.status == JobStatus.CHUNKED:
+            uow.jobs.claim_embedding(
+                job_id=job_id,
+                lease_timeout=timedelta(seconds=1),
+            )
+        uow.jobs.complete_embedding(job_id=job_id)
 
     @staticmethod
     def _enqueue_terminal_callback_in_uow(
@@ -196,7 +233,7 @@ class SyncChunkingService:
             or not job.callback_required
             or job.status
             not in (
-                JobStatus.CHUNKED,
+                JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,

@@ -71,6 +71,7 @@ class SyncTelegramIngressCallbackService:
                 return None
             if job.status not in (
                 JobStatus.CHUNKED,
+                JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,
@@ -86,7 +87,13 @@ class SyncTelegramIngressCallbackService:
                 )
             source = sources[0]
 
-            success_statuses = (JobStatus.CHUNKED, JobStatus.COMPLETED)
+            # EMBEDDED is the happy-path terminal after embedding; keep CHUNKED for
+            # historical jobs completed before the embedding stage existed.
+            success_statuses = (
+                JobStatus.EMBEDDED,
+                JobStatus.COMPLETED,
+                JobStatus.CHUNKED,
+            )
             transcribed_text: str | None = None
             if (
                 job.status in success_statuses

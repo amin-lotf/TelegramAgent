@@ -11,7 +11,16 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
 _BLOCKING_ATTACHMENT_TYPES = frozenset({"voice", "video_note"})
 _TERMINAL_ATTACHMENT = frozenset({"ready", "failed"})
 _ACTIVE_JOB = frozenset(
-    {"queued", "running", "downloaded", "transcribing", "transcribed", "chunking"}
+    {
+        "queued",
+        "running",
+        "downloaded",
+        "transcribing",
+        "transcribed",
+        "chunking",
+        "chunked",
+        "embedding",
+    }
 )
 _FAILED_JOB = frozenset({"failed", "cancelled", "timed_out"})
 _PIPELINE_IN_PROGRESS = frozenset(

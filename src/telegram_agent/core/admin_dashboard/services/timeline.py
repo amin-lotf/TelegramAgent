@@ -20,6 +20,7 @@ _STAGE_ORDER = (
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
     StageKey.CHUNKING_DONE,
+    StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
     StageKey.ATTACHMENT_RESULT_APPLIED,
     StageKey.CONVERSATION_ENQUEUED,
@@ -37,6 +38,7 @@ _CP_PIPELINE_STAGES = (
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
     StageKey.CHUNKING_DONE,
+    StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
 )
 
@@ -48,6 +50,7 @@ _LABELS = {
     StageKey.MEDIA_DEMUXED: "Audio/video demuxed",
     StageKey.TRANSCRIPTION_DONE: "Transcription performed",
     StageKey.CHUNKING_DONE: "Transcript chunked",
+    StageKey.EMBEDDING_DONE: "Chunks embedded",
     StageKey.CP_FINISHED: "Content-processing finished",
     StageKey.ATTACHMENT_RESULT_APPLIED: "Attachment result applied",
     StageKey.CONVERSATION_ENQUEUED: "Conversation enqueued",
@@ -66,10 +69,13 @@ _POST_DOWNLOAD_STATUSES = frozenset(
         "transcribed",
         "chunking",
         "chunked",
+        "embedding",
+        "embedded",
         "completed",
     }
 )
-_SUCCESS_JOB_STATUSES = frozenset({"chunked", "completed"})
+# Pipeline terminal success after embedding; CHUNKED is intermediate.
+_SUCCESS_JOB_STATUSES = frozenset({"embedded", "completed"})
 
 
 def _event(
@@ -163,6 +169,7 @@ def build_timeline(
                 StageKey.MEDIA_DEMUXED,
                 StageKey.TRANSCRIPTION_DONE,
                 StageKey.CHUNKING_DONE,
+                StageKey.EMBEDDING_DONE,
                 StageKey.CP_FINISHED,
             ):
                 events.append(_event(key, StageStatus.NOT_STARTED))
@@ -361,7 +368,74 @@ def build_timeline(
             else:
                 events.append(_event(StageKey.CHUNKING_DONE, StageStatus.NOT_APPLICABLE))
 
-            if job.status in _SUCCESS_JOB_STATUSES:
+            # Embedding follows chunking (vectors stored in content-processing).
+            embedding_expected = bool(content.chunks) or bool(content.embeddings)
+            if content.embeddings:
+                first = content.embeddings[0]
+                detail = (
+                    f"{len(content.embeddings)} embedding(s)"
+                    f" · {first.provider}/{first.model}"
+                    f" · {first.dimensions}d"
+                )
+                events.append(
+                    _event(
+                        StageKey.EMBEDDING_DONE,
+                        StageStatus.COMPLETED,
+                        first.created_at,
+                        detail=detail,
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif embedding_expected:
+                if job.status in {"chunked", "embedding"}:
+                    events.append(
+                        _event(
+                            StageKey.EMBEDDING_DONE,
+                            StageStatus.PENDING,
+                            detail="awaiting embedding",
+                            source_db=DbName.CONTENT_PROCESSING,
+                        )
+                    )
+                elif job.status in {"failed", "timed_out"} and content.chunks:
+                    events.append(
+                        _event(
+                            StageKey.EMBEDDING_DONE,
+                            StageStatus.FAILED,
+                            detail=job.error_message,
+                            source_db=DbName.CONTENT_PROCESSING,
+                        )
+                    )
+                elif job.status in _SUCCESS_JOB_STATUSES:
+                    events.append(
+                        _event(
+                            StageKey.EMBEDDING_DONE,
+                            StageStatus.NOT_STARTED,
+                            detail="No embeddings stored",
+                            source_db=DbName.CONTENT_PROCESSING,
+                        )
+                    )
+                else:
+                    events.append(
+                        _event(StageKey.EMBEDDING_DONE, StageStatus.NOT_STARTED)
+                    )
+            else:
+                events.append(
+                    _event(StageKey.EMBEDDING_DONE, StageStatus.NOT_APPLICABLE)
+                )
+
+            # CP finished only after embedding terminal success (or failure).
+            if job.status in {"chunked", "embedding"}:
+                events.append(
+                    _event(
+                        StageKey.CP_FINISHED,
+                        StageStatus.PENDING,
+                        detail="awaiting embedding"
+                        if job.status == "chunked"
+                        else "embedding in progress",
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif job.status in _SUCCESS_JOB_STATUSES:
                 events.append(
                     _event(
                         StageKey.CP_FINISHED,

@@ -196,6 +196,7 @@ class SyncDownloadPreparationService:
         _TERMINAL_SUCCESS = frozenset(
             {
                 JobStatus.CHUNKED,
+                JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
             }
         )

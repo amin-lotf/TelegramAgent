@@ -21,6 +21,7 @@ from telegram_agent.core.content_processing.celery.tasks.download_delivery impor
 from telegram_agent.core.content_processing.celery.tasks.download_preparation import (
     prepare_download_task,
 )
+from telegram_agent.core.content_processing.celery.tasks.embedding import embed_media_task
 from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
 from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
 from telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback import notify_telegram_ingress_task
@@ -54,6 +55,7 @@ class OutboxDispatcher:
             OutboxEventType.CONTENT_PROCESSING_JOB_READY.value: download_telegram_media_task,
             OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value: transcribe_media_task,
             OutboxEventType.TRANSCRIPT_READY_FOR_CHUNKING.value: chunk_media_task,
+            OutboxEventType.CHUNKS_READY_FOR_EMBEDDING.value: embed_media_task,
             OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value: notify_telegram_ingress_task,
             OutboxEventType.DOWNLOAD_PREPARATION_READY.value: prepare_download_task,
             OutboxEventType.DOWNLOAD_READY_FOR_DELIVERY.value: deliver_download_task,

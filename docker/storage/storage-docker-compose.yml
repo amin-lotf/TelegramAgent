@@ -122,7 +122,7 @@ services:
       timeout: 5s
       retries: 10
   content_processing_postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: content-processing-postgres
     restart: unless-stopped
     environment:

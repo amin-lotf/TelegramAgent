@@ -25,7 +25,14 @@ from telegram_agent.core.admin_dashboard_v2.services.cursors import CursorCodec
 
 
 _PENDING_INGRESS = {"pending", "enqueued"}
-_PENDING_CONTENT = {"queued", "running", "downloaded", "transcribing"}
+_PENDING_CONTENT = {
+    "queued",
+    "running",
+    "downloaded",
+    "transcribing",
+    "transcribed",
+    "chunking",
+}
 
 
 class MessageListingService:

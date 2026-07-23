@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telegram_agent.core.admin_dashboard.db.mappings import content_processing as tables
 from telegram_agent.core.admin_dashboard.services.view_models import (
+    ChunkEmbeddingRow,
     ContentChunkRow,
     JobRow,
     MediaAssetRow,
@@ -16,6 +17,8 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     TranscriptRow,
     TranscriptSegmentRow,
 )
+
+_EMBEDDING_PREVIEW_DIMS = 4
 
 
 class ContentProcessingReader:
@@ -180,6 +183,50 @@ class ContentProcessingReader:
                 )
             )
         return chunks
+
+    async def list_embeddings(self, job_id: UUID) -> list[ChunkEmbeddingRow]:
+        emb = tables.chunk_embeddings
+        chunks = tables.content_chunks
+        result = await self._session.execute(
+            select(
+                emb.c.id,
+                emb.c.job_id,
+                emb.c.chunk_id,
+                emb.c.provider,
+                emb.c.model,
+                emb.c.dimensions,
+                emb.c.embedding,
+                emb.c.created_at,
+                chunks.c.chunk_index,
+            )
+            .select_from(
+                emb.outerjoin(chunks, chunks.c.id == emb.c.chunk_id)
+            )
+            .where(emb.c.job_id == job_id)
+            .order_by(chunks.c.chunk_index.asc().nulls_last(), emb.c.created_at.asc())
+        )
+        rows: list[ChunkEmbeddingRow] = []
+        for row in result:
+            raw = row.embedding
+            preview: tuple[float, ...]
+            if isinstance(raw, list):
+                preview = tuple(float(value) for value in raw[:_EMBEDDING_PREVIEW_DIMS])
+            else:
+                preview = ()
+            rows.append(
+                ChunkEmbeddingRow(
+                    id=row.id,
+                    job_id=row.job_id,
+                    chunk_id=row.chunk_id,
+                    chunk_index=row.chunk_index,
+                    provider=row.provider,
+                    model=row.model,
+                    dimensions=row.dimensions,
+                    embedding_preview=preview,
+                    created_at=row.created_at,
+                )
+            )
+        return rows
 
     async def list_job_status_by_ingress_ids(
         self,
