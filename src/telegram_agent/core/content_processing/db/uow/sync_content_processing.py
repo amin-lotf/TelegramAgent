@@ -4,6 +4,9 @@ from types import TracebackType
 
 from sqlalchemy.orm import Session
 
+from telegram_agent.core.content_processing.db.repositories.sync_chunk_embedding import (
+    SyncSqlAlchemyChunkEmbeddingRepository,
+)
 from telegram_agent.core.content_processing.db.repositories.sync_content_chunk import (
     SyncSqlAlchemyContentChunkRepository,
 )
@@ -32,6 +35,7 @@ class SyncSqlAlchemyContentProcessingUnitOfWork:
         self.telegram_sources = SyncSqlAlchemyTelegramSourceRepository(session)
         self.transcripts = SyncSqlAlchemyTranscriptRepository(session)
         self.content_chunks = SyncSqlAlchemyContentChunkRepository(session)
+        self.chunk_embeddings = SyncSqlAlchemyChunkEmbeddingRepository(session)
         self.download_requests = SyncSqlAlchemyDownloadRequestRepository(session)
         self.subtitle_translations = SyncSqlAlchemySubtitleTranslationRepository(session)
         self.outbox_events = SyncSqlAlchemyOutboxRepository(session)

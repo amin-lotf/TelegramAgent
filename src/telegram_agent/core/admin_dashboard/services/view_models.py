@@ -144,6 +144,19 @@ class ContentChunkRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ChunkEmbeddingRow:
+    id: UUID
+    job_id: UUID
+    chunk_id: UUID
+    chunk_index: int | None
+    provider: str
+    model: str
+    dimensions: int
+    embedding_preview: tuple[float, ...]
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeBatchRow:
     id: UUID
     chat_id: int
@@ -242,6 +255,7 @@ class ContentProcessingView:
     outbox_events: tuple[OutboxRow, ...] = ()
     transcript: TranscriptRow | None = None
     chunks: tuple[ContentChunkRow, ...] = ()
+    embeddings: tuple[ChunkEmbeddingRow, ...] = ()
     not_applicable: bool = False
 
 

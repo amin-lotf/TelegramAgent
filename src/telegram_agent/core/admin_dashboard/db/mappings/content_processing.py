@@ -14,6 +14,11 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from pgvector.sqlalchemy import Vector
+
+from telegram_agent.core.content_processing.common.const import (
+    DEFAULT_EMBEDDING_VECTOR_DIMENSIONS,
+)
 
 metadata = MetaData()
 
@@ -118,5 +123,18 @@ content_chunks = Table(
     Column("speakers", JSONB, nullable=True),
     Column("strategy", String(128), nullable=False),
     Column("metadata", JSONB, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+chunk_embeddings = Table(
+    "chunk_embeddings",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("job_id", UUID(as_uuid=True), nullable=False),
+    Column("chunk_id", UUID(as_uuid=True), nullable=False),
+    Column("provider", String(64), nullable=False),
+    Column("model", String(128), nullable=False),
+    Column("dimensions", Integer, nullable=False),
+    Column("embedding", Vector(DEFAULT_EMBEDDING_VECTOR_DIMENSIONS), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )

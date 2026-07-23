@@ -14,6 +14,7 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
     Transcript,
     TranscriptSegment,
     ContentChunk,
+    ChunkEmbedding,
     DownloadRequest,
     SubtitleTranslation,
     TranslationBatch,

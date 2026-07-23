@@ -309,6 +309,62 @@
                 {% endif %}
               </p>
             {% endif %}
+
+            <h3>Chunk embeddings</h3>
+            {% if cp.embeddings %}
+              <p class="meta" style="margin-bottom: 0.75rem;">
+                {{ cp.embeddings|length }} embedding{{ 's' if cp.embeddings|length != 1 else '' }}
+                · provider <code>{{ cp.embeddings[0].provider }}</code>
+                · model <code>{{ cp.embeddings[0].model }}</code>
+                · {{ cp.embeddings[0].dimensions }} dimensions
+              </p>
+              <div class="table-wrap">
+                <table class="data">
+                  <thead>
+                    <tr>
+                      <th>Chunk #</th>
+                      <th>Chunk ID</th>
+                      <th>Provider</th>
+                      <th>Model</th>
+                      <th>Dims</th>
+                      <th>Preview</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for e in cp.embeddings %}
+                      <tr>
+                        <td>{{ e.chunk_index if e.chunk_index is not none else '—' }}</td>
+                        <td><code>{{ e.chunk_id }}</code></td>
+                        <td>{{ e.provider }}</td>
+                        <td><code>{{ e.model }}</code></td>
+                        <td>{{ e.dimensions }}</td>
+                        <td class="pre">
+                          {% if e.embedding_preview %}
+                            [{{ e.embedding_preview|join(', ') }}{% if e.dimensions > e.embedding_preview|length %}, …{% endif %}]
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                        <td class="dt">{{ e.created_at|dt }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="muted">No chunk embeddings
+                {% if cp.job.status == 'embedding' %}
+                  (embedding in progress).
+                {% elif cp.job.status in ['chunked', 'embedded', 'completed'] and cp.chunks %}
+                  (job {{ cp.job.status }}; no embeddings stored).
+                {% elif cp.chunks %}
+                  (chunks present; embedding not started).
+                {% else %}
+                  .
+                {% endif %}
+              </p>
+            {% endif %}
           {% endif %}
           </div>
         </div>

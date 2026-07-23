@@ -195,7 +195,7 @@ def test_processing_media_while_chunking() -> None:
             created_at=_now(),
         )
     )
-    for status in ("transcribed", "chunking"):
+    for status in ("transcribed", "chunking", "chunked", "embedding"):
         content = ContentProcessingView(
             job=JobRow(
                 id=uuid4(),

@@ -103,6 +103,21 @@ class RecordContentChunksCommand:
     chunks: tuple[RecordContentChunkCommand, ...]
 
 
+@dataclass(frozen=True)
+class RecordChunkEmbeddingCommand:
+    chunk_id: UUID
+    provider: str
+    model: str
+    dimensions: int
+    embedding: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class RecordChunkEmbeddingsCommand:
+    job_id: UUID
+    embeddings: tuple[RecordChunkEmbeddingCommand, ...]
+
+
 class NotifyAttachmentProcessingResultCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 

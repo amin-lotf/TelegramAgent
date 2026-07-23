@@ -220,6 +220,7 @@ class SyncTranscriptionService:
             or job.status
             not in (
                 JobStatus.CHUNKED,
+                JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,

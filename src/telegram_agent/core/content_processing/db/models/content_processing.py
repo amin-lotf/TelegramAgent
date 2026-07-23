@@ -6,10 +6,14 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import UUID as SA_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 from telegram_agent.core.common.db.base import Base
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import get_enum_values
+from telegram_agent.core.content_processing.common.const import (
+    DEFAULT_EMBEDDING_VECTOR_DIMENSIONS,
+)
 from telegram_agent.core.content_processing.common.types import (
     ContentChunkType,
     JobCompletionExpectationKind,
@@ -766,6 +770,70 @@ class ContentChunk(Base):
             "ix_content_chunks_job_type",
             "job_id",
             "content_type",
+        ),
+    )
+
+
+class ChunkEmbedding(Base):
+    """Persisted embedding vectors for content_chunks (owned by content-processing)."""
+
+    __tablename__ = "chunk_embeddings"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    chunk_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("content_chunks.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+
+    provider: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    model: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+
+    dimensions: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(DEFAULT_EMBEDDING_VECTOR_DIMENSIONS),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "dimensions > 0",
+            name="ck_chunk_embeddings_dimensions_positive",
+        ),
+        Index(
+            "ix_chunk_embeddings_job_id_created",
+            "job_id",
+            "created_at",
         ),
     )
 

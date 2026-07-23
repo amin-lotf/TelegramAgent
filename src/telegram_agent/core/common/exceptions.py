@@ -123,3 +123,11 @@ class ChunkingServiceError(RetryableContentProcessingError):
 
 class ChunkingResponseError(PermanentContentProcessingError):
     pass
+
+
+class EmbeddingServiceError(RetryableContentProcessingError):
+    pass
+
+
+class EmbeddingResponseError(PermanentContentProcessingError):
+    pass
