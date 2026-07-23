@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_JOB_STATUSES = frozenset(
     {
+        JobStatus.CHUNKED,
         JobStatus.COMPLETED,
         JobStatus.FAILED,
         JobStatus.TIMED_OUT,
@@ -45,6 +46,8 @@ _ACTIVE_JOB_STATUSES = frozenset(
         JobStatus.RUNNING,
         JobStatus.DOWNLOADED,
         JobStatus.TRANSCRIBING,
+        JobStatus.TRANSCRIBED,
+        JobStatus.CHUNKING,
     }
 )
 

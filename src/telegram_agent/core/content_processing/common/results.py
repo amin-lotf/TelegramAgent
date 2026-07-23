@@ -97,6 +97,45 @@ class TranscriptionResult:
 
 
 @dataclass(frozen=True)
+class ChunkingSegmentInput:
+    segment_index: int
+    start_ms: int
+    end_ms: int
+    text: str
+    speaker: str | None
+    speaker_confidence: float | None
+
+
+@dataclass(frozen=True)
+class ChunkingContext:
+    job_id: UUID
+    language: str | None
+    duration_ms: int | None
+    segments: tuple[ChunkingSegmentInput, ...]
+
+
+@dataclass(frozen=True)
+class ChunkResultItem:
+    chunk_index: int
+    text: str
+    start_ms: int
+    end_ms: int
+    char_count: int
+    token_count: int
+    segment_index_start: int
+    segment_index_end: int
+    speakers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ChunkingResult:
+    content_type: str
+    strategy: str
+    chunk_count: int
+    chunks: tuple[ChunkResultItem, ...]
+
+
+@dataclass(frozen=True)
 class StageExecutionResult:
     retryable: bool = False
     error_message: str | None = None

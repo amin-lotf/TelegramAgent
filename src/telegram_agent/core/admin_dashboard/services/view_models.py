@@ -126,6 +126,24 @@ class TranscriptRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ContentChunkRow:
+    id: UUID
+    job_id: UUID
+    content_type: str
+    chunk_index: int
+    text: str
+    start_ms: int | None
+    end_ms: int | None
+    char_count: int
+    token_count: int | None
+    segment_index_start: int | None
+    segment_index_end: int | None
+    speakers: tuple[str, ...] | None
+    strategy: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeBatchRow:
     id: UUID
     chat_id: int
@@ -223,6 +241,7 @@ class ContentProcessingView:
     assets: tuple[MediaAssetRow, ...] = ()
     outbox_events: tuple[OutboxRow, ...] = ()
     transcript: TranscriptRow | None = None
+    chunks: tuple[ContentChunkRow, ...] = ()
     not_applicable: bool = False
 
 

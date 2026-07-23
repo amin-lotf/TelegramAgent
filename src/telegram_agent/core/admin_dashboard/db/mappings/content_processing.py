@@ -100,3 +100,23 @@ transcript_segments = Table(
     Column("speaker", String(64), nullable=True),
     Column("speaker_confidence", Float, nullable=True),
 )
+
+content_chunks = Table(
+    "content_chunks",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("job_id", UUID(as_uuid=True), nullable=False),
+    Column("content_type", String(32), nullable=False),
+    Column("chunk_index", Integer, nullable=False),
+    Column("text", Text, nullable=False),
+    Column("start_ms", Integer, nullable=True),
+    Column("end_ms", Integer, nullable=True),
+    Column("char_count", Integer, nullable=False),
+    Column("token_count", Integer, nullable=True),
+    Column("segment_index_start", Integer, nullable=True),
+    Column("segment_index_end", Integer, nullable=True),
+    Column("speakers", JSONB, nullable=True),
+    Column("strategy", String(128), nullable=False),
+    Column("metadata", JSONB, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)

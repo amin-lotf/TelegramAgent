@@ -11,10 +11,17 @@ class JobStatus(StrEnum):
     RUNNING = "running"
     DOWNLOADED = "downloaded"
     TRANSCRIBING = "transcribing"
+    TRANSCRIBED = "transcribed"
+    CHUNKING = "chunking"
+    CHUNKED = "chunked"
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
     CANCELLED = "cancelled"
+
+
+class ContentChunkType(StrEnum):
+    TRANSCRIPT = "transcript"
 
 
 class DownloadMediaType(StrEnum):
@@ -43,6 +50,7 @@ class MediaAssetRole(StrEnum):
 class OutboxEventType(StrEnum):
     CONTENT_PROCESSING_JOB_READY = "content_processing.job.ready"
     MEDIA_READY_FOR_TRANSCRIPTION = "content_processing.media.ready_for_transcription"
+    TRANSCRIPT_READY_FOR_CHUNKING = "content_processing.transcript.ready_for_chunking"
     CONTENT_PROCESSING_JOB_FINISHED = "content_processing.job.finished"
     DOWNLOAD_PREPARATION_READY = "content_processing.download_preparation.ready"
     DOWNLOAD_READY_FOR_DELIVERY = "content_processing.download.ready_for_delivery"

@@ -115,3 +115,11 @@ class WhisperXServiceError(RetryableContentProcessingError):
 
 class WhisperXResponseError(PermanentContentProcessingError):
     pass
+
+
+class ChunkingServiceError(RetryableContentProcessingError):
+    pass
+
+
+class ChunkingResponseError(PermanentContentProcessingError):
+    pass

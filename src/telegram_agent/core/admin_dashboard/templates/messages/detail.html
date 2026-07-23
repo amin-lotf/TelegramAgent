@@ -250,6 +250,65 @@
             {% else %}
               <p class="muted">No transcript.</p>
             {% endif %}
+
+            <h3>Content chunks</h3>
+            {% if cp.chunks %}
+              <p class="meta" style="margin-bottom: 0.75rem;">
+                {{ cp.chunks|length }} chunk{{ 's' if cp.chunks|length != 1 else '' }}
+                · strategy <code>{{ cp.chunks[0].strategy }}</code>
+                · type <code>{{ cp.chunks[0].content_type }}</code>
+              </p>
+              <div class="table-wrap">
+                <table class="data">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Start (ms)</th>
+                      <th>End (ms)</th>
+                      <th>Segments</th>
+                      <th>Tokens</th>
+                      <th>Speakers</th>
+                      <th>Text</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for c in cp.chunks %}
+                      <tr>
+                        <td>{{ c.chunk_index }}</td>
+                        <td>{{ c.start_ms if c.start_ms is not none else '—' }}</td>
+                        <td>{{ c.end_ms if c.end_ms is not none else '—' }}</td>
+                        <td>
+                          {% if c.segment_index_start is not none and c.segment_index_end is not none %}
+                            {{ c.segment_index_start }}–{{ c.segment_index_end }}
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                        <td>{{ c.token_count if c.token_count is not none else '—' }}</td>
+                        <td>
+                          {% if c.speakers %}
+                            {{ c.speakers|join(', ') }}
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                        <td class="pre">{{ c.text }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="muted">No content chunks
+                {% if cp.job.status in ['transcribed', 'chunking'] %}
+                  (chunking {{ cp.job.status }}).
+                {% elif cp.transcript %}
+                  (transcript present; chunking not finished).
+                {% else %}
+                  .
+                {% endif %}
+              </p>
+            {% endif %}
           {% endif %}
           </div>
         </div>

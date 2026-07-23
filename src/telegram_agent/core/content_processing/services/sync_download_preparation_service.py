@@ -189,6 +189,14 @@ class SyncDownloadPreparationService:
                 JobStatus.RUNNING,
                 JobStatus.DOWNLOADED,
                 JobStatus.TRANSCRIBING,
+                JobStatus.TRANSCRIBED,
+                JobStatus.CHUNKING,
+            }
+        )
+        _TERMINAL_SUCCESS = frozenset(
+            {
+                JobStatus.CHUNKED,
+                JobStatus.COMPLETED,
             }
         )
         _TERMINAL_FAILURE = frozenset(
@@ -233,7 +241,7 @@ class SyncDownloadPreparationService:
                     saw_in_progress = True
                     continue
 
-                if job.status != JobStatus.COMPLETED:
+                if job.status not in _TERMINAL_SUCCESS:
                     saw_in_progress = True
                     continue
 

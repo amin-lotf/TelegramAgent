@@ -81,6 +81,28 @@ class RecordTranscriptCommand:
     segments: tuple[RecordTranscriptSegmentCommand, ...]
 
 
+@dataclass(frozen=True)
+class RecordContentChunkCommand:
+    chunk_index: int
+    text: str
+    start_ms: int | None
+    end_ms: int | None
+    char_count: int
+    token_count: int | None
+    segment_index_start: int | None
+    segment_index_end: int | None
+    speakers: tuple[str, ...] | None
+    strategy: str
+    metadata: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class RecordContentChunksCommand:
+    job_id: UUID
+    content_type: str
+    chunks: tuple[RecordContentChunkCommand, ...]
+
+
 class NotifyAttachmentProcessingResultCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
