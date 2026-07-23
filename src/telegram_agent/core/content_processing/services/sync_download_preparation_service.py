@@ -189,15 +189,6 @@ class SyncDownloadPreparationService:
                 JobStatus.RUNNING,
                 JobStatus.DOWNLOADED,
                 JobStatus.TRANSCRIBING,
-                JobStatus.TRANSCRIBED,
-                JobStatus.CHUNKING,
-            }
-        )
-        _TERMINAL_SUCCESS = frozenset(
-            {
-                JobStatus.CHUNKED,
-                JobStatus.EMBEDDED,
-                JobStatus.COMPLETED,
             }
         )
         _TERMINAL_FAILURE = frozenset(
@@ -207,7 +198,6 @@ class SyncDownloadPreparationService:
                 JobStatus.CANCELLED,
             }
         )
-
 
         with self._uow_factory() as uow:
             sources = uow.telegram_sources.list_by_ingress_message_id(
@@ -243,7 +233,7 @@ class SyncDownloadPreparationService:
                     saw_in_progress = True
                     continue
 
-                if job.status not in _TERMINAL_SUCCESS:
+                if job.status != JobStatus.COMPLETED:
                     saw_in_progress = True
                     continue
 

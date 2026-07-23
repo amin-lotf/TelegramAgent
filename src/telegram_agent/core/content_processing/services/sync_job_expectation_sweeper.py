@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_JOB_STATUSES = frozenset(
     {
-        JobStatus.EMBEDDED,
         JobStatus.COMPLETED,
         JobStatus.FAILED,
         JobStatus.TIMED_OUT,
@@ -39,17 +38,13 @@ _TERMINAL_JOB_STATUSES = frozenset(
 
 # Jobs in these states may legitimately run longer than the initial SLA
 # (e.g. WhisperX on hour-long media on CPU). Extend rather than time out while
-# the stage lease is still fresh. CHUNKED waits for embedding outbox/worker.
+# the stage lease is still fresh.
 _ACTIVE_JOB_STATUSES = frozenset(
     {
         JobStatus.QUEUED,
         JobStatus.RUNNING,
         JobStatus.DOWNLOADED,
         JobStatus.TRANSCRIBING,
-        JobStatus.TRANSCRIBED,
-        JobStatus.CHUNKING,
-        JobStatus.CHUNKED,
-        JobStatus.EMBEDDING,
     }
 )
 

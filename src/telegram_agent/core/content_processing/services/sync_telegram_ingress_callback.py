@@ -70,8 +70,6 @@ class SyncTelegramIngressCallbackService:
             if job is None or not job.callback_required:
                 return None
             if job.status not in (
-                JobStatus.CHUNKED,
-                JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,
@@ -87,16 +85,9 @@ class SyncTelegramIngressCallbackService:
                 )
             source = sources[0]
 
-            # EMBEDDED is the happy-path terminal after embedding; keep CHUNKED for
-            # historical jobs completed before the embedding stage existed.
-            success_statuses = (
-                JobStatus.EMBEDDED,
-                JobStatus.COMPLETED,
-                JobStatus.CHUNKED,
-            )
             transcribed_text: str | None = None
             if (
-                job.status in success_statuses
+                job.status == JobStatus.COMPLETED
                 and source.attachment_type in _MESSAGE_ATTACHMENT_TYPES
             ):
                 transcript = uow.transcripts.get_by_job_id(job_id)
@@ -106,7 +97,7 @@ class SyncTelegramIngressCallbackService:
                     )
                 transcribed_text = transcript.text
 
-            if job.status in success_statuses:
+            if job.status == JobStatus.COMPLETED:
                 result_status = AttachmentProcessingResultStatus.COMPLETED
             elif job.status == JobStatus.TIMED_OUT:
                 result_status = AttachmentProcessingResultStatus.TIMED_OUT

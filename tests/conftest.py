@@ -75,8 +75,6 @@ CONTENT_PROCESSING_TABLES = (
     "translated_segments",
     "translation_batches",
     "subtitle_translations",
-    "chunk_embeddings",
-    "content_chunks",
     "transcript_segments",
     "transcripts",
     "download_requests",
@@ -187,11 +185,7 @@ def postgres_admin_url() -> str:
 
     port = _find_free_port()
     container_name = f"telegram-agent-test-postgres-{uuid4().hex[:8]}"
-    # content-processing migrations require the `vector` extension (pgvector).
-    image = os.environ.get(
-        "TELEGRAM_AGENT_TEST_POSTGRES_IMAGE",
-        "pgvector/pgvector:pg16",
-    )
+    image = os.environ.get("TELEGRAM_AGENT_TEST_POSTGRES_IMAGE", "postgres:16-alpine")
 
     try:
         _run_command(

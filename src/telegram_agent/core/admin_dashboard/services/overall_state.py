@@ -10,18 +10,7 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
 
 _BLOCKING_ATTACHMENT_TYPES = frozenset({"voice", "video_note"})
 _TERMINAL_ATTACHMENT = frozenset({"ready", "failed"})
-_ACTIVE_JOB = frozenset(
-    {
-        "queued",
-        "running",
-        "downloaded",
-        "transcribing",
-        "transcribed",
-        "chunking",
-        "chunked",
-        "embedding",
-    }
-)
+_ACTIVE_JOB = frozenset({"queued", "running", "downloaded", "transcribing"})
 _FAILED_JOB = frozenset({"failed", "cancelled", "timed_out"})
 _PIPELINE_IN_PROGRESS = frozenset(
     {"received", "coordinating", "coordinated", "classifying"}
@@ -74,11 +63,6 @@ def derive_overall_state(
     if runtime_message is not None and runtime_message.status == "failed":
         return OverallState.FAILED
 
-    # Prefer an in-flight content-processing job over "waiting for media".
-    # Attachment may still be "processing" while download/transcription/chunking runs.
-    if job is not None and job.status in _ACTIVE_JOB:
-        return OverallState.PROCESSING_MEDIA
-
     if (
         attachment is not None
         and attachment.type in _BLOCKING_ATTACHMENT_TYPES
@@ -86,6 +70,9 @@ def derive_overall_state(
         and message.conversation_status == "pending"
     ):
         return OverallState.WAITING_MEDIA
+
+    if job is not None and job.status in _ACTIVE_JOB:
+        return OverallState.PROCESSING_MEDIA
 
     if message.conversation_status == "enqueued":
         return OverallState.DISPATCHING

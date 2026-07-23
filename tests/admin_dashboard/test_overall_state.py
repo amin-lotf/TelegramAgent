@@ -181,33 +181,3 @@ def test_processing_media_from_job_status() -> None:
     )
     state = derive_overall_state(message=msg, content=content, runtime=None)
     assert state == OverallState.PROCESSING_MEDIA
-
-
-def test_processing_media_while_chunking() -> None:
-    msg = _message(
-        attachment=AttachmentRow(
-            id=uuid4(),
-            user_message_id=uuid4(),
-            file_id="f",
-            file_unique_id=None,
-            type="voice",
-            status="processing",
-            created_at=_now(),
-        )
-    )
-    for status in ("transcribed", "chunking", "chunked", "embedding"):
-        content = ContentProcessingView(
-            job=JobRow(
-                id=uuid4(),
-                kind="telegram attachment",
-                status=status,
-                idempotency_key=f"k-{status}",
-                error_message=None,
-                callback_required=True,
-                created_at=_now(),
-                updated_at=_now(),
-            ),
-            source=None,
-        )
-        state = derive_overall_state(message=msg, content=content, runtime=None)
-        assert state == OverallState.PROCESSING_MEDIA, status

@@ -38,12 +38,6 @@ class StubTelegramIngressClient:
             "hello from voice",
         ),
         (
-            JobStatus.CHUNKED,
-            True,
-            AttachmentProcessingResultStatus.COMPLETED,
-            "hello from voice",
-        ),
-        (
             JobStatus.FAILED,
             False,
             AttachmentProcessingResultStatus.FAILED,

@@ -91,23 +91,6 @@ COPY src ./src
 RUN uv sync --extra llm-gateway --extra apps --no-dev --frozen
 
 
-FROM base AS chunking
-
-RUN uv sync --extra chunking --extra apps --no-dev --frozen --no-install-project
-
-COPY src ./src
-
-RUN uv sync --extra chunking --extra apps --no-dev --frozen
-
-
-FROM base AS embedding
-
-RUN uv sync --extra embedding --extra apps --no-dev --frozen --no-install-project
-
-COPY src ./src
-
-RUN uv sync --extra embedding --extra apps --no-dev --frozen
-
 
 FROM base AS admin-dashboard
 

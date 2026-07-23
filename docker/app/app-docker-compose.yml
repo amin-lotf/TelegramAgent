@@ -82,32 +82,6 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-  chunking:
-    build:
-      context: ../..
-      dockerfile: docker/app/Dockerfile
-      target: chunking
-    container_name: chunking_app
-    env_file:
-      - .env.chunking.docker
-    command: python -m uvicorn telegram_agent.core.chunking.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
-    volumes:
-      - ../..:/app
-    networks:
-      - fatol-net
-  embedding:
-    build:
-      context: ../..
-      dockerfile: docker/app/Dockerfile
-      target: embedding
-    container_name: embedding_app
-    env_file:
-      - .env.embedding.docker
-    command: python -m uvicorn telegram_agent.core.embedding.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
-    volumes:
-      - ../..:/app
-    networks:
-      - fatol-net
 volumes:
   telegram_bot_api_data:
 

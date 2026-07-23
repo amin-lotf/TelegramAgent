@@ -300,13 +300,7 @@ class SyncTelegramMediaDownloadService:
             job is None
             or not job.callback_required
             or job.status
-            not in (
-                JobStatus.CHUNKED,
-                JobStatus.EMBEDDED,
-                JobStatus.COMPLETED,
-                JobStatus.FAILED,
-                JobStatus.TIMED_OUT,
-            )
+            not in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMED_OUT)
         ):
             return
 

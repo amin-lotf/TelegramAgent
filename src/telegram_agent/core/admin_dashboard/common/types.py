@@ -39,8 +39,6 @@ class StageKey(StrEnum):
     MEDIA_DOWNLOADED = "media_downloaded"
     MEDIA_DEMUXED = "media_demuxed"
     TRANSCRIPTION_DONE = "transcription_done"
-    CHUNKING_DONE = "chunking_done"
-    EMBEDDING_DONE = "embedding_done"
     CP_FINISHED = "cp_finished"
     ATTACHMENT_RESULT_APPLIED = "attachment_result_applied"
     CONVERSATION_ENQUEUED = "conversation_enqueued"

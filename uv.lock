@@ -2781,15 +2781,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pgvector"
-version = "0.5.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a7/ec/6eb80aebc728200f95229219882994c1b0585b956ca47da5edb9d062627a/pgvector-0.5.0.tar.gz", hash = "sha256:07a9dcf735696879406983afc6eba9a787cef7c0cf6c367ca1a5779f036dee74", size = 35170, upload-time = "2026-07-06T18:27:27.767Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/e4/a5573f2c579ca9ad133293bfb624148ba0893674ca4a6eeec85ced9a6a09/pgvector-0.5.0-py3-none-any.whl", hash = "sha256:fedc9800894e6da2be51358d7b7c574bf34f247ca741a5a09513622135f5964f", size = 30958, upload-time = "2026-07-06T18:27:26.797Z" },
-]
-
-[[package]]
 name = "pillow"
 version = "12.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4117,7 +4108,6 @@ dependencies = [
 admin-dashboard = [
     { name = "itsdangerous" },
     { name = "jinja2" },
-    { name = "pgvector" },
     { name = "python-multipart" },
 ]
 admin-dashboard-v2 = [
@@ -4138,7 +4128,6 @@ apps = [
 ]
 content-processing = [
     { name = "celery", extra = ["redis"] },
-    { name = "pgvector" },
     { name = "psycopg2-binary" },
 ]
 dev = [
@@ -4148,10 +4137,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
-embedding = [
-    { name = "langchain", extra = ["openai"] },
-    { name = "openai" },
-]
 llm-gateway = [
     { name = "jsonschema" },
     { name = "langchain", extra = ["openai"] },
@@ -4160,7 +4145,6 @@ llm-gateway = [
 ]
 migration = [
     { name = "alembic" },
-    { name = "pgvector" },
     { name = "psycopg2-binary" },
 ]
 telegram-ingress = [
@@ -4189,15 +4173,10 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'admin-dashboard'", specifier = ">=3.1.0" },
     { name = "jinja2", marker = "extra == 'admin-dashboard-v2'", specifier = ">=3.1.0" },
     { name = "jsonschema", marker = "extra == 'llm-gateway'", specifier = ">=4.26.0" },
-    { name = "langchain", extras = ["openai"], marker = "extra == 'embedding'", specifier = ">=1.3.13" },
     { name = "langchain", extras = ["openai"], marker = "extra == 'llm-gateway'", specifier = ">=1.3.13" },
     { name = "langgraph", marker = "extra == 'llm-gateway'", specifier = ">=1.2.9" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "openai", marker = "extra == 'embedding'", specifier = ">=2.24.0" },
     { name = "openai", marker = "extra == 'llm-gateway'", specifier = ">=2.24.0" },
-    { name = "pgvector", marker = "extra == 'admin-dashboard'", specifier = ">=0.3.0" },
-    { name = "pgvector", marker = "extra == 'content-processing'", specifier = ">=0.3.0" },
-    { name = "pgvector", marker = "extra == 'migration'", specifier = ">=0.3.0" },
     { name = "psycopg2-binary", marker = "extra == 'agent-runtime'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'content-processing'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'dev'", specifier = ">=2.9.12" },
@@ -4217,7 +4196,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'apps'", specifier = ">=0.50.1" },
     { name = "whisperx", marker = "extra == 'whisperx'", specifier = ">=3.8.6" },
 ]
-provides-extras = ["apps", "dev", "agent-runtime", "llm-gateway", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "chunking", "embedding", "admin-dashboard", "admin-dashboard-v2", "migration"]
+provides-extras = ["apps", "dev", "agent-runtime", "llm-gateway", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "admin-dashboard", "admin-dashboard-v2", "migration"]
 
 [[package]]
 name = "tenacity"

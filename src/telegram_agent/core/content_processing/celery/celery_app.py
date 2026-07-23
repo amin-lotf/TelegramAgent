@@ -14,8 +14,6 @@ def create_celery_app() -> Celery:
         include=[
             "telegram_agent.core.content_processing.celery.tasks.media_download",
             "telegram_agent.core.content_processing.celery.tasks.transcription",
-            "telegram_agent.core.content_processing.celery.tasks.chunking",
-            "telegram_agent.core.content_processing.celery.tasks.embedding",
             "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
             "telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback",
             "telegram_agent.core.content_processing.celery.tasks.job_expectation_sweep",
@@ -50,16 +48,6 @@ def create_celery_app() -> Celery:
                 "media_transcription",
                 Exchange("content_processing", type="direct"),
                 routing_key="media.transcribe",
-            ),
-            Queue(
-                "media_chunking",
-                Exchange("content_processing", type="direct"),
-                routing_key="media.chunk",
-            ),
-            Queue(
-                "media_embedding",
-                Exchange("content_processing", type="direct"),
-                routing_key="media.embed",
             ),
             Queue(
                 "outbox_dispatch",
@@ -99,14 +87,6 @@ def create_celery_app() -> Celery:
             "media.transcribe": {
                 "queue": "media_transcription",
                 "routing_key": "media.transcribe",
-            },
-            "media.chunk": {
-                "queue": "media_chunking",
-                "routing_key": "media.chunk",
-            },
-            "media.embed": {
-                "queue": "media_embedding",
-                "routing_key": "media.embed",
             },
             "telegram_ingress.processing_result": {
                 "queue": "telegram_ingress_callback",

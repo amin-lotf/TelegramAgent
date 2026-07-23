@@ -192,17 +192,8 @@ class SyncTranscriptionService:
                     "Transcription result could not be applied to job state"
                 )
 
-            event_type = OutboxEventType.TRANSCRIPT_READY_FOR_CHUNKING
-            idempotency_key = f"{event_type.value}:{context.job_id}"
-            if uow.outbox_events.get_by_idempotency_key(idempotency_key) is None:
-                uow.outbox_events.add(
-                    OutboxEvent(
-                        event_type=event_type,
-                        job_id=context.job_id,
-                        idempotency_key=idempotency_key,
-                        payload={},
-                    )
-                )
+            uow.job_expectations.mark_satisfied(job_id=context.job_id)
+            self._enqueue_terminal_callback_in_uow(uow, context.job_id)
 
     def _enqueue_terminal_callback(self, job_id: UUID) -> None:
         with self._uow_factory() as uow:
@@ -218,13 +209,7 @@ class SyncTranscriptionService:
             job is None
             or not job.callback_required
             or job.status
-            not in (
-                JobStatus.CHUNKED,
-                JobStatus.EMBEDDED,
-                JobStatus.COMPLETED,
-                JobStatus.FAILED,
-                JobStatus.TIMED_OUT,
-            )
+            not in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMED_OUT)
         ):
             return
 

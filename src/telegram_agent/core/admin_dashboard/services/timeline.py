@@ -19,8 +19,6 @@ _STAGE_ORDER = (
     StageKey.MEDIA_DOWNLOADED,
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
-    StageKey.CHUNKING_DONE,
-    StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
     StageKey.ATTACHMENT_RESULT_APPLIED,
     StageKey.CONVERSATION_ENQUEUED,
@@ -32,16 +30,6 @@ _STAGE_ORDER = (
     StageKey.CONTENT_PROCESSING_HANDOFF,
 )
 
-_CP_PIPELINE_STAGES = (
-    StageKey.CP_JOB_CREATED,
-    StageKey.MEDIA_DOWNLOADED,
-    StageKey.MEDIA_DEMUXED,
-    StageKey.TRANSCRIPTION_DONE,
-    StageKey.CHUNKING_DONE,
-    StageKey.EMBEDDING_DONE,
-    StageKey.CP_FINISHED,
-)
-
 _LABELS = {
     StageKey.MESSAGE_RECEIVED: "Message received",
     StageKey.ATTACHMENT_REGISTERED: "Attachment registered",
@@ -49,8 +37,6 @@ _LABELS = {
     StageKey.MEDIA_DOWNLOADED: "Media downloaded",
     StageKey.MEDIA_DEMUXED: "Audio/video demuxed",
     StageKey.TRANSCRIPTION_DONE: "Transcription performed",
-    StageKey.CHUNKING_DONE: "Transcript chunked",
-    StageKey.EMBEDDING_DONE: "Chunks embedded",
     StageKey.CP_FINISHED: "Content-processing finished",
     StageKey.ATTACHMENT_RESULT_APPLIED: "Attachment result applied",
     StageKey.CONVERSATION_ENQUEUED: "Conversation enqueued",
@@ -61,21 +47,6 @@ _LABELS = {
     StageKey.DOWNLOAD_HANDLED: "Download request handled",
     StageKey.CONTENT_PROCESSING_HANDOFF: "Content-processing handoff",
 }
-
-_POST_DOWNLOAD_STATUSES = frozenset(
-    {
-        "downloaded",
-        "transcribing",
-        "transcribed",
-        "chunking",
-        "chunked",
-        "embedding",
-        "embedded",
-        "completed",
-    }
-)
-# Pipeline terminal success after embedding; CHUNKED is intermediate.
-_SUCCESS_JOB_STATUSES = frozenset({"embedded", "completed"})
 
 
 def _event(
@@ -128,7 +99,14 @@ def build_timeline(
         events.append(
             _event(StageKey.ATTACHMENT_REGISTERED, StageStatus.NOT_APPLICABLE)
         )
-        for key in (*_CP_PIPELINE_STAGES, StageKey.ATTACHMENT_RESULT_APPLIED):
+        for key in (
+            StageKey.CP_JOB_CREATED,
+            StageKey.MEDIA_DOWNLOADED,
+            StageKey.MEDIA_DEMUXED,
+            StageKey.TRANSCRIPTION_DONE,
+            StageKey.CP_FINISHED,
+            StageKey.ATTACHMENT_RESULT_APPLIED,
+        ):
             events.append(_event(key, StageStatus.NOT_APPLICABLE))
     else:
         att = message.attachment
@@ -144,10 +122,14 @@ def build_timeline(
         )
 
         if not cp_available:
-            for key in _CP_PIPELINE_STAGES:
-                events.append(
-                    _event(key, StageStatus.UNAVAILABLE, source_db=DbName.CONTENT_PROCESSING)
-                )
+            for key in (
+                StageKey.CP_JOB_CREATED,
+                StageKey.MEDIA_DOWNLOADED,
+                StageKey.MEDIA_DEMUXED,
+                StageKey.TRANSCRIPTION_DONE,
+                StageKey.CP_FINISHED,
+            ):
+                events.append(_event(key, StageStatus.UNAVAILABLE, source_db=DbName.CONTENT_PROCESSING))
         elif content is None or content.job is None:
             status = (
                 StageStatus.FAILED
@@ -168,8 +150,6 @@ def build_timeline(
                 StageKey.MEDIA_DOWNLOADED,
                 StageKey.MEDIA_DEMUXED,
                 StageKey.TRANSCRIPTION_DONE,
-                StageKey.CHUNKING_DONE,
-                StageKey.EMBEDDING_DONE,
                 StageKey.CP_FINISHED,
             ):
                 events.append(_event(key, StageStatus.NOT_STARTED))
@@ -187,9 +167,11 @@ def build_timeline(
             ready_evt = _outbox_by_type(
                 content.outbox_events, "content_processing.job.ready"
             )
-            download_done = job.status in _POST_DOWNLOAD_STATUSES or any(
-                a.role == "source" and a.local_path for a in content.assets
-            )
+            download_done = job.status in {
+                "downloaded",
+                "transcribing",
+                "completed",
+            } or any(a.role == "source" and a.local_path for a in content.assets)
             if job.status in {"failed", "timed_out"} and not download_done:
                 events.append(
                     _event(
@@ -243,11 +225,7 @@ def build_timeline(
                     )
                 elif job.status in {"queued", "running"}:
                     events.append(
-                        _event(
-                            StageKey.MEDIA_DEMUXED,
-                            StageStatus.PENDING,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
+                        _event(StageKey.MEDIA_DEMUXED, StageStatus.PENDING, source_db=DbName.CONTENT_PROCESSING)
                     )
                 else:
                     events.append(_event(StageKey.MEDIA_DEMUXED, StageStatus.NOT_STARTED))
@@ -271,11 +249,7 @@ def build_timeline(
             elif transcription_expected:
                 if job.status == "transcribing":
                     events.append(
-                        _event(
-                            StageKey.TRANSCRIPTION_DONE,
-                            StageStatus.PENDING,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
+                        _event(StageKey.TRANSCRIPTION_DONE, StageStatus.PENDING, source_db=DbName.CONTENT_PROCESSING)
                     )
                 elif job.status in {"failed", "timed_out"}:
                     events.append(
@@ -286,7 +260,7 @@ def build_timeline(
                             source_db=DbName.CONTENT_PROCESSING,
                         )
                     )
-                elif job.status in _SUCCESS_JOB_STATUSES:
+                elif job.status == "completed":
                     events.append(
                         _event(
                             StageKey.TRANSCRIPTION_DONE,
@@ -296,152 +270,16 @@ def build_timeline(
                         )
                     )
                 else:
-                    events.append(
-                        _event(StageKey.TRANSCRIPTION_DONE, StageStatus.NOT_STARTED)
-                    )
+                    events.append(_event(StageKey.TRANSCRIPTION_DONE, StageStatus.NOT_STARTED))
             else:
-                events.append(
-                    _event(StageKey.TRANSCRIPTION_DONE, StageStatus.NOT_APPLICABLE)
-                )
+                events.append(_event(StageKey.TRANSCRIPTION_DONE, StageStatus.NOT_APPLICABLE))
 
-            # Chunking follows transcription for media that produces a transcript.
-            chunking_expected = (
-                transcription_expected
-                or content.transcript is not None
-                or bool(content.chunks)
-            )
-            if content.chunks:
-                strategy = content.chunks[0].strategy if content.chunks else None
-                detail = f"{len(content.chunks)} chunk(s)"
-                if strategy:
-                    detail = f"{detail} · {strategy}"
-                events.append(
-                    _event(
-                        StageKey.CHUNKING_DONE,
-                        StageStatus.COMPLETED,
-                        content.chunks[0].created_at,
-                        detail=detail,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif chunking_expected:
-                if job.status == "chunking":
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.PENDING,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status == "transcribed":
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.PENDING,
-                            detail="awaiting chunking",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in {"failed", "timed_out"} and content.transcript is not None:
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.FAILED,
-                            detail=job.error_message,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in _SUCCESS_JOB_STATUSES:
-                    # Historical completed jobs may predate chunking.
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.NOT_STARTED,
-                            detail="Finished without content chunks",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                else:
-                    events.append(
-                        _event(StageKey.CHUNKING_DONE, StageStatus.NOT_STARTED)
-                    )
-            else:
-                events.append(_event(StageKey.CHUNKING_DONE, StageStatus.NOT_APPLICABLE))
-
-            # Embedding follows chunking (vectors stored in content-processing).
-            embedding_expected = bool(content.chunks) or bool(content.embeddings)
-            if content.embeddings:
-                first = content.embeddings[0]
-                detail = (
-                    f"{len(content.embeddings)} embedding(s)"
-                    f" · {first.provider}/{first.model}"
-                    f" · {first.dimensions}d"
-                )
-                events.append(
-                    _event(
-                        StageKey.EMBEDDING_DONE,
-                        StageStatus.COMPLETED,
-                        first.created_at,
-                        detail=detail,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif embedding_expected:
-                if job.status in {"chunked", "embedding"}:
-                    events.append(
-                        _event(
-                            StageKey.EMBEDDING_DONE,
-                            StageStatus.PENDING,
-                            detail="awaiting embedding",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in {"failed", "timed_out"} and content.chunks:
-                    events.append(
-                        _event(
-                            StageKey.EMBEDDING_DONE,
-                            StageStatus.FAILED,
-                            detail=job.error_message,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in _SUCCESS_JOB_STATUSES:
-                    events.append(
-                        _event(
-                            StageKey.EMBEDDING_DONE,
-                            StageStatus.NOT_STARTED,
-                            detail="No embeddings stored",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                else:
-                    events.append(
-                        _event(StageKey.EMBEDDING_DONE, StageStatus.NOT_STARTED)
-                    )
-            else:
-                events.append(
-                    _event(StageKey.EMBEDDING_DONE, StageStatus.NOT_APPLICABLE)
-                )
-
-            # CP finished only after embedding terminal success (or failure).
-            if job.status in {"chunked", "embedding"}:
-                events.append(
-                    _event(
-                        StageKey.CP_FINISHED,
-                        StageStatus.PENDING,
-                        detail="awaiting embedding"
-                        if job.status == "chunked"
-                        else "embedding in progress",
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif job.status in _SUCCESS_JOB_STATUSES:
+            if job.status == "completed":
                 events.append(
                     _event(
                         StageKey.CP_FINISHED,
                         StageStatus.COMPLETED,
                         job.updated_at,
-                        detail=job.status,
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
@@ -457,11 +295,7 @@ def build_timeline(
                 )
             else:
                 events.append(
-                    _event(
-                        StageKey.CP_FINISHED,
-                        StageStatus.PENDING,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
+                    _event(StageKey.CP_FINISHED, StageStatus.PENDING, source_db=DbName.CONTENT_PROCESSING)
                 )
 
         if att.status == "ready":
