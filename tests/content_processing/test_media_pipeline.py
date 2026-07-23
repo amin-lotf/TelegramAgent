@@ -289,11 +289,11 @@ def test_transcription_service_persists_complete_supported_result(
             .where(Transcript.job_id == job_id)
         )
     assert result.retryable is False
-    assert job is not None and job.status == JobStatus.COMPLETED
+    assert job is not None and job.status == JobStatus.TRANSCRIBED
     assert transcript is not None and transcript.duration_ms == 1500
     assert segment_count == 1
     assert [event.event_type for event in events] == [
-        OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
+        OutboxEventType.TRANSCRIPT_READY_FOR_CHUNKING.value
     ]
 
 
@@ -354,7 +354,7 @@ def test_transcription_service_accepts_document_video_audio(
 
     assert result.retryable is False
     assert result.error_message is None
-    assert job is not None and job.status == JobStatus.COMPLETED
+    assert job is not None and job.status == JobStatus.TRANSCRIBED
     assert transcript is not None
     assert transcript.text == "from document video"
 

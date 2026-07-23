@@ -35,7 +35,7 @@ from telegram_agent.core.content_processing.services.sync_chunking_service impor
 )
 
 
-def test_chunking_service_persists_chunks_and_finishes_job(
+def test_chunking_service_persists_chunks_and_enqueues_embedding(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,
     monkeypatch,
@@ -87,7 +87,7 @@ def test_chunking_service_persists_chunks_and_finishes_job(
     assert job is not None and job.status == JobStatus.CHUNKED
     assert chunk_count == 1
     assert [event.event_type for event in events] == [
-        OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
+        OutboxEventType.CHUNKS_READY_FOR_EMBEDDING.value
     ]
 
 
@@ -194,10 +194,16 @@ def test_chunking_service_idempotent_when_chunks_exist(
 
     with content_sync_sessionmaker() as session:
         job = session.get(Job, job_id)
+        events = list(
+            session.scalars(select(OutboxEvent).where(OutboxEvent.job_id == job_id))
+        )
 
     assert result.retryable is False
     assert called["value"] is False
     assert job is not None and job.status == JobStatus.CHUNKED
+    assert [event.event_type for event in events] == [
+        OutboxEventType.CHUNKS_READY_FOR_EMBEDDING.value
+    ]
 
 
 def _seed_transcribed_job(sessionmaker_: sessionmaker[Session]):
