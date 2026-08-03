@@ -97,6 +97,42 @@ class TranscriptionResult:
 
 
 @dataclass(frozen=True)
+class EmotionSegmentInput:
+    segment_index: int
+    start_ms: int
+    end_ms: int
+
+
+@dataclass(frozen=True)
+class EmotionExtractionContext:
+    job_id: UUID
+    media_asset_id: UUID
+    local_path: Path
+    mime_type: str | None
+    segments: tuple[EmotionSegmentInput, ...]
+
+
+@dataclass(frozen=True)
+class SegmentEmotionResult:
+    emotion: str | None
+    events: tuple[str, ...]
+    language: str | None = None
+    text: str | None = None
+
+
+@dataclass(frozen=True)
+class SegmentEmotionUpdate:
+    segment_index: int
+    emotion: str | None
+    audio_events: tuple[str, ...] | None
+
+
+@dataclass(frozen=True)
+class EmotionExtractionBatchResult:
+    segments: tuple[SegmentEmotionUpdate, ...]
+
+
+@dataclass(frozen=True)
 class ChunkingSegmentInput:
     segment_index: int
     start_ms: int

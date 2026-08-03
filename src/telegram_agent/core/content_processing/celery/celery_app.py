@@ -14,6 +14,7 @@ def create_celery_app() -> Celery:
         include=[
             "telegram_agent.core.content_processing.celery.tasks.media_download",
             "telegram_agent.core.content_processing.celery.tasks.transcription",
+            "telegram_agent.core.content_processing.celery.tasks.emotion_extraction",
             "telegram_agent.core.content_processing.celery.tasks.chunking",
             "telegram_agent.core.content_processing.celery.tasks.embedding",
             "telegram_agent.core.content_processing.celery.tasks.outbox_dispatch",
@@ -50,6 +51,11 @@ def create_celery_app() -> Celery:
                 "media_transcription",
                 Exchange("content_processing", type="direct"),
                 routing_key="media.transcribe",
+            ),
+            Queue(
+                "media_emotion_extraction",
+                Exchange("content_processing", type="direct"),
+                routing_key="media.extract_emotions",
             ),
             Queue(
                 "media_chunking",
@@ -99,6 +105,10 @@ def create_celery_app() -> Celery:
             "media.transcribe": {
                 "queue": "media_transcription",
                 "routing_key": "media.transcribe",
+            },
+            "media.extract_emotions": {
+                "queue": "media_emotion_extraction",
+                "routing_key": "media.extract_emotions",
             },
             "media.chunk": {
                 "queue": "media_chunking",

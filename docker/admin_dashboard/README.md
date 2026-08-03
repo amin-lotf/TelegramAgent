@@ -36,5 +36,5 @@ Point the `*_RO_DATABASE_URL` variables at that role.
 ## Notes
 
 - The dashboard never writes to service databases.
-- The current pipeline ends at agent-runtime message coordination; no Telegram reply records exist yet.
+- Agent-runtime pipeline: rule-based message grouping → download agent → content-processing handoff (intent classification removed).
 - Every settings field must appear in `.env.admin_dashboard.docker.example`.

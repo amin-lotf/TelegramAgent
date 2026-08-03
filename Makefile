@@ -4,7 +4,8 @@ HOST_GID := $(shell id -g)
 COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 
 .PHONY: up up-build down down-v restart ps logs \
-        logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx \
+        logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx logs-sensevoice \
+        logs-chunking logs-embedding logs-admin-dashboard logs-admin-dashboard-v2 \
         logs-telegram-bot-api \
         shell-celery \
         migrate-telegram-auth migrate-telegram-ingress migrate-content_processing migrate-agent-runtime \
@@ -37,7 +38,7 @@ logs-storage:
 	$(COMPOSE) logs -f --tail=100 telegram-ingress-migrate  telegram-auth-migrate n8n_postgres telegram_auth_postgres telegram_ingress_postgres  agent_runtime_postgres redis
 
 logs-app:
-	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime llm_gateway chunking embedding
+	$(COMPOSE) logs -f --tail=100  telegram-auth telegram-ingress content-processing agent-runtime llm_gateway chunking embedding whisperx sensevoice
 
 logs-chunking:
 	$(COMPOSE) logs -f --tail=100 chunking
@@ -62,6 +63,9 @@ logs-vllm:
 
 logs-whisperx:
 	$(COMPOSE) logs -f --tail=100 whisperx
+
+logs-sensevoice:
+	$(COMPOSE) logs -f --tail=100 sensevoice
 
 logs-telegram-bot-api:
 	$(COMPOSE) logs -f --tail=100 telegram-bot-api

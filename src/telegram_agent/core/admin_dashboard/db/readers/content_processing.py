@@ -134,6 +134,16 @@ class ContentProcessingReader:
                 language_probability=seg.language_probability,
                 speaker=seg.speaker,
                 speaker_confidence=seg.speaker_confidence,
+                emotion=seg.emotion,
+                audio_events=(
+                    tuple(str(item) for item in seg.audio_events)
+                    if isinstance(seg.audio_events, list)
+                    else (
+                        (str(seg.audio_events),)
+                        if seg.audio_events is not None
+                        else None
+                    )
+                ),
             )
             for seg in seg_result
         )

@@ -189,12 +189,17 @@ class SyncDownloadPreparationService:
                 JobStatus.RUNNING,
                 JobStatus.DOWNLOADED,
                 JobStatus.TRANSCRIBING,
-                JobStatus.TRANSCRIBED,
-                JobStatus.CHUNKING,
+                JobStatus.EMOTION_EXTRACTING,
             }
         )
         _TERMINAL_SUCCESS = frozenset(
             {
+                JobStatus.EMOTION_EXTRACTED,
+                # Transcript is already available once transcription finishes, so
+                # download preparation may also proceed from TRANSCRIBED while emotion
+                # extraction runs (or for historical jobs that ended at transcription).
+                JobStatus.TRANSCRIBED,
+                # Historical terminals from when chunking/embedding were active.
                 JobStatus.CHUNKED,
                 JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,

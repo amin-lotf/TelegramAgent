@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -12,11 +12,9 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageCommand,
 )
 from telegram_agent.core.agent_runtime.common.settings import Settings
-from telegram_agent.core.agent_runtime.common.models import CoordinatorDecision
 from telegram_agent.core.agent_runtime.common.types import (
     ClaimStatus,
     CoordinationStatus,
-    CoordinatorDecisionKind,
     OutboxEventStatus,
     OutboxEventType,
 )
@@ -36,7 +34,6 @@ from telegram_agent.core.agent_runtime.services.sync_message_group_coordination 
 )
 from telegram_agent.core.common.exceptions import PermanentAgentRuntimeCoordinationError
 from telegram_agent.core.common.utils import utcnow
-from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
 
 
 def _settings(**overrides) -> Settings:
@@ -78,16 +75,6 @@ async def _ingest(
     )
 
 
-class AlwaysNew:
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-
-
-class PermanentCoordinator:
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        raise PermanentAgentRuntimeCoordinationError("hard fail")
-
-
 class _FakeTask:
     def __init__(self) -> None:
         self.fail = False
@@ -104,6 +91,7 @@ async def test_permanent_failure_is_atomic_vague_and_failed(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
+    monkeypatch,
 ) -> None:
     chat_id = 9101
     await _ingest(
@@ -120,9 +108,17 @@ async def test_permanent_failure_is_atomic_vague_and_failed(
         )
         token = claimed[0].claim_token
 
+    def boom(*args, **kwargs):
+        raise PermanentAgentRuntimeCoordinationError("hard fail")
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        boom,
+    )
+
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(PermanentCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=token)
 
@@ -167,9 +163,17 @@ async def test_permanent_failure_rolls_back_if_outbox_update_fails(
         fail_mark_failed,
     )
 
+    def boom(*args, **kwargs):
+        raise PermanentAgentRuntimeCoordinationError("hard fail")
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        boom,
+    )
+
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(PermanentCoordinator()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=token)
 
@@ -203,7 +207,7 @@ async def test_broker_enqueue_failure_schedules_head_outbox_retry_and_releases_c
         uow_factory=agent_runtime_sync_uow_factory,
         task_by_event_type={
             OutboxEventType.MESSAGE_PENDING_COORDINATION.value: task,  # type: ignore[dict-item]
-            OutboxEventType.INTENT_CLASSIFIER.value: task,  # type: ignore[dict-item]
+            OutboxEventType.DOWNLOAD_HANDLER.value: task,  # type: ignore[dict-item]
         },
         batch_size=10,
         claim_lease_timeout=timedelta(minutes=5),
@@ -287,7 +291,6 @@ async def test_bounded_batch_leaves_remainder_immediately_claimable(
 
     service = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(coordination_message_batch_size=2),
     )
 
@@ -313,10 +316,10 @@ async def test_bounded_batch_leaves_remainder_immediately_claimable(
                 .order_by(OutboxEvent.message_id)
             ).all()
         )
-        intent_events = list(
+        download_events = list(
             session.scalars(
                 select(OutboxEvent)
-                .where(OutboxEvent.event_type == OutboxEventType.INTENT_CLASSIFIER.value)
+                .where(OutboxEvent.event_type == OutboxEventType.DOWNLOAD_HANDLER.value)
                 .order_by(OutboxEvent.message_id)
             ).all()
         )
@@ -327,8 +330,8 @@ async def test_bounded_batch_leaves_remainder_immediately_claimable(
             OutboxEventStatus.PENDING,
             OutboxEventStatus.PENDING,
         ]
-        assert len(intent_events) == 2
-        assert all(e.status == OutboxEventStatus.PENDING for e in intent_events)
+        assert len(download_events) == 2
+        assert all(e.status == OutboxEventStatus.PENDING for e in download_events)
         assert all(
             e.available_at <= utcnow()
             for e in coordination_events

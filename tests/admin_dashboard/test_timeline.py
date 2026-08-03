@@ -13,9 +13,11 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     ContentProcessingView,
     JobRow,
     MediaAssetRow,
+    OutboxRow,
     RuntimeMessageRow,
     TelegramSourceRow,
     TranscriptRow,
+    TranscriptSegmentRow,
     UserMessageRow,
 )
 
@@ -157,8 +159,8 @@ def test_voice_happy_path_timeline() -> None:
             attachment_file_unique_id=None,
             group_id=uuid4(),
             coordination_status="grouped",
-            status="classified",
-            intent="conversation",
+            status="coordinated",
+            intent=None,
             coordinated_at=now,
             created_at=now,
         ),
@@ -179,100 +181,10 @@ def test_voice_happy_path_timeline() -> None:
     assert by_key[StageKey.TRANSCRIPTION_DONE].status == StageStatus.COMPLETED
     assert by_key[StageKey.CHUNKING_DONE].status == StageStatus.COMPLETED
     assert "1 chunk" in (by_key[StageKey.CHUNKING_DONE].detail or "")
-    # Chunked with chunks but no vectors → still awaiting embedding stage.
-    assert by_key[StageKey.EMBEDDING_DONE].status == StageStatus.PENDING
-    assert "awaiting embedding" in (by_key[StageKey.EMBEDDING_DONE].detail or "")
-    assert by_key[StageKey.CP_FINISHED].status == StageStatus.PENDING
+    # Historical chunks without vectors → embedding skipped in the active pipeline.
+    assert by_key[StageKey.EMBEDDING_DONE].status == StageStatus.NOT_APPLICABLE
+    assert by_key[StageKey.CP_FINISHED].status == StageStatus.COMPLETED
     assert by_key[StageKey.COORDINATED].status == StageStatus.COMPLETED
-
-
-def test_embedding_pending_only_while_job_embedding() -> None:
-    message_id = uuid4()
-    att_id = uuid4()
-    job_id = uuid4()
-    now = _now()
-    message = UserMessageRow(
-        id=message_id,
-        telegram_user_id=1,
-        chat_id=1,
-        message_id=5,
-        update_id=None,
-        reply_message_id=None,
-        text=None,
-        conversation_status="pending",
-        dispatch_event_id=None,
-        created_at=now,
-        attachment=AttachmentRow(
-            id=att_id,
-            user_message_id=message_id,
-            file_id="file",
-            file_unique_id=None,
-            type="voice",
-            status="processing",
-            created_at=now,
-        ),
-    )
-    content = ContentProcessingView(
-        job=JobRow(
-            id=job_id,
-            kind="telegram attachment",
-            status="embedding",
-            idempotency_key="k",
-            error_message=None,
-            callback_required=True,
-            created_at=now,
-            updated_at=now,
-        ),
-        source=TelegramSourceRow(
-            id=uuid4(),
-            job_id=job_id,
-            ingress_message_id=message_id,
-            ingress_attachment_id=att_id,
-            telegram_user_id=1,
-            telegram_file_id="file",
-            telegram_file_unique_id=None,
-            attachment_type="voice",
-        ),
-        assets=(),
-        outbox_events=(),
-        transcript=TranscriptRow(
-            id=uuid4(),
-            job_id=job_id,
-            text="hello",
-            language="en",
-            language_probability=0.9,
-            duration_ms=500,
-        ),
-        chunks=(
-            ContentChunkRow(
-                id=uuid4(),
-                job_id=job_id,
-                content_type="transcript",
-                chunk_index=0,
-                text="hello",
-                start_ms=0,
-                end_ms=500,
-                char_count=5,
-                token_count=1,
-                segment_index_start=0,
-                segment_index_end=0,
-                speakers=None,
-                strategy="transcript_segment_window_v1",
-                created_at=now,
-            ),
-        ),
-    )
-    events = build_timeline(
-        message=message,
-        ingress_outbox=None,
-        content=content,
-        runtime=None,
-        cp_available=True,
-        runtime_available=True,
-    )
-    by_key = {e.key: e for e in events}
-    assert by_key[StageKey.EMBEDDING_DONE].status == StageStatus.PENDING
-    assert by_key[StageKey.CP_FINISHED].status == StageStatus.PENDING
 
 
 def test_embedding_completed_when_vectors_present() -> None:
@@ -381,7 +293,8 @@ def test_embedding_completed_when_vectors_present() -> None:
     assert by_key[StageKey.CP_FINISHED].status == StageStatus.COMPLETED
 
 
-def test_chunking_pending_after_transcription() -> None:
+def test_legacy_transcribed_without_emotion_stage() -> None:
+    """Jobs that finished at transcribed before emotion extraction still complete CP."""
     message_id = uuid4()
     att_id = uuid4()
     job_id = uuid4()
@@ -450,6 +363,219 @@ def test_chunking_pending_after_transcription() -> None:
     )
     by_key = {e.key: e for e in events}
     assert by_key[StageKey.TRANSCRIPTION_DONE].status == StageStatus.COMPLETED
-    assert by_key[StageKey.CHUNKING_DONE].status == StageStatus.PENDING
+    assert by_key[StageKey.EMOTION_EXTRACTION_DONE].status == StageStatus.NOT_APPLICABLE
+    assert by_key[StageKey.CHUNKING_DONE].status == StageStatus.NOT_APPLICABLE
     assert by_key[StageKey.EMBEDDING_DONE].status == StageStatus.NOT_APPLICABLE
+    assert by_key[StageKey.CP_FINISHED].status == StageStatus.COMPLETED
+
+
+def test_emotion_extraction_happy_path() -> None:
+    message_id = uuid4()
+    att_id = uuid4()
+    job_id = uuid4()
+    transcript_id = uuid4()
+    now = _now()
+    message = UserMessageRow(
+        id=message_id,
+        telegram_user_id=1,
+        chat_id=1,
+        message_id=5,
+        update_id=None,
+        reply_message_id=None,
+        text=None,
+        conversation_status="pending",
+        dispatch_event_id=None,
+        created_at=now,
+        attachment=AttachmentRow(
+            id=att_id,
+            user_message_id=message_id,
+            file_id="file",
+            file_unique_id=None,
+            type="voice",
+            status="ready",
+            created_at=now,
+        ),
+    )
+    content = ContentProcessingView(
+        job=JobRow(
+            id=job_id,
+            kind="telegram attachment",
+            status="emotion_extracted",
+            idempotency_key="k",
+            error_message=None,
+            callback_required=True,
+            created_at=now,
+            updated_at=now,
+        ),
+        source=TelegramSourceRow(
+            id=uuid4(),
+            job_id=job_id,
+            ingress_message_id=message_id,
+            ingress_attachment_id=att_id,
+            telegram_user_id=1,
+            telegram_file_id="file",
+            telegram_file_unique_id=None,
+            attachment_type="voice",
+        ),
+        assets=(),
+        outbox_events=(
+            OutboxRow(
+                id=uuid4(),
+                event_type="content_processing.transcript.ready_for_emotion_extraction",
+                status="published",
+                attempt_count=1,
+                created_at=now,
+                published_at=now,
+                available_at=now,
+                locked_at=None,
+                locked_by=None,
+                last_error=None,
+                idempotency_key=f"emotion:{job_id}",
+                payload={},
+                job_id=job_id,
+            ),
+            OutboxRow(
+                id=uuid4(),
+                event_type="content_processing.job.finished",
+                status="published",
+                attempt_count=1,
+                created_at=now,
+                published_at=now,
+                available_at=now,
+                locked_at=None,
+                locked_by=None,
+                last_error=None,
+                idempotency_key=f"finished:{job_id}",
+                payload={},
+                job_id=job_id,
+            ),
+        ),
+        transcript=TranscriptRow(
+            id=transcript_id,
+            job_id=job_id,
+            text="hello",
+            language="en",
+            language_probability=0.9,
+            duration_ms=500,
+            segments=(
+                TranscriptSegmentRow(
+                    id=uuid4(),
+                    transcript_id=transcript_id,
+                    segment_index=0,
+                    start_ms=0,
+                    end_ms=500,
+                    text="hello",
+                    language="en",
+                    language_probability=0.9,
+                    speaker=None,
+                    speaker_confidence=None,
+                    emotion="HAPPY",
+                    audio_events=("Speech",),
+                ),
+            ),
+        ),
+        chunks=(),
+    )
+    events = build_timeline(
+        message=message,
+        ingress_outbox=None,
+        content=content,
+        runtime=None,
+        cp_available=True,
+        runtime_available=True,
+    )
+    by_key = {e.key: e for e in events}
+    assert by_key[StageKey.TRANSCRIPTION_DONE].status == StageStatus.COMPLETED
+    assert by_key[StageKey.EMOTION_EXTRACTION_DONE].status == StageStatus.COMPLETED
+    assert "1/1 segment emotion" in (by_key[StageKey.EMOTION_EXTRACTION_DONE].detail or "")
+    assert by_key[StageKey.CHUNKING_DONE].status == StageStatus.NOT_APPLICABLE
+    assert by_key[StageKey.CP_FINISHED].status == StageStatus.COMPLETED
+
+
+def test_emotion_extraction_pending_after_transcription() -> None:
+    message_id = uuid4()
+    att_id = uuid4()
+    job_id = uuid4()
+    now = _now()
+    message = UserMessageRow(
+        id=message_id,
+        telegram_user_id=1,
+        chat_id=1,
+        message_id=5,
+        update_id=None,
+        reply_message_id=None,
+        text=None,
+        conversation_status="pending",
+        dispatch_event_id=None,
+        created_at=now,
+        attachment=AttachmentRow(
+            id=att_id,
+            user_message_id=message_id,
+            file_id="file",
+            file_unique_id=None,
+            type="voice",
+            status="processing",
+            created_at=now,
+        ),
+    )
+    content = ContentProcessingView(
+        job=JobRow(
+            id=job_id,
+            kind="telegram attachment",
+            status="transcribed",
+            idempotency_key="k",
+            error_message=None,
+            callback_required=True,
+            created_at=now,
+            updated_at=now,
+        ),
+        source=TelegramSourceRow(
+            id=uuid4(),
+            job_id=job_id,
+            ingress_message_id=message_id,
+            ingress_attachment_id=att_id,
+            telegram_user_id=1,
+            telegram_file_id="file",
+            telegram_file_unique_id=None,
+            attachment_type="voice",
+        ),
+        assets=(),
+        outbox_events=(
+            OutboxRow(
+                id=uuid4(),
+                event_type="content_processing.transcript.ready_for_emotion_extraction",
+                status="pending",
+                attempt_count=0,
+                created_at=now,
+                published_at=None,
+                available_at=now,
+                locked_at=None,
+                locked_by=None,
+                last_error=None,
+                idempotency_key=f"emotion:{job_id}",
+                payload={},
+                job_id=job_id,
+            ),
+        ),
+        transcript=TranscriptRow(
+            id=uuid4(),
+            job_id=job_id,
+            text="hello",
+            language="en",
+            language_probability=0.9,
+            duration_ms=500,
+        ),
+        chunks=(),
+    )
+    events = build_timeline(
+        message=message,
+        ingress_outbox=None,
+        content=content,
+        runtime=None,
+        cp_available=True,
+        runtime_available=True,
+    )
+    by_key = {e.key: e for e in events}
+    assert by_key[StageKey.TRANSCRIPTION_DONE].status == StageStatus.COMPLETED
+    assert by_key[StageKey.EMOTION_EXTRACTION_DONE].status == StageStatus.PENDING
     assert by_key[StageKey.CP_FINISHED].status == StageStatus.PENDING

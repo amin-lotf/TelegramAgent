@@ -255,14 +255,19 @@ class SyncSqlAlchemyRuntimeMessageRepository:
         *,
         runtime_message_id: UUID,
     ) -> RuntimeMessage | None:
-        """Mark a classified download-request message as permanently failed."""
+        """Mark a coordinated (post-group) message as permanently failed in download."""
         statement = (
             update(RuntimeMessage)
             .where(
                 RuntimeMessage.id == runtime_message_id,
                 RuntimeMessage.coordination_status == CoordinationStatus.GROUPED,
-                RuntimeMessage.status == RuntimeMessageStatus.CLASSIFIED,
-                RuntimeMessage.intent == MessageIntent.DOWNLOAD_REQUEST,
+                RuntimeMessage.status.in_(
+                    (
+                        RuntimeMessageStatus.COORDINATED,
+                        # Legacy: messages classified before intent step was removed.
+                        RuntimeMessageStatus.CLASSIFIED,
+                    )
+                ),
             )
             .values(status=RuntimeMessageStatus.FAILED)
             .returning(RuntimeMessage)

@@ -12,6 +12,8 @@ class JobStatus(StrEnum):
     DOWNLOADED = "downloaded"
     TRANSCRIBING = "transcribing"
     TRANSCRIBED = "transcribed"
+    EMOTION_EXTRACTING = "emotion_extracting"
+    EMOTION_EXTRACTED = "emotion_extracted"
     CHUNKING = "chunking"
     CHUNKED = "chunked"
     EMBEDDING = "embedding"
@@ -52,6 +54,9 @@ class MediaAssetRole(StrEnum):
 class OutboxEventType(StrEnum):
     CONTENT_PROCESSING_JOB_READY = "content_processing.job.ready"
     MEDIA_READY_FOR_TRANSCRIPTION = "content_processing.media.ready_for_transcription"
+    TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION = (
+        "content_processing.transcript.ready_for_emotion_extraction"
+    )
     TRANSCRIPT_READY_FOR_CHUNKING = "content_processing.transcript.ready_for_chunking"
     CHUNKS_READY_FOR_EMBEDDING = "content_processing.chunks.ready_for_embedding"
     CONTENT_PROCESSING_JOB_FINISHED = "content_processing.job.finished"

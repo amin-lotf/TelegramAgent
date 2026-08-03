@@ -155,8 +155,10 @@ class MessageTraceService:
         if runtime is not None:
             if runtime.message is not None and runtime.message.status == "failed":
                 detail = "Pipeline status is failed"
-                if runtime.message.intent:
-                    detail = f"{detail} (intent={runtime.message.intent})"
+                if runtime.message.coordination_status:
+                    detail = (
+                        f"{detail} (coordination={runtime.message.coordination_status})"
+                    )
                 failures.append(
                     FailureInfo(
                         source="agent_runtime.pipeline",

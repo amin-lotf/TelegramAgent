@@ -14,16 +14,17 @@ from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.content_processing.common.results import OutboxDispatchResult
 from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import OutboxEventType
-from telegram_agent.core.content_processing.celery.tasks.chunking import chunk_media_task
 from telegram_agent.core.content_processing.celery.tasks.download_delivery import (
     deliver_download_task,
 )
 from telegram_agent.core.content_processing.celery.tasks.download_preparation import (
     prepare_download_task,
 )
-from telegram_agent.core.content_processing.celery.tasks.embedding import embed_media_task
 from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
 from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
+from telegram_agent.core.content_processing.celery.tasks.emotion_extraction import (
+    extract_emotions_task,
+)
 from telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback import notify_telegram_ingress_task
 from telegram_agent.core.content_processing.db.models.content_processing import OutboxEvent
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
@@ -51,11 +52,12 @@ class OutboxDispatcher:
         self._retry_base_delay = retry_base_delay
         self._retry_max_delay = retry_max_delay
         self._lease_owner = lease_owner or self._default_lease_owner()
+        # Chunking/embedding tasks remain registered in Celery but are not dispatched:
+        # emotion extraction is the final pipeline stage for now.
         self._task_by_event_type: dict[str, Task] = {
             OutboxEventType.CONTENT_PROCESSING_JOB_READY.value: download_telegram_media_task,
             OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value: transcribe_media_task,
-            OutboxEventType.TRANSCRIPT_READY_FOR_CHUNKING.value: chunk_media_task,
-            OutboxEventType.CHUNKS_READY_FOR_EMBEDDING.value: embed_media_task,
+            OutboxEventType.TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION.value: extract_emotions_task,
             OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value: notify_telegram_ingress_task,
             OutboxEventType.DOWNLOAD_PREPARATION_READY.value: prepare_download_task,
             OutboxEventType.DOWNLOAD_READY_FOR_DELIVERY.value: deliver_download_task,

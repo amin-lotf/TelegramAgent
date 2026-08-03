@@ -70,6 +70,9 @@ class SyncTelegramIngressCallbackService:
             if job is None or not job.callback_required:
                 return None
             if job.status not in (
+                JobStatus.EMOTION_EXTRACTED,
+                # Historical terminals from when transcription/chunking/embedding ended the job.
+                JobStatus.TRANSCRIBED,
                 JobStatus.CHUNKED,
                 JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
@@ -87,9 +90,11 @@ class SyncTelegramIngressCallbackService:
                 )
             source = sources[0]
 
-            # EMBEDDED is the happy-path terminal after embedding; keep CHUNKED for
-            # historical jobs completed before the embedding stage existed.
+            # EMOTION_EXTRACTED is the happy-path terminal.
+            # Keep TRANSCRIBED/CHUNKED/EMBEDDED for historical jobs.
             success_statuses = (
+                JobStatus.EMOTION_EXTRACTED,
+                JobStatus.TRANSCRIBED,
                 JobStatus.EMBEDDED,
                 JobStatus.COMPLETED,
                 JobStatus.CHUNKED,

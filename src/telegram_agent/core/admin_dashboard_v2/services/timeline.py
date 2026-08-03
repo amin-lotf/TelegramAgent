@@ -108,8 +108,6 @@ def build_lifecycle_and_timeline(
                     "running",
                     "downloaded",
                     "transcribing",
-                    "transcribed",
-                    "chunking",
                 }
                 else StageStatus.UNKNOWN
             )
@@ -134,8 +132,6 @@ def build_lifecycle_and_timeline(
                 "running",
                 "downloaded",
                 "transcribing",
-                "transcribed",
-                "chunking",
             }
             else StageStatus.NOT_STARTED
         )
@@ -585,6 +581,8 @@ def _download_stage_status(job_status: str | None, source_status: DataSourceStat
         "transcribed",
         "chunking",
         "chunked",
+        "embedding",
+        "embedded",
         "completed",
     }:
         return StageStatus.COMPLETED

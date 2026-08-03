@@ -74,6 +74,8 @@ class SyncSqlAlchemyJobRepository:
             JobStatus.DOWNLOADED,
             JobStatus.TRANSCRIBING,
             JobStatus.TRANSCRIBED,
+            JobStatus.EMOTION_EXTRACTING,
+            JobStatus.EMOTION_EXTRACTED,
             JobStatus.CHUNKING,
             JobStatus.CHUNKED,
             JobStatus.EMBEDDING,
@@ -93,11 +95,50 @@ class SyncSqlAlchemyJobRepository:
         current_status = self._session.scalar(select(Job.status).where(Job.id == job_id))
         return current_status in (
             JobStatus.TRANSCRIBED,
+            JobStatus.EMOTION_EXTRACTING,
+            JobStatus.EMOTION_EXTRACTED,
             JobStatus.CHUNKING,
             JobStatus.CHUNKED,
             JobStatus.EMBEDDING,
             JobStatus.EMBEDDED,
         )
+
+    def claim_emotion_extraction(self, *, job_id: UUID, lease_timeout: timedelta) -> bool:
+        stale_before = utcnow() - lease_timeout
+        statement = (
+            update(Job)
+            .where(
+                Job.id == job_id,
+                or_(
+                    Job.status == JobStatus.TRANSCRIBED,
+                    (Job.status == JobStatus.EMOTION_EXTRACTING)
+                    & (Job.updated_at < stale_before),
+                ),
+            )
+            .values(
+                status=JobStatus.EMOTION_EXTRACTING,
+                error_message=None,
+                updated_at=func.now(),
+            )
+            .returning(Job.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def complete_emotion_extraction(self, *, job_id: UUID) -> bool:
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.EMOTION_EXTRACTING)
+            .values(
+                status=JobStatus.EMOTION_EXTRACTED,
+                error_message=None,
+                updated_at=func.now(),
+            )
+            .returning(Job.id)
+        )
+        if self._session.execute(statement).scalar_one_or_none() is not None:
+            return True
+        current_status = self._session.scalar(select(Job.status).where(Job.id == job_id))
+        return current_status == JobStatus.EMOTION_EXTRACTED
 
     def claim_chunking(self, *, job_id: UUID, lease_timeout: timedelta) -> bool:
         stale_before = utcnow() - lease_timeout
@@ -167,6 +208,14 @@ class SyncSqlAlchemyJobRepository:
     def mark_transcription_retryable(self, *, job_id: UUID, error_message: str) -> None:
         self._mark_retryable(job_id=job_id, from_status=JobStatus.TRANSCRIBING, to_status=JobStatus.DOWNLOADED, error_message=error_message)
 
+    def mark_emotion_extraction_retryable(self, *, job_id: UUID, error_message: str) -> None:
+        self._mark_retryable(
+            job_id=job_id,
+            from_status=JobStatus.EMOTION_EXTRACTING,
+            to_status=JobStatus.TRANSCRIBED,
+            error_message=error_message,
+        )
+
     def mark_chunking_retryable(self, *, job_id: UUID, error_message: str) -> None:
         self._mark_retryable(
             job_id=job_id,
@@ -184,13 +233,17 @@ class SyncSqlAlchemyJobRepository:
         )
 
     def mark_failed(self, *, job_id: UUID, error_message: str) -> bool:
-        # CHUNKED is intermediate (awaits embedding); only EMBEDDED/COMPLETED are success terminals.
+        # EMOTION_EXTRACTED is the happy-path terminal.
+        # CHUNKED/EMBEDDED remain terminals for historical jobs.
+        # TRANSCRIBED is intermediate (awaits emotion extraction) and may fail/timeout.
         statement = (
             update(Job)
             .where(
                 Job.id == job_id,
                 Job.status.not_in(
                     (
+                        JobStatus.EMOTION_EXTRACTED,
+                        JobStatus.CHUNKED,
                         JobStatus.EMBEDDED,
                         JobStatus.COMPLETED,
                         JobStatus.FAILED,
@@ -216,6 +269,8 @@ class SyncSqlAlchemyJobRepository:
                 Job.id == job_id,
                 Job.status.not_in(
                     (
+                        JobStatus.EMOTION_EXTRACTED,
+                        JobStatus.CHUNKED,
                         JobStatus.EMBEDDED,
                         JobStatus.COMPLETED,
                         JobStatus.FAILED,
@@ -236,6 +291,8 @@ class SyncSqlAlchemyJobRepository:
                 Job.id == job_id,
                 Job.status.not_in(
                     (
+                        JobStatus.EMOTION_EXTRACTED,
+                        JobStatus.CHUNKED,
                         JobStatus.EMBEDDED,
                         JobStatus.COMPLETED,
                         JobStatus.FAILED,

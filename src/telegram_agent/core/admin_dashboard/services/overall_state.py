@@ -16,18 +16,12 @@ _ACTIVE_JOB = frozenset(
         "running",
         "downloaded",
         "transcribing",
+        # Waiting for / running SenseVoice emotion extraction after transcription.
         "transcribed",
-        "chunking",
-        "chunked",
-        "embedding",
+        "emotion_extracting",
     }
 )
 _FAILED_JOB = frozenset({"failed", "cancelled", "timed_out"})
-_PIPELINE_IN_PROGRESS = frozenset(
-    {"received", "coordinating", "coordinated", "classifying"}
-)
-
-
 def overall_state_label(state: OverallState) -> str:
     return {
         OverallState.FAILED: "Failed",
@@ -35,7 +29,8 @@ def overall_state_label(state: OverallState) -> str:
         OverallState.PROCESSING_MEDIA: "Processing media",
         OverallState.DISPATCHING: "Dispatching",
         OverallState.COORDINATING: "Coordinating",
-        OverallState.CLASSIFYING: "Classifying intent",
+        # Legacy label kept for historical rows still carrying this enum value.
+        OverallState.CLASSIFYING: "Classifying intent (legacy)",
         OverallState.HANDLING_DOWNLOAD: "Handling download",
         OverallState.COMPLETED: "Completed",
         OverallState.PENDING_DISPATCH: "Pending dispatch",
@@ -75,7 +70,7 @@ def derive_overall_state(
         return OverallState.FAILED
 
     # Prefer an in-flight content-processing job over "waiting for media".
-    # Attachment may still be "processing" while download/transcription/chunking runs.
+    # Attachment may still be "processing" while download/transcription runs.
     if job is not None and job.status in _ACTIVE_JOB:
         return OverallState.PROCESSING_MEDIA
 
@@ -104,12 +99,13 @@ def derive_overall_state(
         )
         if download_pending or handoff_pending:
             return OverallState.HANDLING_DOWNLOAD
-        if pipeline == "classified":
-            return OverallState.COMPLETED
-        if pipeline in {"coordinated", "classifying"}:
-            return OverallState.CLASSIFYING
         if pipeline in {"received", "coordinating"}:
             return OverallState.COORDINATING
+        # After rule-based grouping, status stays coordinated; download agent may
+        # still be in-flight only via pending outbox (handled above).
+        # "classified" is a legacy pipeline status from the removed intent step.
+        if pipeline in {"coordinated", "classified", "classifying"}:
+            return OverallState.COMPLETED
         # Fallback when only coordination_status is known (list enrichment).
         if runtime_message.coordination_status == "pending":
             return OverallState.COORDINATING

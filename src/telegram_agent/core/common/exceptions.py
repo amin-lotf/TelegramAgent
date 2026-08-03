@@ -65,6 +65,18 @@ class WhisperXBackendBusyError(RuntimeError):
     ) -> None:
         super().__init__(message)
 
+
+class SenseVoiceBackendUnavailableError(Exception):
+    pass
+
+
+class SenseVoiceBackendBusyError(RuntimeError):
+    def __init__(
+        self,
+        message: str = "SenseVoice backend is busy",
+    ) -> None:
+        super().__init__(message)
+
 class ContentProcessingError(RuntimeError):
     """Base class for worker-side content processing failures."""
 
@@ -115,6 +127,22 @@ class WhisperXServiceError(RetryableContentProcessingError):
 
 class WhisperXResponseError(PermanentContentProcessingError):
     pass
+
+
+class SenseVoiceServiceError(RetryableContentProcessingError):
+    pass
+
+
+class SenseVoiceResponseError(PermanentContentProcessingError):
+    pass
+
+
+class AudioClipError(RetryableContentProcessingError):
+    """A transient failure while cutting an audio clip with ffmpeg."""
+
+
+class AudioClipPermanentError(PermanentContentProcessingError):
+    """A permanent failure while cutting an audio clip (missing source, invalid range)."""
 
 
 class ChunkingServiceError(RetryableContentProcessingError):

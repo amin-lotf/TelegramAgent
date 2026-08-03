@@ -80,4 +80,6 @@ transcript_segments = Table(
     Column("language_probability", Float),
     Column("speaker", String(64)),
     Column("speaker_confidence", Float),
+    Column("emotion", String(64)),
+    Column("audio_events", JSONB),
 )

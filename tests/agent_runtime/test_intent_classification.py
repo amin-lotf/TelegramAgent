@@ -38,13 +38,10 @@ from telegram_agent.core.agent_runtime.services.sync_message_group_coordination 
 from telegram_agent.core.common.exceptions import PermanentAgentRuntimeCoordinationError
 from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.llm_gateway.common.schemas import IntentKind
-from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
 from telegram_agent.core.agent_runtime.clients.models import (
     LlmGatewayGeneration,
     LlmGatewayTokenUsage,
 )
-from telegram_agent.core.agent_runtime.common.models import CoordinatorDecision
-from telegram_agent.core.agent_runtime.common.types import CoordinatorDecisionKind
 
 
 def _settings(**overrides) -> Settings:
@@ -61,10 +58,6 @@ def _settings(**overrides) -> Settings:
     values.update(overrides)
     return Settings(**values)
 
-
-class AlwaysNew:
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
 
 
 class FixedIntentGateway:
@@ -94,11 +87,17 @@ class FixedIntentGateway:
 async def _ingest_coordinate_and_claim_intent(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker,
     *,
     chat_id: int,
     text: str = "hello",
     key: str = "intent-seed",
 ) -> UUID:
+    """Seed a grouped message with a synthetic INTENT outbox for service unit tests.
+
+    The live pipeline no longer emits intent events (it goes straight to download).
+    These tests keep exercising SyncIntentClassificationService in isolation.
+    """
     await AsyncMessageBatchIngestionService(agent_runtime_uow_factory).ingest(
         IngestMessageBatchCommand(
             batch_id=uuid4(),
@@ -124,9 +123,39 @@ async def _ingest_coordinate_and_claim_intent(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    # Replace post-group download outbox with intent outbox for isolated service tests.
+    with agent_runtime_sync_sessionmaker() as session:
+        from sqlalchemy import select
+        from telegram_agent.core.agent_runtime.db.models.runtime import OutboxEvent, RuntimeMessage
+        message = session.scalars(
+            select(RuntimeMessage).where(RuntimeMessage.chat_id == chat_id)
+        ).one()
+        for event in session.scalars(
+            select(OutboxEvent).where(
+                OutboxEvent.runtime_message_id == message.id,
+                OutboxEvent.event_type == OutboxEventType.DOWNLOAD_HANDLER.value,
+            )
+        ).all():
+            session.delete(event)
+        session.add(
+            OutboxEvent(
+                event_type=OutboxEventType.INTENT_CLASSIFIER.value,
+                chat_id=chat_id,
+                runtime_message_id=message.id,
+                message_id=message.message_id,
+                idempotency_key=f"agent_runtime:intent_classifier:{message.ingress_message_id}:v1",
+                payload={
+                    "ingress_message_id": str(message.ingress_message_id),
+                    "chat_id": chat_id,
+                    "message_id": message.message_id,
+                    "group_id": str(message.group_id) if message.group_id else None,
+                },
+            )
+        )
+        session.commit()
 
     with agent_runtime_sync_uow_factory() as uow:
         claimed = uow.conversation_claims.claim_available_conversations(
@@ -148,6 +177,7 @@ async def test_intent_classifier_marks_classified_and_publishes_outbox(
     claim_token = await _ingest_coordinate_and_claim_intent(
         agent_runtime_uow_factory,
         agent_runtime_sync_uow_factory,
+        agent_runtime_sync_sessionmaker,
         chat_id=chat_id,
         text="how are you?",
     )
@@ -191,6 +221,7 @@ async def test_intent_classifier_download_request(
     claim_token = await _ingest_coordinate_and_claim_intent(
         agent_runtime_uow_factory,
         agent_runtime_sync_uow_factory,
+        agent_runtime_sync_sessionmaker,
         chat_id=chat_id,
         text="download https://example.com/video.mp4",
         key="intent-download",
@@ -226,6 +257,7 @@ async def test_intent_classifier_permanent_failure(
     claim_token = await _ingest_coordinate_and_claim_intent(
         agent_runtime_uow_factory,
         agent_runtime_sync_uow_factory,
+        agent_runtime_sync_sessionmaker,
         chat_id=chat_id,
         key="intent-permanent",
     )
@@ -262,6 +294,7 @@ async def test_intent_classifier_retryable_failure_backs_off(
     claim_token = await _ingest_coordinate_and_claim_intent(
         agent_runtime_uow_factory,
         agent_runtime_sync_uow_factory,
+        agent_runtime_sync_sessionmaker,
         chat_id=chat_id,
         key="intent-retry",
     )
@@ -322,7 +355,6 @@ async def test_grouped_message_emits_intent_outbox(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(AlwaysNew()),
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=token)
 
@@ -338,7 +370,7 @@ async def test_grouped_message_emits_intent_outbox(
         == OutboxEventStatus.PUBLISHED
     )
     assert (
-        by_type[OutboxEventType.INTENT_CLASSIFIER.value].status
+        by_type[OutboxEventType.DOWNLOAD_HANDLER.value].status
         == OutboxEventStatus.PENDING
     )
 

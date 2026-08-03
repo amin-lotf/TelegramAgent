@@ -98,8 +98,8 @@ def test_completed_after_coordination() -> None:
         attachment_file_unique_id=None,
         group_id=uuid4(),
         coordination_status="grouped",
-        status="classified",
-        intent="conversation",
+        status="coordinated",
+        intent=None,
         coordinated_at=_now(),
         created_at=_now(),
     )
@@ -117,7 +117,9 @@ def test_completed_after_coordination() -> None:
     assert state == OverallState.COMPLETED
 
 
-def test_classifying_after_coordination() -> None:
+def test_handling_download_when_download_outbox_pending() -> None:
+    from telegram_agent.core.admin_dashboard.services.view_models import OutboxRow
+
     msg = _message(conversation_status="dispatched")
     runtime_msg = RuntimeMessageRow(
         id=uuid4(),
@@ -140,6 +142,20 @@ def test_classifying_after_coordination() -> None:
         coordinated_at=_now(),
         created_at=_now(),
     )
+    outbox = OutboxRow(
+        id=uuid4(),
+        event_type="agent_runtime.message.pending_download_handler",
+        status="pending",
+        attempt_count=0,
+        created_at=_now(),
+        published_at=None,
+        available_at=_now(),
+        locked_at=None,
+        locked_by=None,
+        last_error=None,
+        idempotency_key="agent_runtime:download_handler:test:v1",
+        payload={},
+    )
     state = derive_overall_state(
         message=msg,
         content=None,
@@ -147,11 +163,11 @@ def test_classifying_after_coordination() -> None:
             message=runtime_msg,
             batch=None,
             group=None,
-            outbox=None,
+            outbox=outbox,
             claim=None,
         ),
     )
-    assert state == OverallState.CLASSIFYING
+    assert state == OverallState.HANDLING_DOWNLOAD
 
 
 def test_processing_media_from_job_status() -> None:
@@ -183,7 +199,7 @@ def test_processing_media_from_job_status() -> None:
     assert state == OverallState.PROCESSING_MEDIA
 
 
-def test_processing_media_while_chunking() -> None:
+def test_processing_media_while_transcribing_or_extracting_emotion() -> None:
     msg = _message(
         attachment=AttachmentRow(
             id=uuid4(),
@@ -195,7 +211,14 @@ def test_processing_media_while_chunking() -> None:
             created_at=_now(),
         )
     )
-    for status in ("transcribed", "chunking", "chunked", "embedding"):
+    for status in (
+        "queued",
+        "running",
+        "downloaded",
+        "transcribing",
+        "transcribed",
+        "emotion_extracting",
+    ):
         content = ContentProcessingView(
             job=JobRow(
                 id=uuid4(),
@@ -211,3 +234,33 @@ def test_processing_media_while_chunking() -> None:
         )
         state = derive_overall_state(message=msg, content=content, runtime=None)
         assert state == OverallState.PROCESSING_MEDIA, status
+
+
+def test_emotion_extracted_is_not_processing_media() -> None:
+    """Emotion extraction is the final CP stage; completed jobs are not in-flight."""
+    msg = _message(
+        attachment=AttachmentRow(
+            id=uuid4(),
+            user_message_id=uuid4(),
+            file_id="f",
+            file_unique_id=None,
+            type="voice",
+            status="processing",
+            created_at=_now(),
+        )
+    )
+    content = ContentProcessingView(
+        job=JobRow(
+            id=uuid4(),
+            kind="telegram attachment",
+            status="emotion_extracted",
+            idempotency_key="k-emotion-extracted",
+            error_message=None,
+            callback_required=True,
+            created_at=_now(),
+            updated_at=_now(),
+        ),
+        source=None,
+    )
+    state = derive_overall_state(message=msg, content=content, runtime=None)
+    assert state != OverallState.PROCESSING_MEDIA

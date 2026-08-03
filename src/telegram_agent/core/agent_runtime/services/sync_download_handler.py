@@ -20,7 +20,6 @@ from telegram_agent.core.agent_runtime.common.results import (
 from telegram_agent.core.agent_runtime.common.settings import Settings, settings
 from telegram_agent.core.agent_runtime.common.types import (
     AgentMessageRole,
-    MessageIntent,
     OutboxEventType,
     RuntimeMessageStatus,
 )
@@ -228,6 +227,7 @@ class SyncDownloadHandlerService:
             media_ingress_message_id,
             media_message_id,
             media_type,
+            group_message_ids,
         ) = load_result
 
         try:
@@ -248,12 +248,26 @@ class SyncDownloadHandlerService:
                     "LLM gateway returned an invalid download-agent extraction"
                 ) from exc
 
+            if not decision.is_download_request:
+                return self._apply_invalid_request(
+                    chat_id=chat_id,
+                    runtime_message_id=runtime_message_id,
+                    claim_token=claim_token,
+                    lease_timeout=lease_timeout,
+                    group_id=group_id,
+                    group_message_ids=group_message_ids,
+                    trigger_ingress_message_id=trigger_ingress_message_id,
+                    trigger_telegram_user_id=trigger_telegram_user_id,
+                    decision=decision,
+                )
+
             return self._apply_success(
                 chat_id=chat_id,
                 runtime_message_id=runtime_message_id,
                 claim_token=claim_token,
                 lease_timeout=lease_timeout,
                 group_id=group_id,
+                group_message_ids=group_message_ids,
                 trigger_ingress_message_id=trigger_ingress_message_id,
                 trigger_telegram_user_id=trigger_telegram_user_id,
                 trigger_message_id=trigger_message_id,
@@ -305,7 +319,17 @@ class SyncDownloadHandlerService:
         lease_timeout: timedelta,
     ) -> (
         MessageDownloadHandlerResult
-        | tuple[UUID, list[str], UUID, int, int, UUID, int, TelegramAttachmentType]
+        | tuple[
+            UUID,
+            list[str],
+            UUID,
+            int,
+            int,
+            UUID,
+            int,
+            TelegramAttachmentType,
+            list[UUID],
+        ]
         | PermanentAgentRuntimeCoordinationError
         | RetryableAgentRuntimeCoordinationError
         | None
@@ -321,9 +345,11 @@ class SyncDownloadHandlerService:
             message = uow.messages.get_by_id(runtime_message_id)
             if message is None or message.chat_id != chat_id:
                 return None
-            if message.status != RuntimeMessageStatus.CLASSIFIED:
-                return None
-            if message.intent != MessageIntent.DOWNLOAD_REQUEST:
+            # Download runs immediately after grouping (no intent classification step).
+            if message.status not in (
+                RuntimeMessageStatus.COORDINATED,
+                RuntimeMessageStatus.CLASSIFIED,  # legacy in-flight messages
+            ):
                 return None
 
             head = uow.outbox_events.get_head_unresolved_for_chat(chat_id=chat_id)
@@ -347,19 +373,20 @@ class SyncDownloadHandlerService:
                 group_id=group_id,
                 role=AgentMessageRole.DOWNLOAD_AGENT,
             )
+            group_message_ids = [item.id for item in group_messages]
             if existing_agent is not None:
-                published = uow.outbox_events.mark_published_for_message(
-                    runtime_message_id=runtime_message_id,
+                published_count = uow.outbox_events.mark_published_for_messages(
+                    runtime_message_ids=group_message_ids,
                     claim_token=claim_token,
                     event_type=OutboxEventType.DOWNLOAD_HANDLER,
                 )
-                if published is None:
+                if published_count < 1:
                     return RetryableAgentRuntimeCoordinationError(
                         "Failed to mark download-handler outbox published under active claim"
                     )
                 return MessageDownloadHandlerResult(
                     runtime_message_id=runtime_message_id,
-                    status=RuntimeMessageStatus.CLASSIFIED.value,
+                    status=message.status.value,
                     early_exit=True,
                     agent_message_id=existing_agent.id,
                 )
@@ -399,7 +426,7 @@ class SyncDownloadHandlerService:
                 )
                 return MessageDownloadHandlerResult(
                     runtime_message_id=runtime_message_id,
-                    status=RuntimeMessageStatus.CLASSIFIED.value,
+                    status=message.status.value,
                     early_exit=True,
                 )
 
@@ -423,7 +450,102 @@ class SyncDownloadHandlerService:
                 media_message.ingress_message_id,
                 media_message.message_id,
                 media_message.attachment_type,
+                group_message_ids,
             )
+
+    def _apply_invalid_request(
+        self,
+        *,
+        chat_id: int,
+        runtime_message_id: UUID,
+        claim_token: UUID,
+        lease_timeout: timedelta,
+        group_id: UUID,
+        group_message_ids: list[UUID],
+        trigger_ingress_message_id: UUID,
+        trigger_telegram_user_id: int,
+        decision: DownloadAgentDecision,
+    ) -> MessageDownloadHandlerResult:
+        """User text was not a download request: notify and close outbox without handoff.
+
+        Intentionally does not store an agent_message so a later clearer instruction
+        in the same group can re-run the download agent.
+        """
+        notify_text = decision.assistant_text
+
+        with self._uow_factory() as uow:
+            if not uow.conversation_claims.verify_claim(
+                chat_id=chat_id,
+                claim_token=claim_token,
+                lease_timeout=lease_timeout,
+            ):
+                raise RetryableAgentRuntimeCoordinationError(
+                    "Claim token is no longer valid"
+                )
+
+            existing = uow.agent_messages.get_by_group_and_role(
+                group_id=group_id,
+                role=AgentMessageRole.DOWNLOAD_AGENT,
+            )
+            if existing is not None:
+                published_count = uow.outbox_events.mark_published_for_messages(
+                    runtime_message_ids=group_message_ids,
+                    claim_token=claim_token,
+                    event_type=OutboxEventType.DOWNLOAD_HANDLER,
+                )
+                if published_count < 1:
+                    raise RetryableAgentRuntimeCoordinationError(
+                        "Failed to mark download-handler outbox published under active claim"
+                    )
+                return MessageDownloadHandlerResult(
+                    runtime_message_id=runtime_message_id,
+                    status=RuntimeMessageStatus.COORDINATED.value,
+                    early_exit=True,
+                    agent_message_id=existing.id,
+                )
+
+            published_count = uow.outbox_events.mark_published_for_messages(
+                runtime_message_ids=group_message_ids,
+                claim_token=claim_token,
+                event_type=OutboxEventType.DOWNLOAD_HANDLER,
+            )
+            if published_count < 1:
+                raise RetryableAgentRuntimeCoordinationError(
+                    "Failed to mark download-handler outbox published under active claim"
+                )
+
+        try:
+            self._telegram_ingress_client.notify_request_preparing(
+                chat_id=chat_id,
+                telegram_user_id=trigger_telegram_user_id,
+                text=notify_text,
+                group_id=group_id,
+                ingress_message_id=trigger_ingress_message_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Best-effort telegram notify failed after invalid download request",
+                extra={
+                    "chat_id": chat_id,
+                    "runtime_message_id": str(runtime_message_id),
+                    "error": str(exc),
+                },
+            )
+
+        logger.info(
+            "Download handler rejected non-download request",
+            extra={
+                "chat_id": chat_id,
+                "runtime_message_id": str(runtime_message_id),
+                "group_id": str(group_id),
+            },
+        )
+        return MessageDownloadHandlerResult(
+            runtime_message_id=runtime_message_id,
+            status=RuntimeMessageStatus.COORDINATED.value,
+            early_exit=False,
+            agent_message_id=None,
+        )
 
     def _apply_success(
         self,
@@ -433,6 +555,7 @@ class SyncDownloadHandlerService:
         claim_token: UUID,
         lease_timeout: timedelta,
         group_id: UUID,
+        group_message_ids: list[UUID],
         trigger_ingress_message_id: UUID,
         trigger_telegram_user_id: int,
         trigger_message_id: int,
@@ -469,18 +592,18 @@ class SyncDownloadHandlerService:
                 role=AgentMessageRole.DOWNLOAD_AGENT,
             )
             if existing is not None:
-                published = uow.outbox_events.mark_published_for_message(
-                    runtime_message_id=runtime_message_id,
+                published_count = uow.outbox_events.mark_published_for_messages(
+                    runtime_message_ids=group_message_ids,
                     claim_token=claim_token,
                     event_type=OutboxEventType.DOWNLOAD_HANDLER,
                 )
-                if published is None:
+                if published_count < 1:
                     raise RetryableAgentRuntimeCoordinationError(
                         "Failed to mark download-handler outbox published under active claim"
                     )
                 return MessageDownloadHandlerResult(
                     runtime_message_id=runtime_message_id,
-                    status=RuntimeMessageStatus.CLASSIFIED.value,
+                    status=RuntimeMessageStatus.COORDINATED.value,
                     early_exit=True,
                     agent_message_id=existing.id,
                 )
@@ -509,12 +632,14 @@ class SyncDownloadHandlerService:
                     )
                 )
 
-            published = uow.outbox_events.mark_published_for_message(
-                runtime_message_id=runtime_message_id,
+            # Publish all group download-handler events so siblings are not blocked
+            # behind the newly created content-processing handoff outbox.
+            published_count = uow.outbox_events.mark_published_for_messages(
+                runtime_message_ids=group_message_ids,
                 claim_token=claim_token,
                 event_type=OutboxEventType.DOWNLOAD_HANDLER,
             )
-            if published is None:
+            if published_count < 1:
                 raise RetryableAgentRuntimeCoordinationError(
                     "Failed to mark download-handler outbox published under active claim"
                 )
@@ -540,7 +665,7 @@ class SyncDownloadHandlerService:
 
         return MessageDownloadHandlerResult(
             runtime_message_id=runtime_message_id,
-            status=RuntimeMessageStatus.CLASSIFIED.value,
+            status=RuntimeMessageStatus.COORDINATED.value,
             early_exit=False,
             agent_message_id=agent_message_id,
         )

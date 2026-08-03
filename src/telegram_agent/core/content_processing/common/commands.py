@@ -82,6 +82,19 @@ class RecordTranscriptCommand:
 
 
 @dataclass(frozen=True)
+class UpdateTranscriptSegmentEmotionCommand:
+    segment_index: int
+    emotion: str | None
+    audio_events: tuple[str, ...] | None
+
+
+@dataclass(frozen=True)
+class RecordSegmentEmotionsCommand:
+    job_id: UUID
+    segments: tuple[UpdateTranscriptSegmentEmotionCommand, ...]
+
+
+@dataclass(frozen=True)
 class RecordContentChunkCommand:
     chunk_index: int
     text: str

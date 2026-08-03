@@ -12,10 +12,8 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageCommand,
 )
 from telegram_agent.core.agent_runtime.common.settings import Settings
-from telegram_agent.core.agent_runtime.common.models import CoordinatorDecision
 from telegram_agent.core.agent_runtime.common.types import (
     CoordinationStatus,
-    CoordinatorDecisionKind,
     OutboxEventStatus,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
@@ -32,9 +30,11 @@ from telegram_agent.core.agent_runtime.services.async_message_batch_ingestion im
 from telegram_agent.core.agent_runtime.services.sync_message_group_coordination import (
     SyncMessageGroupCoordinationService,
 )
-from telegram_agent.core.common.exceptions import PermanentAgentRuntimeCoordinationError
+from telegram_agent.core.common.exceptions import (
+    PermanentAgentRuntimeCoordinationError,
+    RetryableAgentRuntimeCoordinationError,
+)
 from telegram_agent.core.common.utils import utcnow
-from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
 
 
 def _settings(**overrides) -> Settings:
@@ -50,6 +50,13 @@ def _settings(**overrides) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+def _service(uow_factory, **settings_overrides) -> SyncMessageGroupCoordinationService:
+    return SyncMessageGroupCoordinationService(
+        uow_factory=uow_factory,
+        settings=_settings(**settings_overrides),
+    )
 
 
 async def _ingest_and_claim(
@@ -78,55 +85,12 @@ async def _ingest_and_claim(
         return claimed[0].claim_token
 
 
-class PermanentCoordinator:
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        raise PermanentAgentRuntimeCoordinationError("protocol broken")
-
-
-class RetryableCoordinator:
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        raise RuntimeError("transient boom")
-
-
-class CaptureWindowCoordinator:
-    def __init__(self) -> None:
-        self.windows: list[list[int]] = []
-        self.step = 0
-
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        self.windows.append([item.message_id for item in recent_window])
-        self.step += 1
-        if self.step == 1:
-            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-        if self.step == 2:
-            return CoordinatorDecision(kind=CoordinatorDecisionKind.VAGUE)
-        # After a vague message, window must still only show grouped priors.
-        return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-
-
-class ScriptedGroupCoordinator:
-    """NEW then EXISTING using the group number from the window."""
-
-    def __init__(self) -> None:
-        self.step = 0
-
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        self.step += 1
-        if self.step == 1:
-            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-        assert recent_window
-        assert recent_window[-1].group_number == 1
-        return CoordinatorDecision(
-            kind=CoordinatorDecisionKind.EXISTING,
-            group_number=recent_window[-1].group_number,
-        )
-
-
 @pytest.mark.asyncio
 async def test_permanent_error_marks_outbox_failed_not_retryable(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
+    monkeypatch,
 ) -> None:
     chat_id = 9001
     claim_token = await _ingest_and_claim(
@@ -144,11 +108,18 @@ async def test_permanent_error_marks_outbox_failed_not_retryable(
         ),
     )
 
-    SyncMessageGroupCoordinationService(
-        uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(PermanentCoordinator()),
-        settings=_settings(),
-    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+    def boom(*args, **kwargs):
+        raise PermanentAgentRuntimeCoordinationError("protocol broken")
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        boom,
+    )
+
+    _service(agent_runtime_sync_uow_factory).process_conversation(
+        chat_id=chat_id, claim_token=claim_token
+    )
 
     with agent_runtime_sync_sessionmaker() as session:
         event = session.scalars(select(OutboxEvent)).one()
@@ -165,6 +136,7 @@ async def test_stale_claim_cannot_record_retryable_failure(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
+    monkeypatch,
 ) -> None:
     chat_id = 9002
     old_token = await _ingest_and_claim(
@@ -204,11 +176,18 @@ async def test_stale_claim_cannot_record_retryable_failure(
         new_token = new_claims[0].claim_token
         assert new_token != old_token
 
-    SyncMessageGroupCoordinationService(
-        uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(RetryableCoordinator()),
-        settings=_settings(),
-    ).process_conversation(chat_id=chat_id, claim_token=old_token)
+    def boom(*args, **kwargs):
+        raise RetryableAgentRuntimeCoordinationError("transient boom")
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        boom,
+    )
+
+    _service(agent_runtime_sync_uow_factory).process_conversation(
+        chat_id=chat_id, claim_token=old_token
+    )
 
     with agent_runtime_sync_sessionmaker() as session:
         event = session.scalars(select(OutboxEvent)).one()
@@ -226,13 +205,22 @@ async def test_retryable_failure_uses_exponential_backoff(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
+    monkeypatch,
 ) -> None:
     chat_id = 9003
     settings = _settings(outbox_retry_base_seconds=5, outbox_retry_max_seconds=40)
     service = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(RetryableCoordinator()),
         settings=settings,
+    )
+
+    def boom(*args, **kwargs):
+        raise RetryableAgentRuntimeCoordinationError("transient boom")
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        boom,
     )
 
     await AsyncMessageBatchIngestionService(agent_runtime_uow_factory).ingest(
@@ -298,6 +286,7 @@ async def test_retryable_failure_promotes_to_permanent_after_max_attempts(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
+    monkeypatch,
 ) -> None:
     """Poison messages must not block a chat forever after max attempts."""
     chat_id = 9010
@@ -309,8 +298,16 @@ async def test_retryable_failure_promotes_to_permanent_after_max_attempts(
     )
     service = SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(RetryableCoordinator()),
         settings=settings,
+    )
+
+    def boom(*args, **kwargs):
+        raise RetryableAgentRuntimeCoordinationError("transient boom")
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        boom,
     )
 
     await AsyncMessageBatchIngestionService(agent_runtime_uow_factory).ingest(
@@ -379,10 +376,13 @@ async def test_retryable_failure_promotes_to_permanent_after_max_attempts(
 
 
 @pytest.mark.asyncio
-async def test_vague_messages_excluded_from_recent_window(
+async def test_vague_messages_excluded_from_latest_group(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+    monkeypatch,
 ) -> None:
+    """After a permanent failure (vague), later text joins the prior grouped message."""
     chat_id = 9004
     claim_token = await _ingest_and_claim(
         agent_runtime_uow_factory,
@@ -411,17 +411,76 @@ async def test_vague_messages_excluded_from_recent_window(
         ),
     )
 
-    capture = CaptureWindowCoordinator()
-    SyncMessageGroupCoordinationService(
-        uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(capture),
-        settings=_settings(),
-    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+    call_count = {"n": 0}
 
-    # Windows for messages 1,2,3: [], [1], [1]  — vague message 2 never appears.
-    assert capture.windows[0] == []
-    assert capture.windows[1] == [1]
-    assert capture.windows[2] == [1]
+    original_apply = SyncMessageGroupCoordinationService._apply_decision
+
+    def maybe_fail(self, *args, **kwargs):
+        call_count["n"] += 1
+        # Fail the second message permanently.
+        if call_count["n"] == 2:
+            raise PermanentAgentRuntimeCoordinationError("force vague")
+        return original_apply(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        maybe_fail,
+    )
+
+    result = _service(agent_runtime_sync_uow_factory).process_conversation(
+        chat_id=chat_id, claim_token=claim_token
+    )
+
+    # Message 2 fails permanently (processed=None stops batch?); check carefully.
+    # process_conversation appends only successful results; permanent returns None and breaks.
+    assert result.processed == 1
+
+    # Claim remaining after permanent failure on head would leave msg 2 vague and 3 pending.
+    with agent_runtime_sync_sessionmaker() as session:
+        messages = list(
+            session.scalars(
+                select(RuntimeMessage)
+                .where(RuntimeMessage.chat_id == chat_id)
+                .order_by(RuntimeMessage.message_id)
+            ).all()
+        )
+    assert messages[0].coordination_status == CoordinationStatus.GROUPED
+    assert messages[1].coordination_status == CoordinationStatus.VAGUE
+    assert messages[2].coordination_status == CoordinationStatus.PENDING
+
+    # Re-claim and process remaining message 3 — should join group of message 1.
+    with agent_runtime_sync_uow_factory() as uow:
+        claimed = uow.conversation_claims.claim_available_conversations(
+            batch_size=1,
+            lease_timeout=timedelta(minutes=5),
+            process_owner="after-vague",
+        )
+        assert len(claimed) == 1
+        token2 = claimed[0].claim_token
+
+    # Stop forcing failures.
+    monkeypatch.setattr(
+        SyncMessageGroupCoordinationService,
+        "_apply_decision",
+        original_apply,
+    )
+
+    result2 = _service(agent_runtime_sync_uow_factory).process_conversation(
+        chat_id=chat_id, claim_token=token2
+    )
+    assert result2.processed == 1
+    assert result2.results[0].group_number == 1
+
+    with agent_runtime_sync_sessionmaker() as session:
+        messages = list(
+            session.scalars(
+                select(RuntimeMessage)
+                .where(RuntimeMessage.chat_id == chat_id)
+                .order_by(RuntimeMessage.message_id)
+            ).all()
+        )
+    assert messages[2].group_id == messages[0].group_id
 
 
 @pytest.mark.asyncio
@@ -447,24 +506,10 @@ async def test_latest_group_before_is_chronological_oldest_to_newest(
         ),
     )
 
-    # Put first three into one group so the fourth sees the full latest group.
-    class SameGroupThenStop:
-        def __init__(self) -> None:
-            self.step = 0
-
-        def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-            self.step += 1
-            if self.step == 1:
-                return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-            return CoordinatorDecision(
-                kind=CoordinatorDecisionKind.EXISTING,
-                group_number=1,
-            )
-
-    SyncMessageGroupCoordinationService(
-        uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(SameGroupThenStop()),
-        settings=_settings(coordination_message_batch_size=3),
+    # Non-reply texts all join the same latest group.
+    _service(
+        agent_runtime_sync_uow_factory,
+        coordination_message_batch_size=3,
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
     with agent_runtime_sync_sessionmaker() as session:
@@ -504,11 +549,9 @@ async def test_same_task_prior_group_visible_to_later_message(
         ),
     )
 
-    result = SyncMessageGroupCoordinationService(
-        uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(ScriptedGroupCoordinator()),
-        settings=_settings(),
-    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+    result = _service(agent_runtime_sync_uow_factory).process_conversation(
+        chat_id=chat_id, claim_token=claim_token
+    )
 
     assert result.results[0].group_number == 1
     assert result.results[1].group_number == 1

@@ -16,15 +16,11 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageBatchCommand,
     IngestMessageCommand,
 )
-from telegram_agent.core.agent_runtime.common.models import (
-    CoordinatorDecision,
-    DownloadAgentDecision,
-)
+from telegram_agent.core.agent_runtime.common.models import DownloadAgentDecision
 from telegram_agent.core.agent_runtime.common.settings import Settings
 from telegram_agent.core.agent_runtime.common.types import (
     AgentMessageRole,
     ClaimStatus,
-    CoordinatorDecisionKind,
     OutboxEventStatus,
     OutboxEventType,
     RuntimeMessageStatus,
@@ -44,9 +40,6 @@ from telegram_agent.core.agent_runtime.services.sync_content_processing_handoff 
 from telegram_agent.core.agent_runtime.services.sync_download_handler import (
     SyncDownloadHandlerService,
 )
-from telegram_agent.core.agent_runtime.services.sync_intent_classification import (
-    SyncIntentClassificationService,
-)
 from telegram_agent.core.agent_runtime.services.sync_message_group_coordination import (
     SyncMessageGroupCoordinationService,
 )
@@ -55,9 +48,6 @@ from telegram_agent.core.common.exceptions import (
     TelegramIngressUnavailableError,
 )
 from telegram_agent.core.common.types import TelegramAttachmentType
-from telegram_agent.core.llm_gateway.common.schemas import IntentKind
-from tests.agent_runtime.llm_gateway_stub import coordinator_gateway
-from tests.agent_runtime.test_intent_classification import FixedIntentGateway
 
 
 def _settings(**overrides) -> Settings:
@@ -75,23 +65,6 @@ def _settings(**overrides) -> Settings:
     return Settings(**values)
 
 
-class AlwaysNew:
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-
-
-class SameGroup:
-    """First message NEW, subsequent messages EXISTING group 1."""
-
-    def assign_group(self, *, current, recent_window) -> CoordinatorDecision:
-        if not recent_window or all(item.group_number is None for item in recent_window):
-            return CoordinatorDecision(kind=CoordinatorDecisionKind.NEW)
-        return CoordinatorDecision(
-            kind=CoordinatorDecisionKind.EXISTING,
-            group_number=1,
-        )
-
-
 class FixedDownloadGateway:
     def __init__(
         self,
@@ -99,10 +72,12 @@ class FixedDownloadGateway:
         assistant_text: str = "Preparing your video download.",
         subtitle: str | None = "en",
         dub: str | None = None,
+        is_download_request: bool = True,
     ) -> None:
         self.assistant_text = assistant_text
         self.subtitle = subtitle
         self.dub = dub
+        self.is_download_request = is_download_request
         self.calls: list[dict] = []
         self.fail: Exception | None = None
 
@@ -111,6 +86,7 @@ class FixedDownloadGateway:
         if self.fail is not None:
             raise self.fail
         decision = DownloadAgentDecision(
+            is_download_request=self.is_download_request,
             assistant_text=self.assistant_text,
             requested_subtitle_language=self.subtitle,
             requested_dub_language=self.dub,
@@ -167,7 +143,6 @@ async def _ingest_coordinate_classify_download(
     chat_id: int,
     messages: tuple[IngestMessageCommand, ...],
     key: str,
-    coordinator=None,
 ) -> UUID:
     await AsyncMessageBatchIngestionService(agent_runtime_uow_factory).ingest(
         IngestMessageBatchCommand(
@@ -187,21 +162,6 @@ async def _ingest_coordinate_classify_download(
 
     SyncMessageGroupCoordinationService(
         uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=coordinator_gateway(coordinator or AlwaysNew()),
-        settings=_settings(),
-    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
-
-    with agent_runtime_sync_uow_factory() as uow:
-        claimed = uow.conversation_claims.claim_available_conversations(
-            batch_size=1,
-            lease_timeout=timedelta(minutes=5),
-            process_owner="intent-worker",
-        )
-        claim_token = claimed[0].claim_token
-
-    SyncIntentClassificationService(
-        uow_factory=agent_runtime_sync_uow_factory,
-        llm_gateway_client=FixedIntentGateway(IntentKind.DOWNLOAD_REQUEST),  # type: ignore[arg-type]
         settings=_settings(),
     ).process_conversation(chat_id=chat_id, claim_token=claim_token)
 
@@ -275,7 +235,7 @@ async def test_download_handler_early_exit_media_only(
         )
         claim = session.get(ConversationClaim, chat_id)
 
-    assert message.status == RuntimeMessageStatus.CLASSIFIED
+    assert message.status == RuntimeMessageStatus.COORDINATED
     assert download_event.status == OutboxEventStatus.PUBLISHED
     assert agent_messages == []
     assert handoff == []
@@ -322,7 +282,7 @@ async def test_download_handler_early_exit_text_only(
         ).one()
         assert list(session.scalars(select(AgentMessage)).all()) == []
 
-    assert message.status == RuntimeMessageStatus.CLASSIFIED
+    assert message.status == RuntimeMessageStatus.COORDINATED
     assert download_event.status == OutboxEventStatus.PUBLISHED
 
 
@@ -338,7 +298,6 @@ async def test_download_handler_happy_path_and_handoff(
         agent_runtime_sync_uow_factory,
         chat_id=chat_id,
         key="dl-happy",
-        coordinator=SameGroup(),
         messages=(
             IngestMessageCommand(
                 ingress_message_id=uuid4(),
@@ -421,9 +380,9 @@ async def test_download_handler_happy_path_and_handoff(
     assert agent_messages[0].chat_id == chat_id
     assert len(handoff_events) == 1
     assert handoff_events[0].status == OutboxEventStatus.PENDING
-    # At least the download-handler head message remains classified (not failed).
-    classified = [m for m in messages if m.status == RuntimeMessageStatus.CLASSIFIED]
-    assert len(classified) >= 1
+    # At least the download-handler head message remains coordinated (not failed).
+    coordinated = [m for m in messages if m.status == RuntimeMessageStatus.COORDINATED]
+    assert len(coordinated) >= 1
     assert all(m.status != RuntimeMessageStatus.FAILED for m in messages)
     assert len(gateway.calls) == 1
     assert len(telegram.calls) == 1
@@ -485,7 +444,6 @@ async def test_download_handler_notify_failure_is_best_effort(
         agent_runtime_sync_uow_factory,
         chat_id=chat_id,
         key="dl-notify-fail",
-        coordinator=SameGroup(),
         messages=(
             IngestMessageCommand(
                 ingress_message_id=uuid4(),
@@ -576,7 +534,6 @@ async def test_download_handler_retryable_llm_failure(
         agent_runtime_sync_uow_factory,
         chat_id=chat_id,
         key="dl-retry",
-        coordinator=SameGroup(),
         messages=(
             IngestMessageCommand(
                 ingress_message_id=uuid4(),
@@ -667,7 +624,6 @@ async def test_download_handler_idempotent_for_group(
         agent_runtime_sync_uow_factory,
         chat_id=chat_id,
         key="dl-idem",
-        coordinator=SameGroup(),
         messages=(
             IngestMessageCommand(
                 ingress_message_id=uuid4(),
@@ -755,3 +711,104 @@ async def test_download_handler_idempotent_for_group(
     assert all(e.status == OutboxEventStatus.PUBLISHED for e in download_events)
     # LLM called once; second download_handler is idempotent early-exit.
     assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_download_handler_invalid_request_notifies_without_handoff(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 9307
+    claim_token = await _ingest_coordinate_classify_download(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="dl-invalid",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VIDEO,
+                    status="ready",
+                    file_id="vid-invalid",
+                ),
+            ),
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=2,
+                text="what is the weather today?",
+            ),
+        ),
+    )
+
+    rejection = (
+        "I only handle download-related requests for media "
+        "(subtitles, language, prepare). Please send a download instruction."
+    )
+    gateway = FixedDownloadGateway(
+        is_download_request=False,
+        assistant_text=rejection,
+        subtitle=None,
+        dub=None,
+    )
+    telegram = RecordingTelegramClient()
+    result = SyncDownloadHandlerService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,  # type: ignore[arg-type]
+        telegram_ingress_client=telegram,  # type: ignore[arg-type]
+        settings=_settings(),
+    ).process_conversation(chat_id=chat_id, claim_token=claim_token)
+
+    assert result.processed >= 1
+    assert result.results[0].agent_message_id is None
+    assert len(gateway.calls) == 1
+    assert len(telegram.calls) == 1
+    assert telegram.calls[0]["text"] == rejection
+
+    with agent_runtime_sync_sessionmaker() as session:
+        agent_messages = list(session.scalars(select(AgentMessage)).all())
+        handoff = list(
+            session.scalars(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type
+                    == OutboxEventType.CONTENT_PROCESSING_HANDOFF.value
+                )
+            ).all()
+        )
+        download_events = list(
+            session.scalars(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == OutboxEventType.DOWNLOAD_HANDLER.value
+                )
+            ).all()
+        )
+
+    assert agent_messages == []
+    assert handoff == []
+    assert download_events
+    assert all(e.status == OutboxEventStatus.PUBLISHED for e in download_events)
+
+
+def test_download_agent_prompts_mention_is_download_request() -> None:
+    from telegram_agent.core.agent_runtime.prompts.download_agent import (
+        build_download_agent_prompts,
+    )
+
+    for media in (
+        TelegramAttachmentType.VIDEO,
+        TelegramAttachmentType.AUDIO,
+        TelegramAttachmentType.DOCUMENT,
+    ):
+        prompts = build_download_agent_prompts(
+            media_type=media,
+            group_texts=["hello"],
+            media_message_id=1,
+        )
+        assert "is_download_request" in prompts.system_prompt
+        assert "false" in prompts.system_prompt.lower() or "False" in prompts.system_prompt

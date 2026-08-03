@@ -620,6 +620,16 @@ class TranscriptSegment(Base):
         nullable=True,
     )
 
+    emotion: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    audio_events: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
     transcript: Mapped["Transcript"] = relationship(
         back_populates="segments",
     )

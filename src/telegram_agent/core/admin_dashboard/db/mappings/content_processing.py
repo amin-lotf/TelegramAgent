@@ -104,6 +104,8 @@ transcript_segments = Table(
     Column("language_probability", Float, nullable=True),
     Column("speaker", String(64), nullable=True),
     Column("speaker_confidence", Float, nullable=True),
+    Column("emotion", String(64), nullable=True),
+    Column("audio_events", JSONB, nullable=True),
 )
 
 content_chunks = Table(

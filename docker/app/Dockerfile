@@ -73,6 +73,24 @@ COPY src ./src
 
 RUN uv sync --extra whisperx --extra apps --no-dev --frozen
 
+
+FROM base AS sensevoice
+
+RUN apt-get update -o Acquire::Retries=5 \
+ && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    git \
+    libgl1 \
+    libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN uv sync --extra sensevoice --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra sensevoice --extra apps --no-dev --frozen
+
+
 FROM base AS agent-runtime
 
 RUN uv sync --extra agent-runtime --extra apps --no-dev --frozen --no-install-project

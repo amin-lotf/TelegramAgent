@@ -551,6 +551,49 @@ input::placeholder {
   color: var(--muted);
 }
 
+/* SenseVoice emotion labels on transcript segments */
+.emotion-happy {
+  color: #fff4c2;
+  background: rgba(240, 180, 41, 0.2);
+  border-color: rgba(240, 180, 41, 0.5);
+}
+.emotion-sad {
+  color: #c9ddff;
+  background: rgba(94, 176, 255, 0.16);
+  border-color: rgba(94, 176, 255, 0.45);
+}
+.emotion-angry {
+  color: #ffd0d3;
+  background: rgba(240, 113, 120, 0.2);
+  border-color: rgba(240, 113, 120, 0.5);
+}
+.emotion-neutral {
+  color: var(--text-secondary);
+  background: rgba(143, 160, 184, 0.14);
+  border-color: rgba(143, 160, 184, 0.4);
+}
+.emotion-fearful {
+  color: #e4d4ff;
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.45);
+}
+.emotion-disgusted {
+  color: #d8f5c8;
+  background: rgba(132, 204, 98, 0.16);
+  border-color: rgba(132, 204, 98, 0.45);
+}
+.emotion-surprised {
+  color: #ffe0c2;
+  background: rgba(251, 146, 60, 0.18);
+  border-color: rgba(251, 146, 60, 0.45);
+}
+.emotion-unknown {
+  color: var(--muted);
+  background: rgba(143, 160, 184, 0.12);
+  border-color: rgba(143, 160, 184, 0.35);
+  border-style: dashed;
+}
+
 /* ── Timeline ────────────────────────────────────────────── */
 
 .section-card {

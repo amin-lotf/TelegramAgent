@@ -110,6 +110,44 @@ class SyncSqlAlchemyOutboxRepository:
         )
         return self._session.execute(statement).scalar_one_or_none()
 
+    def mark_published_for_messages(
+        self,
+        *,
+        runtime_message_ids: list[UUID],
+        claim_token: UUID,
+        event_type: OutboxEventType | str,
+    ) -> int:
+        """Publish unresolved outbox rows for many messages under an active claim.
+
+        Used when download handling completes for a group so sibling per-message
+        download-handler events do not stay stuck behind content-processing handoff.
+        """
+        if not runtime_message_ids:
+            return 0
+        event_type_value = (
+            event_type.value if isinstance(event_type, OutboxEventType) else event_type
+        )
+        statement = (
+            update(OutboxEvent)
+            .where(
+                OutboxEvent.runtime_message_id.in_(runtime_message_ids),
+                OutboxEvent.event_type == event_type_value,
+                OutboxEvent.status.in_(
+                    (OutboxEventStatus.PENDING, OutboxEventStatus.PROCESSING)
+                ),
+                self._active_claim_exists(claim_token=claim_token),
+            )
+            .values(
+                status=OutboxEventStatus.PUBLISHED,
+                published_at=func.now(),
+                locked_at=None,
+                locked_by=None,
+                last_error=None,
+            )
+        )
+        result = self._session.execute(statement)
+        return int(cast(CursorResult, result).rowcount or 0)
+
     def record_failure_for_message(
         self,
         *,

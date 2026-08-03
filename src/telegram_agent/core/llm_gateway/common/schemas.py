@@ -42,14 +42,36 @@ class IntentClassificationResponse(BaseModel):
     intent: IntentKind
 
 
+def _clear_extraction_if_not_download(data: object) -> object:
+    """Coerce extraction fields to null when is_download_request is false."""
+    if not isinstance(data, dict):
+        return data
+    if data.get("is_download_request") is False:
+        for key in (
+            "requested_subtitle_language",
+            "requested_dub_language",
+            "requested_language",
+            "requested_format",
+        ):
+            if key in data:
+                data[key] = None
+    return data
+
+
 class DownloadAgentVideoResponse(BaseModel):
     """Structured output for video download requests."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    is_download_request: bool
     requested_subtitle_language: str | None = None
     requested_dub_language: str | None = None
     assistant_text: str = Field(min_length=1, max_length=2_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def clear_extraction_when_not_download(cls, data: object) -> object:
+        return _clear_extraction_if_not_download(data)
 
 
 class DownloadAgentAudioResponse(BaseModel):
@@ -57,8 +79,14 @@ class DownloadAgentAudioResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    is_download_request: bool
     requested_language: str | None = None
     assistant_text: str = Field(min_length=1, max_length=2_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def clear_extraction_when_not_download(cls, data: object) -> object:
+        return _clear_extraction_if_not_download(data)
 
 
 class DownloadAgentDocumentResponse(BaseModel):
@@ -70,10 +98,16 @@ class DownloadAgentDocumentResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    is_download_request: bool
     requested_subtitle_language: str | None = None
     requested_dub_language: str | None = None
     requested_format: str | None = None
     assistant_text: str = Field(min_length=1, max_length=2_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def clear_extraction_when_not_download(cls, data: object) -> object:
+        return _clear_extraction_if_not_download(data)
 
 
 class DownloadAgentResponse(BaseModel):
@@ -85,11 +119,17 @@ class DownloadAgentResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    is_download_request: bool
     assistant_text: str = Field(min_length=1, max_length=2_000)
     requested_subtitle_language: str | None = None
     requested_dub_language: str | None = None
     requested_language: str | None = None
     requested_format: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clear_extraction_when_not_download(cls, data: object) -> object:
+        return _clear_extraction_if_not_download(data)
 
 
 class GlossaryTermCategory(StrEnum):

@@ -68,7 +68,7 @@
             </li>
           {% endfor %}
         </ol>
-        <p class="muted small" style="margin: 0.85rem 0 0;">Runtime pipeline includes coordination, intent classification, download handling, and content-processing handoff. Conversation agent and Telegram send receipts are not stored yet.</p>
+        <p class="muted small" style="margin: 0.85rem 0 0;">Runtime pipeline: rule-based grouping → download agent (validates request) → content-processing handoff. Intent classification was removed. Conversation agent and Telegram send receipts are not stored yet.</p>
       </section>
 
       <div class="tabs" data-tabs>
@@ -221,17 +221,39 @@
 
             <h3>Transcript</h3>
             {% if cp.transcript %}
+              {% set emotion_labeled = cp.transcript.segments|selectattr('emotion')|list %}
               <table class="kv">
                 <tr><th>Language</th><td>{{ cp.transcript.language or '—' }}</td></tr>
                 <tr><th>Duration (ms)</th><td>{{ cp.transcript.duration_ms or '—' }}</td></tr>
+                <tr><th>Job status</th><td><code>{{ cp.job.status }}</code></td></tr>
+                <tr>
+                  <th>Emotion coverage</th>
+                  <td>
+                    {% if cp.transcript.segments %}
+                      {{ emotion_labeled|length }} / {{ cp.transcript.segments|length }} segments labeled
+                    {% else %}
+                      No segments
+                    {% endif %}
+                  </td>
+                </tr>
                 <tr><th>Text</th><td class="pre">{{ cp.transcript.text }}</td></tr>
               </table>
               {% if cp.transcript.segments %}
-                <details>
-                  <summary>{{ cp.transcript.segments|length }} segments</summary>
+                <details open>
+                  <summary>{{ cp.transcript.segments|length }} segments · emotion results</summary>
                   <div class="table-wrap">
                     <table class="data">
-                      <thead><tr><th>#</th><th>Start</th><th>End</th><th>Speaker</th><th>Text</th></tr></thead>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Start</th>
+                          <th>End</th>
+                          <th>Speaker</th>
+                          <th>Emotion</th>
+                          <th>Audio events</th>
+                          <th>Text</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         {% for s in cp.transcript.segments %}
                           <tr>
@@ -239,6 +261,20 @@
                             <td>{{ s.start_ms }}</td>
                             <td>{{ s.end_ms }}</td>
                             <td>{{ s.speaker or '—' }}</td>
+                            <td>
+                              {% if s.emotion %}
+                                <span class="badge emotion-{{ s.emotion|lower }}">{{ s.emotion }}</span>
+                              {% else %}
+                                <span class="muted">—</span>
+                              {% endif %}
+                            </td>
+                            <td>
+                              {% if s.audio_events %}
+                                {{ s.audio_events|join(', ') }}
+                              {% else %}
+                                <span class="muted">—</span>
+                              {% endif %}
+                            </td>
                             <td>{{ s.text }}</td>
                           </tr>
                         {% endfor %}
@@ -300,10 +336,8 @@
               </div>
             {% else %}
               <p class="muted">No content chunks
-                {% if cp.job.status in ['transcribed', 'chunking'] %}
-                  (chunking {{ cp.job.status }}).
-                {% elif cp.transcript %}
-                  (transcript present; chunking not finished).
+                {% if cp.transcript or cp.job.status in ['transcribed', 'emotion_extracting', 'emotion_extracted', 'chunked', 'embedded', 'completed'] %}
+                  (chunking skipped).
                 {% else %}
                   .
                 {% endif %}
@@ -353,17 +387,7 @@
                 </table>
               </div>
             {% else %}
-              <p class="muted">No chunk embeddings
-                {% if cp.job.status == 'embedding' %}
-                  (embedding in progress).
-                {% elif cp.job.status in ['chunked', 'embedded', 'completed'] and cp.chunks %}
-                  (job {{ cp.job.status }}; no embeddings stored).
-                {% elif cp.chunks %}
-                  (chunks present; embedding not started).
-                {% else %}
-                  .
-                {% endif %}
-              </p>
+              <p class="muted">No chunk embeddings (embedding skipped).</p>
             {% endif %}
           {% endif %}
           </div>
@@ -398,8 +422,8 @@
                   <tr><th>ID</th><td><code>{{ rt.message.id }}</code></td></tr>
                   <tr><th>Batch ID</th><td><code>{{ rt.message.batch_id }}</code></td></tr>
                   <tr><th>Pipeline status</th><td><strong>{{ rt.message.status }}</strong></td></tr>
-                  <tr><th>Intent</th><td>{{ rt.message.intent or '—' }}</td></tr>
                   <tr><th>Coordination status</th><td>{{ rt.message.coordination_status }}</td></tr>
+                  <tr><th>Intent (legacy)</th><td>{{ rt.message.intent or '—' }}</td></tr>
                   <tr><th>Coordinated at</th><td class="dt">{{ rt.message.coordinated_at|dt }}</td></tr>
                   <tr><th>Created at</th><td class="dt">{{ rt.message.created_at|dt }}</td></tr>
                   <tr><th>Attachment status</th><td>{{ rt.message.attachment_status or '—' }}</td></tr>
@@ -526,7 +550,7 @@
                           <th>Msg #</th>
                           <th>Pipeline</th>
                           <th>Coord</th>
-                          <th>Intent</th>
+                          <th>Intent (legacy)</th>
                           <th>Attachment</th>
                           <th>Text</th>
                           <th>Ingress ID</th>

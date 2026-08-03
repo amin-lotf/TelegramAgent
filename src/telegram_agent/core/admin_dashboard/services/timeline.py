@@ -19,6 +19,7 @@ _STAGE_ORDER = (
     StageKey.MEDIA_DOWNLOADED,
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
+    StageKey.EMOTION_EXTRACTION_DONE,
     StageKey.CHUNKING_DONE,
     StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
@@ -27,7 +28,7 @@ _STAGE_ORDER = (
     StageKey.CONVERSATION_DISPATCHED,
     StageKey.RUNTIME_INGESTED,
     StageKey.COORDINATED,
-    StageKey.INTENT_CLASSIFIED,
+    # Intent classification removed from the live pipeline (download agent validates).
     StageKey.DOWNLOAD_HANDLED,
     StageKey.CONTENT_PROCESSING_HANDOFF,
 )
@@ -37,6 +38,7 @@ _CP_PIPELINE_STAGES = (
     StageKey.MEDIA_DOWNLOADED,
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
+    StageKey.EMOTION_EXTRACTION_DONE,
     StageKey.CHUNKING_DONE,
     StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
@@ -49,6 +51,7 @@ _LABELS = {
     StageKey.MEDIA_DOWNLOADED: "Media downloaded",
     StageKey.MEDIA_DEMUXED: "Audio/video demuxed",
     StageKey.TRANSCRIPTION_DONE: "Transcription performed",
+    StageKey.EMOTION_EXTRACTION_DONE: "Emotion extraction performed",
     StageKey.CHUNKING_DONE: "Transcript chunked",
     StageKey.EMBEDDING_DONE: "Chunks embedded",
     StageKey.CP_FINISHED: "Content-processing finished",
@@ -57,7 +60,7 @@ _LABELS = {
     StageKey.CONVERSATION_DISPATCHED: "Dispatched to agent-runtime",
     StageKey.RUNTIME_INGESTED: "Runtime message ingested",
     StageKey.COORDINATED: "Message coordinated",
-    StageKey.INTENT_CLASSIFIED: "Intent classified",
+    StageKey.INTENT_CLASSIFIED: "Intent classified (legacy)",
     StageKey.DOWNLOAD_HANDLED: "Download request handled",
     StageKey.CONTENT_PROCESSING_HANDOFF: "Content-processing handoff",
 }
@@ -67,6 +70,8 @@ _POST_DOWNLOAD_STATUSES = frozenset(
         "downloaded",
         "transcribing",
         "transcribed",
+        "emotion_extracting",
+        "emotion_extracted",
         "chunking",
         "chunked",
         "embedding",
@@ -74,8 +79,17 @@ _POST_DOWNLOAD_STATUSES = frozenset(
         "completed",
     }
 )
-# Pipeline terminal success after embedding; CHUNKED is intermediate.
-_SUCCESS_JOB_STATUSES = frozenset({"embedded", "completed"})
+# Terminal success for content-processing jobs (happy path + historical pipelines).
+_SUCCESS_JOB_STATUSES = frozenset(
+    {"emotion_extracted", "transcribed", "chunked", "embedded", "completed"}
+)
+# Statuses that mean emotion extraction finished (or the job predates that stage
+# but completed a later historical stage).
+_EMOTION_DONE_STATUSES = frozenset(
+    {"emotion_extracted", "chunked", "embedded", "completed"}
+)
+_EMOTION_OUTBOX_TYPE = "content_processing.transcript.ready_for_emotion_extraction"
+_CP_FINISHED_OUTBOX_TYPE = "content_processing.job.finished"
 
 
 def _event(
@@ -168,6 +182,7 @@ def build_timeline(
                 StageKey.MEDIA_DOWNLOADED,
                 StageKey.MEDIA_DEMUXED,
                 StageKey.TRANSCRIPTION_DONE,
+                StageKey.EMOTION_EXTRACTION_DONE,
                 StageKey.CHUNKING_DONE,
                 StageKey.EMBEDDING_DONE,
                 StageKey.CP_FINISHED,
@@ -304,12 +319,87 @@ def build_timeline(
                     _event(StageKey.TRANSCRIPTION_DONE, StageStatus.NOT_APPLICABLE)
                 )
 
-            # Chunking follows transcription for media that produces a transcript.
-            chunking_expected = (
-                transcription_expected
-                or content.transcript is not None
-                or bool(content.chunks)
+            # Emotion extraction is the final active CP stage after transcription.
+            emotion_expected = transcription_expected or content.transcript is not None
+            segments = (
+                content.transcript.segments
+                if content.transcript is not None
+                else ()
             )
+            segments_with_emotion = sum(
+                1 for segment in segments if segment.emotion is not None
+            )
+            emotion_evt = _outbox_by_type(content.outbox_events, _EMOTION_OUTBOX_TYPE)
+            emotion_detail = None
+            if segments:
+                emotion_detail = (
+                    f"{segments_with_emotion}/{len(segments)} segment emotion(s)"
+                )
+
+            if not emotion_expected:
+                events.append(
+                    _event(
+                        StageKey.EMOTION_EXTRACTION_DONE,
+                        StageStatus.NOT_APPLICABLE,
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif job.status in _EMOTION_DONE_STATUSES or (
+                segments
+                and segments_with_emotion == len(segments)
+                and segments_with_emotion > 0
+            ):
+                events.append(
+                    _event(
+                        StageKey.EMOTION_EXTRACTION_DONE,
+                        StageStatus.COMPLETED,
+                        job.updated_at if job.status in _EMOTION_DONE_STATUSES else None,
+                        detail=emotion_detail,
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif job.status == "emotion_extracting" or (
+                job.status == "transcribed" and emotion_evt is not None
+            ):
+                events.append(
+                    _event(
+                        StageKey.EMOTION_EXTRACTION_DONE,
+                        StageStatus.PENDING,
+                        detail=emotion_detail or "awaiting emotion extraction",
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif job.status == "transcribed":
+                # Historical jobs ended at transcribed before emotion extraction existed.
+                events.append(
+                    _event(
+                        StageKey.EMOTION_EXTRACTION_DONE,
+                        StageStatus.NOT_APPLICABLE,
+                        detail="legacy job (pre-emotion stage)",
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif job.status in {"failed", "timed_out"} and emotion_evt is not None:
+                events.append(
+                    _event(
+                        StageKey.EMOTION_EXTRACTION_DONE,
+                        StageStatus.FAILED,
+                        job.updated_at,
+                        detail=job.error_message,
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            else:
+                events.append(
+                    _event(
+                        StageKey.EMOTION_EXTRACTION_DONE,
+                        StageStatus.NOT_STARTED,
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+
+            # Chunking/embedding are retained for historical jobs but are not part of
+            # the active pipeline (emotion extraction is the final stage).
             if content.chunks:
                 strategy = content.chunks[0].strategy if content.chunks else None
                 detail = f"{len(content.chunks)} chunk(s)"
@@ -324,52 +414,16 @@ def build_timeline(
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
-            elif chunking_expected:
-                if job.status == "chunking":
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.PENDING,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status == "transcribed":
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.PENDING,
-                            detail="awaiting chunking",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in {"failed", "timed_out"} and content.transcript is not None:
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.FAILED,
-                            detail=job.error_message,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in _SUCCESS_JOB_STATUSES:
-                    # Historical completed jobs may predate chunking.
-                    events.append(
-                        _event(
-                            StageKey.CHUNKING_DONE,
-                            StageStatus.NOT_STARTED,
-                            detail="Finished without content chunks",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                else:
-                    events.append(
-                        _event(StageKey.CHUNKING_DONE, StageStatus.NOT_STARTED)
-                    )
             else:
-                events.append(_event(StageKey.CHUNKING_DONE, StageStatus.NOT_APPLICABLE))
+                events.append(
+                    _event(
+                        StageKey.CHUNKING_DONE,
+                        StageStatus.NOT_APPLICABLE,
+                        detail="Chunking skipped",
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
 
-            # Embedding follows chunking (vectors stored in content-processing).
-            embedding_expected = bool(content.chunks) or bool(content.embeddings)
             if content.embeddings:
                 first = content.embeddings[0]
                 detail = (
@@ -386,56 +440,23 @@ def build_timeline(
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
-            elif embedding_expected:
-                if job.status in {"chunked", "embedding"}:
-                    events.append(
-                        _event(
-                            StageKey.EMBEDDING_DONE,
-                            StageStatus.PENDING,
-                            detail="awaiting embedding",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in {"failed", "timed_out"} and content.chunks:
-                    events.append(
-                        _event(
-                            StageKey.EMBEDDING_DONE,
-                            StageStatus.FAILED,
-                            detail=job.error_message,
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                elif job.status in _SUCCESS_JOB_STATUSES:
-                    events.append(
-                        _event(
-                            StageKey.EMBEDDING_DONE,
-                            StageStatus.NOT_STARTED,
-                            detail="No embeddings stored",
-                            source_db=DbName.CONTENT_PROCESSING,
-                        )
-                    )
-                else:
-                    events.append(
-                        _event(StageKey.EMBEDDING_DONE, StageStatus.NOT_STARTED)
-                    )
             else:
                 events.append(
-                    _event(StageKey.EMBEDDING_DONE, StageStatus.NOT_APPLICABLE)
-                )
-
-            # CP finished only after embedding terminal success (or failure).
-            if job.status in {"chunked", "embedding"}:
-                events.append(
                     _event(
-                        StageKey.CP_FINISHED,
-                        StageStatus.PENDING,
-                        detail="awaiting embedding"
-                        if job.status == "chunked"
-                        else "embedding in progress",
+                        StageKey.EMBEDDING_DONE,
+                        StageStatus.NOT_APPLICABLE,
+                        detail="Embedding skipped",
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
-            elif job.status in _SUCCESS_JOB_STATUSES:
+
+            # CP finished after emotion extraction terminal success (or historical terminal).
+            finished_evt = _outbox_by_type(
+                content.outbox_events, _CP_FINISHED_OUTBOX_TYPE
+            )
+            if job.status in _EMOTION_DONE_STATUSES or (
+                job.status == "transcribed" and emotion_evt is None
+            ):
                 events.append(
                     _event(
                         StageKey.CP_FINISHED,
@@ -452,6 +473,17 @@ def build_timeline(
                         StageStatus.FAILED,
                         job.updated_at,
                         detail=job.error_message,
+                        source_db=DbName.CONTENT_PROCESSING,
+                    )
+                )
+            elif job.status in {"transcribed", "emotion_extracting"} or (
+                finished_evt is None and emotion_evt is not None
+            ):
+                events.append(
+                    _event(
+                        StageKey.CP_FINISHED,
+                        StageStatus.PENDING,
+                        detail=job.status,
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
@@ -567,10 +599,6 @@ def build_timeline(
         (e for e in outbox_events if "pending_coordination" in e.event_type),
         outbox_events[0] if outbox_events else None,
     )
-    intent_outbox = next(
-        (e for e in outbox_events if "intent" in e.event_type),
-        None,
-    )
 
     download_outbox = next(
         (e for e in outbox_events if "download_handler" in e.event_type),
@@ -583,13 +611,51 @@ def build_timeline(
     agent_messages = runtime.agent_messages if runtime is not None else ()
     download_agent_message = next(
         (item for item in agent_messages if item.role == "download_agent"),
-        agent_messages[0] if agent_messages else None,
+        None,
     )
+
+    def _append_handoff_stage() -> None:
+        if handoff_outbox is None:
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.NOT_APPLICABLE,
+                    detail="no handoff (incomplete group or non-download request)",
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
+        elif handoff_outbox.status == "failed":
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.FAILED,
+                    detail=handoff_outbox.last_error,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
+        elif handoff_outbox.status == "published":
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.COMPLETED,
+                    handoff_outbox.published_at,
+                    detail="content-processing notified",
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
+        else:
+            events.append(
+                _event(
+                    StageKey.CONTENT_PROCESSING_HANDOFF,
+                    StageStatus.PENDING,
+                    detail=handoff_outbox.status,
+                    source_db=DbName.AGENT_RUNTIME,
+                )
+            )
 
     if not runtime_available:
         events.append(_event(StageKey.RUNTIME_INGESTED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.COORDINATED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
-        events.append(_event(StageKey.INTENT_CLASSIFIED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.DOWNLOAD_HANDLED, StageStatus.UNAVAILABLE, source_db=DbName.AGENT_RUNTIME))
         events.append(
             _event(
@@ -601,7 +667,6 @@ def build_timeline(
     elif runtime is None or runtime.message is None:
         events.append(_event(StageKey.RUNTIME_INGESTED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.COORDINATED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
-        events.append(_event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
         events.append(_event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME))
         events.append(
             _event(
@@ -632,9 +697,6 @@ def build_timeline(
                 )
             )
             events.append(
-                _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
-            )
-            events.append(
                 _event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
             )
             events.append(
@@ -657,64 +719,14 @@ def build_timeline(
                     source_db=DbName.AGENT_RUNTIME,
                 )
             )
-            if rm.status == "classified":
-                events.append(
-                    _event(
-                        StageKey.INTENT_CLASSIFIED,
-                        StageStatus.COMPLETED,
-                        detail=rm.intent,
-                        source_db=DbName.AGENT_RUNTIME,
-                    )
-                )
-            elif rm.status == "failed":
-                events.append(
-                    _event(
-                        StageKey.INTENT_CLASSIFIED,
-                        StageStatus.FAILED,
-                        detail=(
-                            intent_outbox.last_error
-                            if intent_outbox is not None
-                            else "classification failed"
-                        ),
-                        source_db=DbName.AGENT_RUNTIME,
-                    )
-                )
-            elif rm.coordination_status == "vague":
-                events.append(
-                    _event(
-                        StageKey.INTENT_CLASSIFIED,
-                        StageStatus.NOT_APPLICABLE,
-                        detail="vague messages are not classified",
-                        source_db=DbName.AGENT_RUNTIME,
-                    )
-                )
-            elif intent_outbox is not None and intent_outbox.status == "failed":
-                events.append(
-                    _event(
-                        StageKey.INTENT_CLASSIFIED,
-                        StageStatus.FAILED,
-                        detail=intent_outbox.last_error,
-                        source_db=DbName.AGENT_RUNTIME,
-                    )
-                )
-            else:
-                events.append(
-                    _event(
-                        StageKey.INTENT_CLASSIFIED,
-                        StageStatus.PENDING,
-                        detail=rm.status,
-                        source_db=DbName.AGENT_RUNTIME,
-                    )
-                )
 
-            # Download handler + content-processing handoff stages.
-            intent = rm.intent or ""
-            if intent == "conversation" or rm.coordination_status == "vague":
+            # Download handler + content-processing handoff (no intent step).
+            if rm.coordination_status == "vague":
                 events.append(
                     _event(
                         StageKey.DOWNLOAD_HANDLED,
                         StageStatus.NOT_APPLICABLE,
-                        detail="no download handler for this intent",
+                        detail="vague messages skip download handling",
                         source_db=DbName.AGENT_RUNTIME,
                     )
                 )
@@ -743,34 +755,8 @@ def build_timeline(
                             source_db=DbName.AGENT_RUNTIME,
                         )
                     )
-                elif handoff_outbox.status == "failed":
-                    events.append(
-                        _event(
-                            StageKey.CONTENT_PROCESSING_HANDOFF,
-                            StageStatus.FAILED,
-                            detail=handoff_outbox.last_error,
-                            source_db=DbName.AGENT_RUNTIME,
-                        )
-                    )
-                elif handoff_outbox.status == "published":
-                    events.append(
-                        _event(
-                            StageKey.CONTENT_PROCESSING_HANDOFF,
-                            StageStatus.COMPLETED,
-                            handoff_outbox.published_at,
-                            detail="content-processing notified",
-                            source_db=DbName.AGENT_RUNTIME,
-                        )
-                    )
                 else:
-                    events.append(
-                        _event(
-                            StageKey.CONTENT_PROCESSING_HANDOFF,
-                            StageStatus.PENDING,
-                            detail=handoff_outbox.status,
-                            source_db=DbName.AGENT_RUNTIME,
-                        )
-                    )
+                    _append_handoff_stage()
             elif download_outbox is not None:
                 if download_outbox.status == "failed":
                     events.append(
@@ -781,16 +767,24 @@ def build_timeline(
                             source_db=DbName.AGENT_RUNTIME,
                         )
                     )
+                    events.append(
+                        _event(
+                            StageKey.CONTENT_PROCESSING_HANDOFF,
+                            StageStatus.NOT_STARTED,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
+                    )
                 elif download_outbox.status == "published":
                     events.append(
                         _event(
                             StageKey.DOWNLOAD_HANDLED,
                             StageStatus.COMPLETED,
                             download_outbox.published_at,
-                            detail="early-exit or completed",
+                            detail="published (early-exit, rejected, or completed)",
                             source_db=DbName.AGENT_RUNTIME,
                         )
                     )
+                    _append_handoff_stage()
                 else:
                     events.append(
                         _event(
@@ -800,14 +794,17 @@ def build_timeline(
                             source_db=DbName.AGENT_RUNTIME,
                         )
                     )
-                events.append(
-                    _event(
-                        StageKey.CONTENT_PROCESSING_HANDOFF,
-                        StageStatus.NOT_STARTED,
-                        source_db=DbName.AGENT_RUNTIME,
+                    events.append(
+                        _event(
+                            StageKey.CONTENT_PROCESSING_HANDOFF,
+                            StageStatus.NOT_STARTED,
+                            source_db=DbName.AGENT_RUNTIME,
+                        )
                     )
-                )
-            elif rm.status == "classified" and intent == "download_request":
+            elif rm.coordination_status == "grouped" and rm.status in {
+                "coordinated",
+                "classified",  # legacy rows
+            }:
                 events.append(
                     _event(
                         StageKey.DOWNLOAD_HANDLED,
@@ -848,9 +845,6 @@ def build_timeline(
                 )
             )
             events.append(
-                _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
-            )
-            events.append(
                 _event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
             )
             events.append(
@@ -868,9 +862,6 @@ def build_timeline(
                     detail=rm.status,
                     source_db=DbName.AGENT_RUNTIME,
                 )
-            )
-            events.append(
-                _event(StageKey.INTENT_CLASSIFIED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)
             )
             events.append(
                 _event(StageKey.DOWNLOAD_HANDLED, StageStatus.NOT_STARTED, source_db=DbName.AGENT_RUNTIME)

@@ -66,6 +66,15 @@ whisperx =[
     "whisperx>=3.8.6",
 ]
 
+sensevoice = [
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.32",
+    "funasr>=1.2.0",
+    # FunASR does not pull torch automatically; required for AutoModel / SenseVoice.
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+]
+
 chunking = [
 ]
 

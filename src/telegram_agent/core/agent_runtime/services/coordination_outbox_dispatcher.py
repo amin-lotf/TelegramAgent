@@ -323,7 +323,7 @@ class CoordinationOutboxDispatcher:
                         )
                         logger.warning(
                             "Enqueue failure exhausted retries but message was not "
-                            "a classified download request",
+                            "in a coordinated download-ready state",
                             extra={
                                 "chat_id": chat_id,
                                 "runtime_message_id": str(head.runtime_message_id),

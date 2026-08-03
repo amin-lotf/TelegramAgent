@@ -112,6 +112,8 @@ class TranscriptSegmentRow:
     language_probability: float | None
     speaker: str | None
     speaker_confidence: float | None
+    emotion: str | None = None
+    audio_events: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
