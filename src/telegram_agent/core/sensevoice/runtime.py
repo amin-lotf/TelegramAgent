@@ -177,6 +177,15 @@ class SenseVoiceRuntime:
         finally:
             self._semaphore.release()
 
+    def extract_emotion_sync(
+        self,
+        *,
+        audio_path: Path,
+        language: str | None = None,
+    ) -> ModelEmotionResult:
+        """Run inference synchronously inside an isolated workload process."""
+        return self._extract_emotion_sync(audio_path, language)
+
     async def _acquire_capacity_slot(self) -> None:
         async with self._capacity_lock:
             if self._semaphore.locked():

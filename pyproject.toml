@@ -60,6 +60,11 @@ content-processing = [
     "pgvector>=0.3.0",
 ]
 
+gpu-execution = [
+    "celery[redis]>=5.3.1",
+    "psycopg2-binary>=2.9.12",
+]
+
 whisperx =[
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.32",

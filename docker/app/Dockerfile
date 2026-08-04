@@ -57,6 +57,32 @@ RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 RUN deno --version
 
 
+FROM base AS gpu-execution
+
+RUN uv sync --extra gpu-execution --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra gpu-execution --extra apps --no-dev --frozen
+
+
+FROM base AS gpu-execution-worker
+
+RUN apt-get update -o Acquire::Retries=5 \
+ && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    git \
+    libgl1 \
+    libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN uv sync --extra gpu-execution --extra whisperx --extra sensevoice --extra apps --no-dev --frozen --no-install-project
+
+COPY src ./src
+
+RUN uv sync --extra gpu-execution --extra whisperx --extra sensevoice --extra apps --no-dev --frozen
+
+
 FROM base AS whisperx
 
 RUN apt-get update -o Acquire::Retries=5 \

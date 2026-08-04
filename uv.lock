@@ -4926,6 +4926,10 @@ embedding = [
     { name = "langchain", extra = ["openai"] },
     { name = "openai" },
 ]
+gpu-execution = [
+    { name = "celery", extra = ["redis"] },
+    { name = "psycopg2-binary" },
+]
 llm-gateway = [
     { name = "jsonschema" },
     { name = "langchain", extra = ["openai"] },
@@ -4962,6 +4966,7 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'apps'", specifier = ">=0.31.0" },
     { name = "celery", extras = ["redis"], marker = "extra == 'agent-runtime'", specifier = ">=5.3.1" },
     { name = "celery", extras = ["redis"], marker = "extra == 'content-processing'", specifier = ">=5.3.1" },
+    { name = "celery", extras = ["redis"], marker = "extra == 'gpu-execution'", specifier = ">=5.3.1" },
     { name = "celery", extras = ["redis"], marker = "extra == 'telegram-ingress'", specifier = ">=5.3.1" },
     { name = "colorlog", marker = "extra == 'apps'", specifier = ">=6.10.1" },
     { name = "fastapi", marker = "extra == 'apps'", specifier = ">=0.136.1" },
@@ -4983,6 +4988,7 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'agent-runtime'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'content-processing'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'dev'", specifier = ">=2.9.12" },
+    { name = "psycopg2-binary", marker = "extra == 'gpu-execution'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'migration'", specifier = ">=2.9.12" },
     { name = "psycopg2-binary", marker = "extra == 'telegram-ingress'", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
@@ -5003,7 +5009,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'apps'", specifier = ">=0.50.1" },
     { name = "whisperx", marker = "extra == 'whisperx'", specifier = ">=3.8.6" },
 ]
-provides-extras = ["apps", "dev", "agent-runtime", "llm-gateway", "telegram-auth", "telegram-ingress", "content-processing", "whisperx", "sensevoice", "chunking", "embedding", "admin-dashboard", "admin-dashboard-v2", "migration"]
+provides-extras = ["apps", "dev", "agent-runtime", "llm-gateway", "telegram-auth", "telegram-ingress", "content-processing", "gpu-execution", "whisperx", "sensevoice", "chunking", "embedding", "admin-dashboard", "admin-dashboard-v2", "migration"]
 
 [[package]]
 name = "tenacity"

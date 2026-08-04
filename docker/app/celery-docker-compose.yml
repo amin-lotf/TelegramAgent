@@ -7,6 +7,9 @@ services:
     container_name: content_processing_worker
     env_file:
       - .env.content_processing.docker
+    environment:
+      GPU_EXECUTION_BASE_URL: http://gpu-execution:8000/api/v1
+      GPU_EXECUTION_SERVICE_TOKEN: ${GPU_EXECUTION_SERVICE_TOKEN:-replace-me}
     # For a dedicated transcript worker, run:
     # celery -A web_analyzer.core.content_processor.celery_app.celery_app worker
     # -Q video_transcript --concurrency=1 --prefetch-multiplier=1 --loglevel=info

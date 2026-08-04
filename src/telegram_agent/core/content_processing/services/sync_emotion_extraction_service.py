@@ -3,6 +3,8 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from pathlib import Path
+import json
+import os
 from typing import Callable
 from uuid import UUID
 
@@ -74,6 +76,7 @@ class SyncEmotionExtractionService:
             else:
                 batch_result = self._extract_emotions(context)
                 self._record_success(job_id=job_id, result=batch_result)
+                self._cleanup_gpu_inputs(context)
                 result = StageExecutionResult()
         except PermanentContentProcessingError as exc:
             self._mark_failed(job_id, str(exc))
@@ -174,70 +177,143 @@ class SyncEmotionExtractionService:
     ) -> EmotionExtractionBatchResult:
         client = SenseVoiceClient(self._settings)
         clipper = AudioClipper.from_settings(self._settings)
-        updates: list[SegmentEmotionUpdate] = []
         clip_paths: list[Path] = []
+        skipped_indices: list[int] = []
+        manifest_path = (
+            Path(self._settings.media_storage_root)
+            / str(context.job_id)
+            / "gpu_inputs"
+            / "sensevoice_emotions.json"
+        )
 
+        for segment in context.segments:
+            if segment.end_ms <= segment.start_ms:
+                skipped_indices.append(segment.segment_index)
+                continue
+
+            clip_path = clipper.clip_path_for_segment(
+                job_id=context.job_id,
+                segment_index=segment.segment_index,
+            )
+            clip_paths.append(clip_path)
+            try:
+                clipper.extract_clip(
+                    source_path=context.local_path,
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
+                    dest_path=clip_path,
+                )
+            except AudioClipPermanentError as exc:
+                raise PermanentContentProcessingError(str(exc)) from exc
+            except AudioClipError as exc:
+                raise RetryableContentProcessingError(str(exc)) from exc
+
+        if not clip_paths:
+            return EmotionExtractionBatchResult(
+                segments=tuple(
+                    SegmentEmotionUpdate(index, None, None)
+                    for index in skipped_indices
+                )
+            )
+        self._write_manifest(
+            manifest_path=manifest_path,
+            context=context,
+            clip_paths=clip_paths,
+        )
         try:
-            for segment in context.segments:
-                if segment.end_ms <= segment.start_ms:
-                    updates.append(
-                        SegmentEmotionUpdate(
-                            segment_index=segment.segment_index,
-                            emotion=None,
-                            audio_events=None,
-                        )
-                    )
-                    continue
+            batch_result = client.extract_emotions(
+                manifest_path=manifest_path,
+                request_id=str(context.job_id),
+                timeout_seconds=max(
+                    1,
+                    min(
+                        int(
+                            self._settings.sensevoice_request_timeout_seconds
+                            * max(1, len(clip_paths))
+                        ),
+                        self._settings.gpu_execution_job_max_timeout_seconds,
+                    ),
+                ),
+                heartbeat=lambda: self._heartbeat(context.job_id),
+            )
+        except SenseVoiceServiceError as exc:
+            raise RetryableContentProcessingError(str(exc)) from exc
+        except SenseVoiceResponseError as exc:
+            raise PermanentContentProcessingError(str(exc)) from exc
+        by_index = {item.segment_index: item for item in batch_result.segments}
+        expected_indices = {
+            segment.segment_index
+            for segment in context.segments
+            if segment.segment_index not in skipped_indices
+        }
+        if set(by_index) != expected_indices:
+            raise PermanentContentProcessingError(
+                "SenseVoice GPU workload returned an incomplete segment batch"
+            )
+        return EmotionExtractionBatchResult(
+            segments=tuple(
+                SegmentEmotionUpdate(index, None, None)
+                for index in skipped_indices
+            )
+            + tuple(by_index[index] for index in sorted(by_index))
+        )
 
-                clip_path = clipper.clip_path_for_segment(
-                    job_id=context.job_id,
-                    segment_index=segment.segment_index,
-                )
-                clip_paths.append(clip_path)
-                try:
-                    clipper.extract_clip(
-                        source_path=context.local_path,
-                        start_ms=segment.start_ms,
-                        end_ms=segment.end_ms,
-                        dest_path=clip_path,
-                    )
-                except AudioClipPermanentError as exc:
-                    raise PermanentContentProcessingError(str(exc)) from exc
-                except AudioClipError as exc:
-                    raise RetryableContentProcessingError(str(exc)) from exc
+    def _cleanup_gpu_inputs(self, context: EmotionExtractionContext) -> None:
+        clipper = AudioClipper.from_settings(self._settings)
+        paths = [
+            clipper.clip_path_for_segment(
+                job_id=context.job_id,
+                segment_index=segment.segment_index,
+            )
+            for segment in context.segments
+        ]
+        paths.append(
+            Path(self._settings.media_storage_root)
+            / str(context.job_id)
+            / "gpu_inputs"
+            / "sensevoice_emotions.json"
+        )
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                continue
+        for parent in {path.parent for path in paths}:
+            try:
+                if parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError:
+                continue
 
-                try:
-                    emotion_result = client.extract_emotion(
-                        path=clip_path,
-                        mime_type="audio/ogg",
-                        request_id=f"{context.job_id}:{segment.segment_index}",
-                    )
-                except SenseVoiceServiceError as exc:
-                    raise RetryableContentProcessingError(str(exc)) from exc
-                except SenseVoiceResponseError as exc:
-                    raise PermanentContentProcessingError(str(exc)) from exc
+    @staticmethod
+    def _write_manifest(
+        *,
+        manifest_path: Path,
+        context: EmotionExtractionContext,
+        clip_paths: list[Path],
+    ) -> None:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        path_by_index = {
+            int(path.stem.split("_")[-1]): path
+            for path in clip_paths
+        }
+        payload = {
+            "segments": [
+                {
+                    "segment_index": segment.segment_index,
+                    "path": str(path_by_index[segment.segment_index].resolve()),
+                }
+                for segment in context.segments
+                if segment.segment_index in path_by_index
+            ]
+        }
+        temporary_path = manifest_path.with_name(f".{manifest_path.name}.part")
+        temporary_path.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(temporary_path, manifest_path)
 
-                updates.append(
-                    SegmentEmotionUpdate(
-                        segment_index=segment.segment_index,
-                        emotion=emotion_result.emotion,
-                        audio_events=emotion_result.events or None,
-                    )
-                )
-                with self._uow_factory() as uow:
-                    uow.jobs.touch(job_id=context.job_id)
-        finally:
-            for clip_path in clip_paths:
-                clip_path.unlink(missing_ok=True)
-            if clip_paths:
-                parent = clip_paths[0].parent
-                try:
-                    if parent.is_dir() and not any(parent.iterdir()):
-                        parent.rmdir()
-                except OSError:
-                    pass
-
-        return EmotionExtractionBatchResult(segments=tuple(updates))
+    def _heartbeat(self, job_id: UUID) -> None:
+        with self._uow_factory() as uow:
+            uow.jobs.touch(job_id=job_id)
 
     def _record_success(
         self,

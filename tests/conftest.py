@@ -62,6 +62,9 @@ from telegram_agent.core.agent_runtime.db.uow.async_agent_runtime import (  # no
 from telegram_agent.core.agent_runtime.db.uow.sync_agent_runtime import (  # noqa: E402
     SyncSqlAlchemyAgentRuntimeUnitOfWork,
 )
+from telegram_agent.core.gpu_execution.db.uow.sync_gpu_execution import (  # noqa: E402
+    SyncSqlAlchemyGpuExecutionUnitOfWork,
+)
 
 
 AUTH_TABLES = ("telegram_users",)
@@ -92,6 +95,10 @@ AGENT_RUNTIME_TABLES = (
     "conversation_groups",
     "runtime_batches",
     "conversation_claims",
+)
+GPU_EXECUTION_TABLES = (
+    "gpu_outbox_events",
+    "gpu_jobs",
 )
 
 
@@ -241,11 +248,13 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
     ingress_database = f"telegram_ingress_test_{uuid4().hex[:8]}"
     content_database = f"content_processing_test_{uuid4().hex[:8]}"
     agent_runtime_database = f"agent_runtime_test_{uuid4().hex[:8]}"
+    gpu_execution_database = f"gpu_execution_test_{uuid4().hex[:8]}"
     database_names = {
         "auth": auth_database,
         "ingress": ingress_database,
         "content": content_database,
         "agent_runtime": agent_runtime_database,
+        "gpu_execution": gpu_execution_database,
     }
 
     try:
@@ -258,11 +267,15 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
         agent_runtime_url = (
             postgres_admin_url.rsplit("/", 1)[0] + f"/{agent_runtime_database}"
         )
+        gpu_execution_url = (
+            postgres_admin_url.rsplit("/", 1)[0] + f"/{gpu_execution_database}"
+        )
 
         _run_migrations("telegram_auth", auth_url)
         _run_migrations("telegram_ingress", ingress_url)
         _run_migrations("content_processing", content_url)
         _run_migrations("agent_runtime", agent_runtime_url)
+        _run_migrations("gpu_execution", gpu_execution_url)
 
         yield {
             "auth": normalize_async_db_url(auth_url),
@@ -272,6 +285,7 @@ def database_urls(postgres_admin_url: str) -> dict[str, str]:
             "content_sync": normalize_sync_db_url(content_url),
             "agent_runtime": normalize_async_db_url(agent_runtime_url),
             "agent_runtime_sync": normalize_sync_db_url(agent_runtime_url),
+            "gpu_execution_sync": normalize_sync_db_url(gpu_execution_url),
         }
     finally:
         for database_name in reversed(tuple(database_names.values())):
@@ -522,6 +536,38 @@ def agent_runtime_sync_uow_factory(
     def _factory() -> Any:
         with agent_runtime_sync_sessionmaker() as session:
             with SyncSqlAlchemyAgentRuntimeUnitOfWork(session) as uow:
+                yield uow
+
+    return _factory
+
+
+@pytest.fixture
+def gpu_execution_sync_sessionmaker(
+    database_urls: dict[str, str],
+) -> sessionmaker[Session]:
+    factory = create_sync_session_factory(database_urls["gpu_execution_sync"])
+    table_names = ", ".join(GPU_EXECUTION_TABLES)
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+    yield factory
+    with factory() as session:
+        session.execute(
+            text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+        )
+        session.commit()
+
+
+@pytest.fixture
+def gpu_execution_sync_uow_factory(
+    gpu_execution_sync_sessionmaker: sessionmaker[Session],
+):
+    @contextmanager
+    def _factory() -> Any:
+        with gpu_execution_sync_sessionmaker() as session:
+            with SyncSqlAlchemyGpuExecutionUnitOfWork(session) as uow:
                 yield uow
 
     return _factory

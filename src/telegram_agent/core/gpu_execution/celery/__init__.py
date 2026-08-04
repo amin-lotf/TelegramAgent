@@ -1,0 +1,1 @@
+"""GPU execution Celery application."""

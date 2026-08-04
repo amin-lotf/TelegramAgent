@@ -81,6 +81,7 @@ class SyncTranscriptionService:
                     path=context.local_path,
                     mime_type=context.mime_type,
                     request_id=str(context.job_id),
+                    heartbeat=lambda: self._heartbeat(context.job_id),
                 )
                 self._record_success(
                     context=context,
@@ -255,6 +256,10 @@ class SyncTranscriptionService:
                 job_id=job_id,
                 error_message=error_message,
             )
+
+    def _heartbeat(self, job_id: UUID) -> None:
+        with self._uow_factory() as uow:
+            uow.jobs.touch(job_id=job_id)
 
     def _mark_failed(self, job_id: UUID, error_message: str) -> None:
         with self._uow_factory() as uow:

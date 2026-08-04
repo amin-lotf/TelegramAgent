@@ -129,6 +129,18 @@ class WhisperXResponseError(PermanentContentProcessingError):
     pass
 
 
+class GpuExecutionServiceError(RetryableContentProcessingError):
+    pass
+
+
+class GpuExecutionResponseError(PermanentContentProcessingError):
+    pass
+
+
+class GpuExecutionCanceledError(PermanentContentProcessingError):
+    pass
+
+
 class SenseVoiceServiceError(RetryableContentProcessingError):
     pass
 

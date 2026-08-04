@@ -394,7 +394,8 @@ def test_transcription_service_prefers_audio_role_for_video(
         def __init__(self, _settings) -> None:
             pass
 
-        def transcribe(self, *, path, mime_type, request_id):
+        def transcribe(self, *, path, mime_type, request_id, heartbeat=None):
+            del heartbeat
             transcribed_paths.append(str(path))
             return TranscriptionResult(
                 text="from audio track",

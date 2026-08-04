@@ -46,6 +46,12 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_SUBTITLE_TRANSLATION_PREVIOUS_CONTEXT,
     DEFAULT_TELEGRAM_INGRESS_BASE_URL,
     DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_GPU_EXECUTION_BASE_URL,
+    DEFAULT_GPU_EXECUTION_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_GPU_EXECUTION_JOB_MAX_ATTEMPTS,
+    DEFAULT_GPU_EXECUTION_JOB_MAX_TIMEOUT_SECONDS,
+    DEFAULT_GPU_EXECUTION_POLL_INTERVAL_SECONDS,
+    DEFAULT_GPU_EXECUTION_WAIT_TIMEOUT_SECONDS,
 )
 
 
@@ -104,6 +110,15 @@ class Settings(BaseSettings):
         description="API token for accessing the sensevoice service API.",
     )
 
+    gpu_execution_service_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_SERVICE_TOKEN",
+            "gpu_execution_service_token",
+        ),
+        description="API token for the central GPU execution service.",
+    )
+
     chunking_service_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices("CHUNKING_SERVICE_TOKEN", "chunking_service_token"),
@@ -142,6 +157,53 @@ class Settings(BaseSettings):
         default=DEFAULT_SENSEVOICE_BASE_URL,
         validation_alias=AliasChoices("SENSEVOICE_BASE_URL", "sensevoice_base_url"),
         description="Base URL for the SenseVoice emotion extraction service API.",
+    )
+    gpu_execution_base_url: str = Field(
+        default=DEFAULT_GPU_EXECUTION_BASE_URL,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_BASE_URL",
+            "gpu_execution_base_url",
+        ),
+    )
+    gpu_execution_http_timeout_seconds: float = Field(
+        default=DEFAULT_GPU_EXECUTION_HTTP_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_HTTP_TIMEOUT_SECONDS",
+            "gpu_execution_http_timeout_seconds",
+        ),
+        gt=0,
+    )
+    gpu_execution_poll_interval_seconds: float = Field(
+        default=DEFAULT_GPU_EXECUTION_POLL_INTERVAL_SECONDS,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_POLL_INTERVAL_SECONDS",
+            "gpu_execution_poll_interval_seconds",
+        ),
+        gt=0,
+    )
+    gpu_execution_wait_timeout_seconds: float = Field(
+        default=DEFAULT_GPU_EXECUTION_WAIT_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_WAIT_TIMEOUT_SECONDS",
+            "gpu_execution_wait_timeout_seconds",
+        ),
+        gt=0,
+    )
+    gpu_execution_job_max_attempts: int = Field(
+        default=DEFAULT_GPU_EXECUTION_JOB_MAX_ATTEMPTS,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_JOB_MAX_ATTEMPTS",
+            "gpu_execution_job_max_attempts",
+        ),
+        ge=1,
+    )
+    gpu_execution_job_max_timeout_seconds: int = Field(
+        default=DEFAULT_GPU_EXECUTION_JOB_MAX_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "GPU_EXECUTION_JOB_MAX_TIMEOUT_SECONDS",
+            "gpu_execution_job_max_timeout_seconds",
+        ),
+        gt=0,
     )
     chunking_base_url: str = Field(
         default=DEFAULT_CHUNKING_BASE_URL,

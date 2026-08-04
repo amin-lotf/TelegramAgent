@@ -7,7 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from telegram_agent.core.common.types import TelegramAttachmentType
-from telegram_agent.core.content_processing.common.results import SegmentEmotionResult
+from telegram_agent.core.content_processing.common.results import (
+    EmotionExtractionBatchResult,
+    SegmentEmotionUpdate,
+)
 from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import (
     JobKind,
@@ -69,14 +72,15 @@ def test_emotion_extraction_updates_segments_and_finishes_job(
         def __init__(self, _settings) -> None:
             pass
 
-        def extract_emotion(self, *, path, mime_type, request_id, language=None):
-            emotion_calls.append(str(path))
-            index = len(emotion_calls)
-            return SegmentEmotionResult(
-                emotion="HAPPY" if index == 1 else "NEUTRAL",
-                events=("Speech",),
-                language="en",
-                text=None,
+        def extract_emotions(self, *, manifest_path, request_id, timeout_seconds, heartbeat):
+            del request_id, timeout_seconds
+            heartbeat()
+            emotion_calls.append(str(manifest_path))
+            return EmotionExtractionBatchResult(
+                segments=(
+                    SegmentEmotionUpdate(0, "HAPPY", ("Speech",)),
+                    SegmentEmotionUpdate(1, "NEUTRAL", ("Speech",)),
+                )
             )
 
     monkeypatch.setattr(
@@ -90,9 +94,12 @@ def test_emotion_extraction_updates_segments_and_finishes_job(
         FakeSenseVoiceClient,
     )
 
+    test_settings = settings.model_copy(
+        update={"media_storage_root": str(tmp_path)}
+    )
     result = SyncEmotionExtractionService(
         uow_factory=content_sync_uow_factory,
-        settings=settings,
+        settings=test_settings,
     ).execute(job_id=job_id, retry_count=0)
 
     with content_sync_sessionmaker() as session:
@@ -113,7 +120,7 @@ def test_emotion_extraction_updates_segments_and_finishes_job(
     assert result.error_message is None
     assert job is not None and job.status == JobStatus.EMOTION_EXTRACTED
     assert clip_calls == [(0, 1000), (1000, 2000)]
-    assert len(emotion_calls) == 2
+    assert len(emotion_calls) == 1
     assert segments[0].emotion == "HAPPY"
     assert segments[0].audio_events == ["Speech"]
     assert segments[1].emotion == "NEUTRAL"

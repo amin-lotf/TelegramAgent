@@ -130,6 +130,15 @@ class WhisperXRuntime:
         finally:
             self._semaphore.release()
 
+    def transcribe_sync(
+        self,
+        *,
+        audio_path: Path,
+        language: str | None = None,
+    ) -> ModelTranscriptResult:
+        """Run one complete logical transcription in the current process."""
+        return self._transcribe_sync(audio_path, language)
+
     async def _acquire_capacity_slot(self) -> None:
         async with self._capacity_lock:
             if self._semaphore.locked():
