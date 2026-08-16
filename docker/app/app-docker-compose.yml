@@ -33,6 +33,9 @@ services:
     container_name: content_processing_app
     env_file:
       - .env.content_processing.docker
+    environment:
+      GPU_EXECUTION_BASE_URL: http://gpu-execution:8000/api/v1
+      GPU_EXECUTION_SERVICE_TOKEN: ${GPU_EXECUTION_SERVICE_TOKEN:-replace-me}
     command: python -m uvicorn telegram_agent.core.content_processing.api.v1.fastapi_app:fastapi_app --host 0.0.0.0 --port 8000
     volumes:
       - ../..:/app

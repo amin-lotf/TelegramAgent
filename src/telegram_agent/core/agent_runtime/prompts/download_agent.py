@@ -11,7 +11,7 @@ Return only structured fields:
 - is_download_request: true only when the user clearly asks to download/process the video (e.g. subtitles, dub, language, prepare/download/convert). false for chitchat, off-topic, empty, or too vague requests.
 - requested_subtitle_language: language code/name for subtitles, or null if unspecified or is_download_request is false
 - requested_dub_language: language code/name for dubbing/audio track, or null if unspecified or is_download_request is false
-- assistant_text: if is_download_request is true, a short confirmation that the request is being prepared; if false, a short polite explanation that you only handle download-related media requests and why this message was not acted on
+- assistant_text: short user-facing status text only. If is_download_request is true, confirm that preparation has started (e.g. "Preparing the video with English dub."). This is sent immediately as a chat reply while work runs — it is NOT the final media caption. If false, a short polite explanation that you only handle download-related media requests and why this message was not acted on.
 
 Do not invent languages the user did not ask for. Keep assistant_text concise. When is_download_request is false, set language fields to null."""
 
@@ -20,7 +20,7 @@ _AUDIO_SYSTEM_PROMPT = """Decide if the user wants a download/processing action 
 Return only structured fields:
 - is_download_request: true only when the user clearly asks to download/process the audio (e.g. language, transcribe, prepare/download/convert). false for chitchat, off-topic, empty, or too vague requests.
 - requested_language: language code/name if the user requested a language, else null (always null when is_download_request is false)
-- assistant_text: if is_download_request is true, a short confirmation that the request is being prepared; if false, a short polite explanation that you only handle download-related media requests and why this message was not acted on
+- assistant_text: short user-facing status text only. If is_download_request is true, confirm that preparation has started (e.g. "Preparing your audio."). This is sent immediately as a chat reply while work runs — it is NOT the final media caption. If false, a short polite explanation that you only handle download-related media requests and why this message was not acted on.
 
 Do not invent languages the user did not ask for. Keep assistant_text concise. When is_download_request is false, set requested_language to null."""
 
@@ -32,7 +32,7 @@ Return only structured fields:
 - requested_subtitle_language: language code/name for subtitles/translation, or null if unspecified or is_download_request is false
 - requested_dub_language: language code/name for dubbing/audio track, or null if unspecified or is_download_request is false
 - requested_format: preferred container/format if the user requested one, else null (always null when is_download_request is false)
-- assistant_text: if is_download_request is true, a short confirmation that the request is being prepared; if false, a short polite explanation that you only handle download-related media requests and why this message was not acted on
+- assistant_text: short user-facing status text only. If is_download_request is true, confirm that preparation has started (e.g. "Preparing your file with English subtitles."). This is sent immediately as a chat reply while work runs — it is NOT the final media caption. If false, a short polite explanation that you only handle download-related media requests and why this message was not acted on.
 
 Do not invent languages or formats the user did not ask for. Keep assistant_text concise.
 If the user asks for translation or subtitles, populate requested_subtitle_language.

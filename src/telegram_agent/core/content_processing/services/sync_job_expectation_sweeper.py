@@ -219,6 +219,25 @@ class SyncJobExpectationSweeper:
                         )
                     )
 
+            request = uow.download_requests.get_by_job_id(expectation.job_id)
+            if request is not None:
+                workflow = uow.dubbing.get_by_job_id(expectation.job_id)
+                if workflow is not None:
+                    uow.dubbing.request_cancellation(job_id=expectation.job_id)
+                    event_type = OutboxEventType.DUBBING_CANCELLATION_REQUESTED
+                else:
+                    event_type = OutboxEventType.DOWNLOAD_FAILED_FOR_DELIVERY
+                idempotency_key = f"{event_type.value}:{expectation.job_id}"
+                if uow.outbox_events.get_by_idempotency_key(idempotency_key) is None:
+                    uow.outbox_events.add(
+                        OutboxEvent(
+                            event_type=event_type,
+                            job_id=expectation.job_id,
+                            idempotency_key=idempotency_key,
+                            payload={},
+                        )
+                    )
+
             resolved = uow.job_expectations.mark_timed_out(
                 expectation_id=expectation.id,
                 lease_owner=self._lease_owner,

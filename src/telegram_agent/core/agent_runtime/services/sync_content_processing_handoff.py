@@ -248,6 +248,7 @@ class SyncContentProcessingHandoffService:
             media_ingress_message_id = UUID(str(payload["media_ingress_message_id"]))
             media_type = str(payload["media_type"])
             assistant_text = str(payload["assistant_text"])
+            reply_to_message_id = _optional_int(payload.get("reply_to_message_id"))
         except (KeyError, TypeError, ValueError) as exc:
             raise PermanentAgentRuntimeCoordinationError(
                 "Invalid content-processing handoff payload"
@@ -261,6 +262,7 @@ class SyncContentProcessingHandoffService:
                 "agent_message_id": agent_message_id,
                 "media_ingress_message_id": media_ingress_message_id,
                 "assistant_text": assistant_text,
+                "reply_to_message_id": reply_to_message_id,
                 "idempotency_key": idempotency_key,
             }
             if media_type == "video":
@@ -439,3 +441,9 @@ def _optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)

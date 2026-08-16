@@ -6,6 +6,7 @@ from uuid import uuid4
 from telegram_agent.core.admin_dashboard.common.types import StageKey, StageStatus
 from telegram_agent.core.admin_dashboard.services.timeline import build_timeline
 from telegram_agent.core.admin_dashboard.services.view_models import (
+    AgentMessageRow,
     AgentRuntimeView,
     AttachmentRow,
     ChunkEmbeddingRow,
@@ -52,6 +53,88 @@ def test_text_only_timeline_marks_cp_not_applicable() -> None:
     assert by_key[StageKey.ATTACHMENT_REGISTERED].status == StageStatus.NOT_APPLICABLE
     assert by_key[StageKey.CP_JOB_CREATED].status == StageStatus.NOT_APPLICABLE
     assert by_key[StageKey.RUNTIME_INGESTED].status == StageStatus.NOT_STARTED
+
+
+def test_download_timeline_uses_agent_result_for_traced_request() -> None:
+    request_id = uuid4()
+    stale_request_id = uuid4()
+    group_id = uuid4()
+    now = _now()
+    stale_created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    message = UserMessageRow(
+        id=request_id,
+        telegram_user_id=1,
+        chat_id=1,
+        message_id=2,
+        update_id=None,
+        reply_message_id=None,
+        text="english subtitles",
+        conversation_status="dispatched",
+        dispatch_event_id=uuid4(),
+        created_at=now,
+    )
+    runtime = AgentRuntimeView(
+        message=RuntimeMessageRow(
+            id=uuid4(),
+            batch_id=uuid4(),
+            ingress_message_id=request_id,
+            chat_id=1,
+            telegram_user_id=1,
+            message_id=2,
+            reply_message_id=None,
+            text="english subtitles",
+            attachment_ingress_id=None,
+            attachment_type=None,
+            attachment_status=None,
+            attachment_file_id=None,
+            attachment_file_unique_id=None,
+            group_id=group_id,
+            coordination_status="grouped",
+            status="coordinated",
+            intent=None,
+            coordinated_at=now,
+            created_at=now,
+        ),
+        batch=None,
+        group=None,
+        outbox=None,
+        claim=None,
+        agent_messages=(
+            AgentMessageRow(
+                id=uuid4(),
+                ingress_message_id=stale_request_id,
+                chat_id=1,
+                telegram_user_id=1,
+                group_id=group_id,
+                text="stale response",
+                role="download_agent",
+                created_at=stale_created_at,
+            ),
+            AgentMessageRow(
+                id=uuid4(),
+                ingress_message_id=request_id,
+                chat_id=1,
+                telegram_user_id=1,
+                group_id=group_id,
+                text="matching response",
+                role="download_agent",
+                created_at=now,
+            ),
+        ),
+    )
+
+    events = build_timeline(
+        message=message,
+        ingress_outbox=None,
+        content=None,
+        runtime=runtime,
+        cp_available=True,
+        runtime_available=True,
+    )
+
+    download = next(event for event in events if event.key == StageKey.DOWNLOAD_HANDLED)
+    assert download.status == StageStatus.COMPLETED
+    assert download.timestamp == now
 
 
 def test_voice_happy_path_timeline() -> None:

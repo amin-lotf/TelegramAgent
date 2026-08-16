@@ -32,6 +32,7 @@ class CreateDownloadRequestCommand(BaseModel):
     media_ingress_message_id: UUID
     media_type: str
     assistant_text: str
+    reply_to_message_id: int | None = None
     requested_subtitle_language: str | None = None
     requested_dub_language: str | None = None
     requested_language: str | None = None

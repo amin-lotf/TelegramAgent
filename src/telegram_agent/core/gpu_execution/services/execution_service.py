@@ -84,10 +84,26 @@ class SyncGpuExecutionService:
         process: subprocess.Popen[bytes] | None = None
         try:
             attempt_dir.mkdir(parents=True, exist_ok=True)
+            definition = get_workload_definition(job.workload_type)
+            if definition is None:
+                return self._record_permanent_failure(
+                    job,
+                    error_kind="invalid_input",
+                    error_message=f"Unsupported GPU workload type: {job.workload_type}",
+                )
+            python_executable = definition.python_executable or sys.executable
+            if not Path(python_executable).is_file():
+                return self._record_permanent_failure(
+                    job,
+                    error_kind="workload_error",
+                    error_message=(
+                        f"GPU workload runtime is not installed: {python_executable}"
+                    ),
+                )
             with log_path.open("ab", buffering=0) as log_file:
                 process = subprocess.Popen(
                     [
-                        sys.executable,
+                        python_executable,
                         "-m",
                         "telegram_agent.core.gpu_execution.workloads.runner",
                         str(descriptor_path),
@@ -218,6 +234,22 @@ class SyncGpuExecutionService:
             error_kind=failure_kind,
             error_message=failure_message,
         )
+
+    def _record_permanent_failure(
+        self,
+        job: GpuJob,
+        *,
+        error_kind: str,
+        error_message: str,
+    ) -> GpuExecutionResult:
+        with self._uow_factory() as uow:
+            uow.jobs.mark_failed(
+                job_id=job.id,
+                worker_id=self._worker_id,
+                error_kind=error_kind,
+                error_message=error_message,
+            )
+        return GpuExecutionResult()
 
     def _record_retryable_failure(
         self,

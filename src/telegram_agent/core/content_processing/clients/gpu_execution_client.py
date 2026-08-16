@@ -16,7 +16,7 @@ from telegram_agent.core.common.exceptions import (
 from telegram_agent.core.content_processing.common.settings import Settings
 
 
-class _GpuJobResponse(BaseModel):
+class GpuJobResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: UUID
@@ -51,7 +51,7 @@ class GpuExecutionClient:
         max_attempts: int,
         heartbeat: Callable[[], None] | None = None,
     ) -> Path:
-        job = self._submit(
+        job = self.submit(
             workload_type=workload_type,
             idempotency_key=idempotency_key,
             input_path=input_path,
@@ -60,11 +60,24 @@ class GpuExecutionClient:
             timeout_seconds=timeout_seconds,
             max_attempts=max_attempts,
         )
+        return self.wait(
+            job=job,
+            expected_output_path=output_path,
+            heartbeat=heartbeat,
+        )
+
+    def wait(
+        self,
+        *,
+        job: GpuJobResponse,
+        expected_output_path: Path,
+        heartbeat: Callable[[], None] | None = None,
+    ) -> Path:
         deadline = time.monotonic() + self._wait_timeout_seconds
         while True:
             if job.status == "succeeded":
                 result_path = Path(job.output_path)
-                if result_path != output_path.resolve(strict=False):
+                if result_path != expected_output_path.resolve(strict=False):
                     raise GpuExecutionResponseError(
                         "GPU execution returned an unexpected output path"
                     )
@@ -99,12 +112,12 @@ class GpuExecutionClient:
             if heartbeat is not None:
                 heartbeat()
             time.sleep(self._poll_interval_seconds)
-            job = self._get(job.id)
+            job = self.get(job.id)
 
     def cancel(self, job_id: UUID) -> None:
         self._request("POST", f"/jobs/{job_id}/cancel")
 
-    def _submit(
+    def submit(
         self,
         *,
         workload_type: str,
@@ -114,7 +127,7 @@ class GpuExecutionClient:
         parameters: dict[str, object],
         timeout_seconds: int,
         max_attempts: int,
-    ) -> _GpuJobResponse:
+    ) -> GpuJobResponse:
         payload = {
             "workload_type": workload_type,
             "input_path": str(input_path.resolve()),
@@ -130,7 +143,7 @@ class GpuExecutionClient:
             extra_headers={"Idempotency-Key": idempotency_key},
         )
 
-    def _get(self, job_id: UUID) -> _GpuJobResponse:
+    def get(self, job_id: UUID) -> GpuJobResponse:
         return self._request("GET", f"/jobs/{job_id}")
 
     def _request(
@@ -140,7 +153,7 @@ class GpuExecutionClient:
         *,
         json: dict[str, object] | None = None,
         extra_headers: dict[str, str] | None = None,
-    ) -> _GpuJobResponse:
+    ) -> GpuJobResponse:
         headers = dict(extra_headers or {})
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
@@ -165,7 +178,7 @@ class GpuExecutionClient:
                 f"GPU execution rejected the request with status {response.status_code}"
             )
         try:
-            return _GpuJobResponse.model_validate(response.json())
+            return GpuJobResponse.model_validate(response.json())
         except (ValueError, ValidationError) as exc:
             raise GpuExecutionResponseError(
                 "GPU execution returned an invalid response"

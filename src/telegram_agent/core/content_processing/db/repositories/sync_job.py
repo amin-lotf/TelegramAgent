@@ -310,6 +310,36 @@ class SyncSqlAlchemyJobRepository:
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
 
+    def mark_cancelled(self, *, job_id: UUID, error_message: str | None = None) -> bool:
+        statement = (
+            update(Job)
+            .where(
+                Job.id == job_id,
+                Job.status.not_in(
+                    (
+                        JobStatus.EMOTION_EXTRACTED,
+                        JobStatus.CHUNKED,
+                        JobStatus.EMBEDDED,
+                        JobStatus.COMPLETED,
+                        JobStatus.FAILED,
+                        JobStatus.TIMED_OUT,
+                        JobStatus.CANCELLED,
+                    )
+                ),
+            )
+            .values(
+                status=JobStatus.CANCELLED,
+                error_message=(
+                    clean_error_message(error_message, max_length=2000)
+                    if error_message
+                    else None
+                ),
+                updated_at=func.now(),
+            )
+            .returning(Job.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
     def _mark_retryable(self, *, job_id: UUID, from_status: JobStatus, to_status: JobStatus, error_message: str) -> None:
         self._session.execute(
             update(Job)

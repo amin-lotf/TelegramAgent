@@ -27,6 +27,8 @@ class _DownloadHandoffBase(BaseModel):
     agent_message_id: UUID
     media_ingress_message_id: UUID
     assistant_text: str = Field(min_length=1, max_length=2_000)
+    # Telegram message_id of the user request to reply to on delivery.
+    reply_to_message_id: int | None = None
 
 
 class AcceptVideoDownloadRequest(_DownloadHandoffBase):
@@ -48,3 +50,18 @@ class AcceptDownloadResponse(BaseModel):
     status: str
     accepted: bool = True
     media_type: str
+    job_id: UUID
+
+
+class CancelDownloadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    telegram_user_id: int
+
+
+class CancelDownloadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    cancelled: bool
+    job_id: UUID

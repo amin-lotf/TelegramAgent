@@ -444,11 +444,12 @@ class AgentMessage(Base):
             ondelete="RESTRICT",
             name="fk_agent_messages_group_id_chat_id",
         ),
-        # One download-agent reply per conversation group.
+        # One reply per agent role and user request. A conversation group can
+        # contain multiple independent requests against the same media.
         UniqueConstraint(
-            "group_id",
+            "ingress_message_id",
             "role",
-            name="uq_agent_messages_group_id_role",
+            name="uq_agent_messages_ingress_message_id_role",
         ),
         Index(
             "ix_agent_messages_chat_id_created_at",

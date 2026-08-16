@@ -75,6 +75,8 @@ INGRESS_TABLES = (
 )
 CONTENT_PROCESSING_TABLES = (
     "outbox_events",
+    "dubbing_artifacts",
+    "dubbing_workflows",
     "translated_segments",
     "translation_batches",
     "subtitle_translations",

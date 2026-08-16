@@ -111,6 +111,44 @@ async def test_duplicate_idempotency_key_returns_existing_without_duplicate_rows
     assert event_count == 1
 
 
+async def test_distinct_request_keys_for_same_media_create_distinct_jobs(
+    content_uow_factory,
+    content_sessionmaker,
+) -> None:
+    service = AsyncDownloadRequestService(uow_factory=content_uow_factory)
+    first_command = _create_command(idempotency_key="request-message-1")
+    second_command = first_command.model_copy(
+        update={
+            "agent_message_id": uuid4(),
+            "idempotency_key": "request-message-2",
+        }
+    )
+
+    first = await service.create_download_request(first_command)
+    second = await service.create_download_request(second_command)
+
+    assert first.created is True
+    assert second.created is True
+    assert second.job_id != first.job_id
+
+    async with content_sessionmaker() as session:
+        requests = list(
+            (
+                await session.scalars(
+                    select(DownloadRequest).order_by(DownloadRequest.created_at)
+                )
+            ).all()
+        )
+
+    assert len(requests) == 2
+    assert requests[0].group_id == requests[1].group_id
+    assert (
+        requests[0].media_ingress_message_id
+        == requests[1].media_ingress_message_id
+    )
+    assert requests[0].agent_message_id != requests[1].agent_message_id
+
+
 async def test_create_download_request_rolls_back_when_outbox_write_fails(
     content_sessionmaker,
 ) -> None:
@@ -159,6 +197,7 @@ def _create_command(*, idempotency_key: str) -> CreateDownloadRequestCommand:
         media_ingress_message_id=uuid4(),
         media_type="video",
         assistant_text="Preparing your video download.",
+        reply_to_message_id=1234,
         requested_subtitle_language="en",
         requested_dub_language=None,
         idempotency_key=idempotency_key,

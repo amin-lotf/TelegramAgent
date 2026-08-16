@@ -26,6 +26,7 @@ from telegram_agent.core.content_processing.celery.tasks.emotion_extraction impo
     extract_emotions_task,
 )
 from telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback import notify_telegram_ingress_task
+from telegram_agent.core.content_processing.celery.tasks.dubbing import advance_dubbing_task
 from telegram_agent.core.content_processing.db.models.content_processing import OutboxEvent
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
     SyncSqlAlchemyContentProcessingUnitOfWork,
@@ -61,6 +62,12 @@ class OutboxDispatcher:
             OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value: notify_telegram_ingress_task,
             OutboxEventType.DOWNLOAD_PREPARATION_READY.value: prepare_download_task,
             OutboxEventType.DOWNLOAD_READY_FOR_DELIVERY.value: deliver_download_task,
+            OutboxEventType.DUBBING_SOURCE_RESOLVED.value: advance_dubbing_task,
+            OutboxEventType.DUBBING_INPUTS_PREPARED.value: advance_dubbing_task,
+            OutboxEventType.DUBBING_SPEECH_SYNTHESIZED.value: advance_dubbing_task,
+            OutboxEventType.DUBBING_BACKGROUND_SEPARATED.value: advance_dubbing_task,
+            OutboxEventType.DUBBING_CANCELLATION_REQUESTED.value: advance_dubbing_task,
+            OutboxEventType.DOWNLOAD_FAILED_FOR_DELIVERY.value: deliver_download_task,
         }
 
     @classmethod

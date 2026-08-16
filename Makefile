@@ -2,9 +2,11 @@ HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
 COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
+DUBBING_WORKLOAD_LOG_ROOT ?= media/.gpu-control
 
-.PHONY: up up-build down down-v restart ps logs \
+.PHONY: up up-build setup-dubbing up-dubbing build-dubbing init-dubbing-models down down-v restart ps logs \
         logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx logs-sensevoice logs-gpu-execution \
+        logs-dubbing logs-cosyvoice logs-sam \
         logs-chunking logs-embedding logs-admin-dashboard logs-admin-dashboard-v2 \
         logs-telegram-bot-api \
         shell-celery \
@@ -17,6 +19,24 @@ up:
 
 up-build:
 	$(COMPOSE) up -d --build $(SERVICE)
+
+# Run once initially, and again only after changing the dubbing model runtimes,
+# model selection, or dubbing database schema.
+setup-dubbing:
+	$(MAKE) build-dubbing
+	$(MAKE) init-dubbing-models
+	$(MAKE) migrate-content_processing
+
+# Convenience target for setup/rebuild followed by stack startup.
+up-dubbing:
+	$(MAKE) setup-dubbing
+	$(COMPOSE) up -d
+
+build-dubbing:
+	$(COMPOSE) --profile dubbing-init build gpu-dubbing-models-init gpu-execution-worker content-processing content-processing-worker
+
+init-dubbing-models:
+	$(COMPOSE) --profile dubbing-init run --rm gpu-dubbing-models-init
 
 down:
 	$(COMPOSE) down
@@ -69,6 +89,37 @@ logs-sensevoice:
 
 logs-gpu-execution:
 	$(COMPOSE) logs -f --tail=100 gpu-execution gpu-execution-worker gpu-execution-control-worker gpu-execution-beat
+
+# Live orchestration and singleton GPU-worker logs for the complete dub flow.
+logs-dubbing:
+	$(COMPOSE) logs -f --tail=100 content-processing-worker gpu-execution-worker gpu-execution-control-worker
+
+# Model subprocesses write attempt logs under media/.gpu-control/<gpu-job>/.
+logs-cosyvoice:
+	@descriptors=$$(grep -rl --include=descriptor.json '"workload_type": "cosyvoice.dubbing_batch.v1"' "$(DUBBING_WORKLOAD_LOG_ROOT)" 2>/dev/null || true); \
+	logs=""; \
+	for descriptor in $$descriptors; do \
+		log="$${descriptor%descriptor.json}workload.log"; \
+		if [ -f "$$log" ]; then logs="$$logs $$log"; fi; \
+	done; \
+	if [ -z "$$logs" ]; then \
+		echo "No CosyVoice workload logs found under $(DUBBING_WORKLOAD_LOG_ROOT)"; \
+		exit 0; \
+	fi; \
+	tail -F $$logs
+
+logs-sam:
+	@descriptors=$$(grep -rl --include=descriptor.json '"workload_type": "sam_audio.residual.v1"' "$(DUBBING_WORKLOAD_LOG_ROOT)" 2>/dev/null || true); \
+	logs=""; \
+	for descriptor in $$descriptors; do \
+		log="$${descriptor%descriptor.json}workload.log"; \
+		if [ -f "$$log" ]; then logs="$$logs $$log"; fi; \
+	done; \
+	if [ -z "$$logs" ]; then \
+		echo "No SAM Audio workload logs found under $(DUBBING_WORKLOAD_LOG_ROOT)"; \
+		exit 0; \
+	fi; \
+	tail -F $$logs
 
 logs-telegram-bot-api:
 	$(COMPOSE) logs -f --tail=100 telegram-bot-api

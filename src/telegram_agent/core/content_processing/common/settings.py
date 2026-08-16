@@ -52,6 +52,25 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_GPU_EXECUTION_JOB_MAX_TIMEOUT_SECONDS,
     DEFAULT_GPU_EXECUTION_POLL_INTERVAL_SECONDS,
     DEFAULT_GPU_EXECUTION_WAIT_TIMEOUT_SECONDS,
+    DEFAULT_COSYVOICE_MODEL,
+    DEFAULT_COSYVOICE_INFERENCE_MODE,
+    DEFAULT_COSYVOICE_PROMPT_PREFIX,
+    DEFAULT_COSYVOICE_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_COSYVOICE_SHORT_TEXT_SPEED,
+    DEFAULT_COSYVOICE_SHORT_TEXT_MAX_ATTEMPTS,
+    DEFAULT_COSYVOICE_DURATION_FIT_MAX_SPEED,
+    DEFAULT_COSYVOICE_DURATION_FIT_TARGET_RATIO,
+    DEFAULT_SAM_AUDIO_MODEL,
+    DEFAULT_SAM_AUDIO_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_SAM_AUDIO_DESCRIPTION,
+    DEFAULT_SAM_AUDIO_CHUNK_SECONDS,
+    DEFAULT_SAM_AUDIO_OVERLAP_SECONDS,
+    DEFAULT_DUBBING_GPU_MAX_ATTEMPTS,
+    DEFAULT_DUBBING_BACKGROUND_RELATIVE_DB,
+    DEFAULT_DUBBING_SAMPLE_RATE,
+    DEFAULT_DUBBING_CHANNELS,
+    DEFAULT_DUBBING_FADE_MILLISECONDS,
+    DEFAULT_DUBBING_AUDIO_BITRATE,
 )
 
 
@@ -521,6 +540,153 @@ class Settings(BaseSettings):
         ),
         gt=0,
     )
+
+    cosyvoice_model: str = Field(
+        default=DEFAULT_COSYVOICE_MODEL,
+        validation_alias=AliasChoices("COSYVOICE_MODEL", "cosyvoice_model"),
+        min_length=1,
+    )
+    cosyvoice_inference_mode: str = Field(
+        default=DEFAULT_COSYVOICE_INFERENCE_MODE,
+        validation_alias=AliasChoices(
+            "COSYVOICE_INFERENCE_MODE", "cosyvoice_inference_mode"
+        ),
+        pattern="^(cross_lingual|zero_shot)$",
+    )
+    cosyvoice_prompt_prefix: str = Field(
+        default=DEFAULT_COSYVOICE_PROMPT_PREFIX,
+        validation_alias=AliasChoices(
+            "COSYVOICE_PROMPT_PREFIX", "cosyvoice_prompt_prefix"
+        ),
+    )
+    cosyvoice_request_timeout_seconds: int = Field(
+        default=DEFAULT_COSYVOICE_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "COSYVOICE_REQUEST_TIMEOUT_SECONDS", "cosyvoice_request_timeout_seconds"
+        ),
+        gt=0,
+    )
+    cosyvoice_short_text_speed: float = Field(
+        default=DEFAULT_COSYVOICE_SHORT_TEXT_SPEED,
+        validation_alias=AliasChoices(
+            "COSYVOICE_SHORT_TEXT_SPEED", "cosyvoice_short_text_speed"
+        ),
+        gt=0,
+    )
+    cosyvoice_short_text_max_attempts: int = Field(
+        default=DEFAULT_COSYVOICE_SHORT_TEXT_MAX_ATTEMPTS,
+        validation_alias=AliasChoices(
+            "COSYVOICE_SHORT_TEXT_MAX_ATTEMPTS", "cosyvoice_short_text_max_attempts"
+        ),
+        gt=0,
+    )
+    cosyvoice_duration_fit_max_speed: float = Field(
+        default=DEFAULT_COSYVOICE_DURATION_FIT_MAX_SPEED,
+        validation_alias=AliasChoices(
+            "COSYVOICE_DURATION_FIT_MAX_SPEED", "cosyvoice_duration_fit_max_speed"
+        ),
+        gt=1,
+    )
+    cosyvoice_duration_fit_target_ratio: float = Field(
+        default=DEFAULT_COSYVOICE_DURATION_FIT_TARGET_RATIO,
+        validation_alias=AliasChoices(
+            "COSYVOICE_DURATION_FIT_TARGET_RATIO", "cosyvoice_duration_fit_target_ratio"
+        ),
+        gt=0,
+        le=1,
+    )
+    sam_audio_model: str = Field(
+        default=DEFAULT_SAM_AUDIO_MODEL,
+        validation_alias=AliasChoices("SAM_AUDIO_MODEL", "sam_audio_model"),
+        min_length=1,
+    )
+    sam_audio_request_timeout_seconds: int = Field(
+        default=DEFAULT_SAM_AUDIO_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "SAM_AUDIO_REQUEST_TIMEOUT_SECONDS", "sam_audio_request_timeout_seconds"
+        ),
+        gt=0,
+    )
+    sam_audio_description: str = Field(
+        default=DEFAULT_SAM_AUDIO_DESCRIPTION,
+        validation_alias=AliasChoices(
+            "SAM_AUDIO_DESCRIPTION", "sam_audio_description"
+        ),
+        min_length=1,
+    )
+    sam_audio_chunk_seconds: float = Field(
+        default=DEFAULT_SAM_AUDIO_CHUNK_SECONDS,
+        validation_alias=AliasChoices(
+            "SAM_AUDIO_CHUNK_SECONDS", "sam_audio_chunk_seconds"
+        ),
+        gt=0,
+    )
+    sam_audio_overlap_seconds: float = Field(
+        default=DEFAULT_SAM_AUDIO_OVERLAP_SECONDS,
+        validation_alias=AliasChoices(
+            "SAM_AUDIO_OVERLAP_SECONDS", "sam_audio_overlap_seconds"
+        ),
+        gt=0,
+    )
+    dubbing_gpu_max_attempts: int = Field(
+        default=DEFAULT_DUBBING_GPU_MAX_ATTEMPTS,
+        validation_alias=AliasChoices(
+            "DUBBING_GPU_MAX_ATTEMPTS", "dubbing_gpu_max_attempts"
+        ),
+        ge=1,
+    )
+    dubbing_background_relative_db: float = Field(
+        default=DEFAULT_DUBBING_BACKGROUND_RELATIVE_DB,
+        validation_alias=AliasChoices(
+            "DUBBING_BACKGROUND_RELATIVE_DB", "dubbing_background_relative_db"
+        ),
+        le=0,
+    )
+    dubbing_sample_rate: int = Field(
+        default=DEFAULT_DUBBING_SAMPLE_RATE,
+        validation_alias=AliasChoices("DUBBING_SAMPLE_RATE", "dubbing_sample_rate"),
+        gt=0,
+    )
+    dubbing_channels: int = Field(
+        default=DEFAULT_DUBBING_CHANNELS,
+        validation_alias=AliasChoices("DUBBING_CHANNELS", "dubbing_channels"),
+        ge=1,
+        le=2,
+    )
+    dubbing_fade_milliseconds: int = Field(
+        default=DEFAULT_DUBBING_FADE_MILLISECONDS,
+        validation_alias=AliasChoices(
+            "DUBBING_FADE_MILLISECONDS", "dubbing_fade_milliseconds"
+        ),
+        ge=0,
+    )
+    dubbing_audio_bitrate: str = Field(
+        default=DEFAULT_DUBBING_AUDIO_BITRATE,
+        validation_alias=AliasChoices(
+            "DUBBING_AUDIO_BITRATE", "dubbing_audio_bitrate"
+        ),
+        min_length=1,
+    )
+
+    @model_validator(mode="after")
+    def _validate_dubbing_settings(self) -> "Settings":
+        if self.sam_audio_overlap_seconds >= self.sam_audio_chunk_seconds:
+            raise ValueError(
+                "SAM_AUDIO_OVERLAP_SECONDS must be shorter than SAM_AUDIO_CHUNK_SECONDS"
+            )
+        if self.cosyvoice_request_timeout_seconds > self.gpu_execution_job_max_timeout_seconds:
+            raise ValueError(
+                "COSYVOICE_REQUEST_TIMEOUT_SECONDS cannot exceed GPU execution maximum"
+            )
+        if self.sam_audio_request_timeout_seconds > self.gpu_execution_job_max_timeout_seconds:
+            raise ValueError(
+                "SAM_AUDIO_REQUEST_TIMEOUT_SECONDS cannot exceed GPU execution maximum"
+            )
+        if self.dubbing_gpu_max_attempts > self.gpu_execution_job_max_attempts:
+            raise ValueError(
+                "DUBBING_GPU_MAX_ATTEMPTS cannot exceed GPU execution maximum"
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod

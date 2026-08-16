@@ -16,6 +16,8 @@ from telegram_agent.core.content_processing.common.const import (
 )
 from telegram_agent.core.content_processing.common.types import (
     ContentChunkType,
+    DownloadDeliveryStatus,
+    DubbingStatus,
     JobCompletionExpectationKind,
     JobCompletionExpectationStatus,
     JobStatus,
@@ -500,8 +502,41 @@ class DownloadRequest(Base):
         nullable=True,
     )
 
+    # Telegram message_id of the user request we should reply to on delivery.
+    reply_to_message_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+
     final_path: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
+    )
+
+    delivery_status: Mapped[DownloadDeliveryStatus] = mapped_column(
+        sa.Enum(
+            DownloadDeliveryStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=DownloadDeliveryStatus.PENDING,
+        server_default=DownloadDeliveryStatus.PENDING.value,
+    )
+    delivery_attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=sa.text("0"),
+    )
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_delivery_message_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
@@ -516,6 +551,105 @@ class DownloadRequest(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "delivery_attempt_count >= 0",
+            name="ck_download_requests_delivery_attempt_non_negative",
+        ),
+    )
+
+
+class DubbingWorkflow(Base):
+    __tablename__ = "dubbing_workflows"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    job_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    source_job_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    target_language: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[DubbingStatus] = mapped_column(
+        sa.Enum(
+            DubbingStatus,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+        default=DubbingStatus.SOURCE_READY,
+        server_default=DubbingStatus.SOURCE_READY.value,
+        index=True,
+    )
+    active_gpu_job_id: Mapped[UUID | None] = mapped_column(
+        SA_UUID(as_uuid=True), nullable=True, index=True
+    )
+    cosyvoice_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    sam_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class DubbingArtifact(Base):
+    __tablename__ = "dubbing_artifacts"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    workflow_id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("dubbing_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    local_path: Mapped[str] = mapped_column(Text, nullable=False)
+    producer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    artifact_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata", JSONB, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id", "artifact_type", name="uq_dubbing_artifact_type"
+        ),
+        CheckConstraint(
+            "size_bytes IS NULL OR size_bytes >= 0",
+            name="ck_dubbing_artifact_size_non_negative",
+        ),
     )
 
 

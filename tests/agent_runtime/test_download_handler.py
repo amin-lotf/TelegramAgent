@@ -109,10 +109,13 @@ class RecordingTelegramClient:
         self.calls: list[dict] = []
         self.fail = fail
 
-    def notify_request_preparing(self, **kwargs) -> None:
+    def notify_user(self, **kwargs) -> None:
         self.calls.append(kwargs)
         if self.fail is not None:
             raise self.fail
+
+    def notify_request_preparing(self, **kwargs) -> None:
+        self.notify_user(**kwargs)
 
 
 class RecordingContentProcessingClient:
@@ -387,6 +390,8 @@ async def test_download_handler_happy_path_and_handoff(
     assert len(gateway.calls) == 1
     assert len(telegram.calls) == 1
     assert telegram.calls[0]["text"] == "Got it — preparing your download."
+    assert telegram.calls[0]["reply_to_message_id"] is not None
+    assert handoff_events[0].payload.get("reply_to_message_id") is not None
 
     # Placeholder content-processing handoff.
     with agent_runtime_sync_uow_factory() as uow:
@@ -409,6 +414,7 @@ async def test_download_handler_happy_path_and_handoff(
     assert cp_client.calls[0]["method"] == "video"
     assert cp_client.calls[0]["requested_subtitle_language"] == "en"
     assert "assistant_text" in cp_client.calls[0]
+    assert cp_client.calls[0].get("reply_to_message_id") is not None
 
     # Outbox payload stores typed fields at top level for the handoff consumer.
     with agent_runtime_sync_sessionmaker() as session:
@@ -421,6 +427,7 @@ async def test_download_handler_happy_path_and_handoff(
     assert handoff_row.payload["media_type"] == "video"
     assert handoff_row.payload["requested_subtitle_language"] == "en"
     assert handoff_row.payload.get("assistant_text")
+    assert handoff_row.payload.get("reply_to_message_id") is not None
 
     with agent_runtime_sync_sessionmaker() as session:
         handoff = session.scalars(
@@ -613,7 +620,7 @@ async def test_download_handler_retryable_llm_failure(
 
 
 @pytest.mark.asyncio
-async def test_download_handler_idempotent_for_group(
+async def test_download_handler_idempotent_for_request(
     agent_runtime_uow_factory,
     agent_runtime_sync_uow_factory,
     agent_runtime_sync_sessionmaker: sessionmaker[Session],
@@ -709,8 +716,134 @@ async def test_download_handler_idempotent_for_group(
     assert len(agent_messages) == 1
     assert len(handoff) == 1
     assert all(e.status == OutboxEventStatus.PUBLISHED for e in download_events)
-    # LLM called once; second download_handler is idempotent early-exit.
+    # The media-only message is not a request; the single text request runs once.
     assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_identical_messages_in_one_group_create_independent_jobs(
+    agent_runtime_uow_factory,
+    agent_runtime_sync_uow_factory,
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    chat_id = 9310
+    first_request_id = uuid4()
+    second_request_id = uuid4()
+    claim_token = await _ingest_coordinate_classify_download(
+        agent_runtime_uow_factory,
+        agent_runtime_sync_uow_factory,
+        chat_id=chat_id,
+        key="dl-message-scoped-idempotency",
+        messages=(
+            IngestMessageCommand(
+                ingress_message_id=uuid4(),
+                telegram_user_id=1,
+                message_id=1,
+                text=None,
+                attachment=IngestAttachmentCommand(
+                    ingress_attachment_id=uuid4(),
+                    type=TelegramAttachmentType.VIDEO,
+                    status="ready",
+                    file_id="vid-shared",
+                ),
+            ),
+            IngestMessageCommand(
+                ingress_message_id=first_request_id,
+                telegram_user_id=1,
+                message_id=2,
+                text="download with english subtitles",
+            ),
+            IngestMessageCommand(
+                ingress_message_id=second_request_id,
+                telegram_user_id=1,
+                message_id=3,
+                text="download with english subtitles",
+            ),
+        ),
+    )
+
+    gateway = FixedDownloadGateway()
+    telegram = RecordingTelegramClient()
+    content_processing = RecordingContentProcessingClient()
+    download_service = SyncDownloadHandlerService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        llm_gateway_client=gateway,  # type: ignore[arg-type]
+        telegram_ingress_client=telegram,  # type: ignore[arg-type]
+        settings=_settings(),
+    )
+    handoff_service = SyncContentProcessingHandoffService(
+        uow_factory=agent_runtime_sync_uow_factory,
+        content_processing_client=content_processing,  # type: ignore[arg-type]
+        settings=_settings(),
+    )
+
+    next_token = claim_token
+    for _ in range(5):
+        with agent_runtime_sync_uow_factory() as uow:
+            head = uow.outbox_events.get_head_unresolved_for_chat(chat_id=chat_id)
+        if head is None:
+            break
+        if head.event_type == OutboxEventType.DOWNLOAD_HANDLER.value:
+            download_service.process_conversation(
+                chat_id=chat_id,
+                claim_token=next_token,
+            )
+        else:
+            assert head.event_type == OutboxEventType.CONTENT_PROCESSING_HANDOFF.value
+            handoff_service.process_conversation(
+                chat_id=chat_id,
+                claim_token=next_token,
+            )
+
+        with agent_runtime_sync_uow_factory() as uow:
+            claimed = uow.conversation_claims.claim_available_conversations(
+                batch_size=1,
+                lease_timeout=timedelta(minutes=5),
+                process_owner="message-scoped-worker",
+            )
+            if not claimed:
+                break
+            next_token = claimed[0].claim_token
+
+    with agent_runtime_sync_sessionmaker() as session:
+        agent_messages = list(
+            session.scalars(select(AgentMessage).order_by(AgentMessage.created_at)).all()
+        )
+        handoffs = list(
+            session.scalars(
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.event_type
+                    == OutboxEventType.CONTENT_PROCESSING_HANDOFF.value
+                )
+                .order_by(OutboxEvent.message_id)
+            ).all()
+        )
+        download_events = list(
+            session.scalars(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == OutboxEventType.DOWNLOAD_HANDLER.value
+                )
+            ).all()
+        )
+
+    assert len(agent_messages) == 2
+    assert {message.ingress_message_id for message in agent_messages} == {
+        first_request_id,
+        second_request_id,
+    }
+    assert agent_messages[0].group_id == agent_messages[1].group_id
+    assert len(handoffs) == 2
+    assert {event.idempotency_key for event in handoffs} == {
+        f"agent_runtime:content_processing_handoff:{first_request_id}:v2",
+        f"agent_runtime:content_processing_handoff:{second_request_id}:v2",
+    }
+    assert all(event.status == OutboxEventStatus.PUBLISHED for event in handoffs)
+    assert all(event.status == OutboxEventStatus.PUBLISHED for event in download_events)
+    assert len(gateway.calls) == 2
+    assert len(telegram.calls) == 2
+    assert len(content_processing.calls) == 2
+    assert len({call["idempotency_key"] for call in content_processing.calls}) == 2
 
 
 @pytest.mark.asyncio

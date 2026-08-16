@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from telegram_agent.core.common.gpu_workloads import (
+    COSYVOICE_DUBBING_BATCH_WORKLOAD,
+    SAM_AUDIO_RESIDUAL_WORKLOAD,
     SENSEVOICE_EMOTION_BATCH_WORKLOAD,
     WHISPERX_TRANSCRIPTION_WORKLOAD,
 )
@@ -12,6 +14,7 @@ from telegram_agent.core.common.gpu_workloads import (
 class WorkloadDefinition:
     handler_module: str
     output_kind: str = "binary"
+    python_executable: str | None = None
 
 
 # This registry intentionally contains import paths rather than imported handler
@@ -29,6 +32,16 @@ WORKLOAD_REGISTRY: dict[str, WorkloadDefinition] = {
             "telegram_agent.core.gpu_execution.workloads.sensevoice_emotion_batch"
         ),
         output_kind="json",
+    ),
+    COSYVOICE_DUBBING_BATCH_WORKLOAD: WorkloadDefinition(
+        handler_module="telegram_agent.core.gpu_execution.workloads.cosyvoice_dubbing_batch",
+        output_kind="json",
+        python_executable="/opt/cosyvoice/bin/python",
+    ),
+    SAM_AUDIO_RESIDUAL_WORKLOAD: WorkloadDefinition(
+        handler_module="telegram_agent.core.gpu_execution.workloads.sam_audio_residual",
+        output_kind="json",
+        python_executable="/opt/sam-audio/bin/python",
     ),
 }
 

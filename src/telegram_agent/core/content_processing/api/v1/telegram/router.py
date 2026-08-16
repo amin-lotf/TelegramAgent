@@ -1,14 +1,17 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 import logging
 
 from starlette import status
+from starlette.concurrency import run_in_threadpool
 
 from telegram_agent.core.common.api.security.token_verification import VerifyApiToken
 from telegram_agent.core.common.clients.telegram_auth import TelegramAuthClient
 from telegram_agent.core.content_processing.api.v1.telegram.dependencies import (
     get_download_request_service,
+    get_dubbing_workflow_service,
     get_telegram_auth_client,
     get_telegram_job_service,
 )
@@ -17,6 +20,8 @@ from telegram_agent.core.content_processing.api.v1.telegram.schemas import (
     AcceptDocumentDownloadRequest,
     AcceptDownloadResponse,
     AcceptVideoDownloadRequest,
+    CancelDownloadRequest,
+    CancelDownloadResponse,
     CreateContentProcessingJobRequest,
 )
 from telegram_agent.core.content_processing.common.commands import (
@@ -30,6 +35,9 @@ from telegram_agent.core.content_processing.services.async_download_request_serv
 )
 from telegram_agent.core.content_processing.services.async_telegram_job_service import (
     AsyncTelegramJobService,
+)
+from telegram_agent.core.content_processing.services.sync_dubbing_workflow_service import (
+    SyncDubbingWorkflowService,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,15 +86,17 @@ async def accept_video_download_request(
         media_ingress_message_id=payload.media_ingress_message_id,
         media_type=DownloadMediaType.VIDEO.value,
         assistant_text=payload.assistant_text,
+        reply_to_message_id=payload.reply_to_message_id,
         requested_subtitle_language=payload.requested_subtitle_language,
         requested_dub_language=payload.requested_dub_language,
         idempotency_key=key,
     )
-    await download_request_service.create_download_request(command)
+    result = await download_request_service.create_download_request(command)
     return AcceptDownloadResponse(
         status="accepted",
         accepted=True,
         media_type=DownloadMediaType.VIDEO.value,
+        job_id=result.job_id,
     )
 
 
@@ -113,14 +123,16 @@ async def accept_audio_download_request(
         media_ingress_message_id=payload.media_ingress_message_id,
         media_type=DownloadMediaType.AUDIO.value,
         assistant_text=payload.assistant_text,
+        reply_to_message_id=payload.reply_to_message_id,
         requested_language=payload.requested_language,
         idempotency_key=key,
     )
-    await download_request_service.create_download_request(command)
+    result = await download_request_service.create_download_request(command)
     return AcceptDownloadResponse(
         status="accepted",
         accepted=True,
         media_type=DownloadMediaType.AUDIO.value,
+        job_id=result.job_id,
     )
 
 
@@ -147,14 +159,46 @@ async def accept_document_download_request(
         media_ingress_message_id=payload.media_ingress_message_id,
         media_type=DownloadMediaType.DOCUMENT.value,
         assistant_text=payload.assistant_text,
+        reply_to_message_id=payload.reply_to_message_id,
         requested_format=payload.requested_format,
         idempotency_key=key,
     )
-    await download_request_service.create_download_request(command)
+    result = await download_request_service.create_download_request(command)
     return AcceptDownloadResponse(
         status="accepted",
         accepted=True,
         media_type=DownloadMediaType.DOCUMENT.value,
+        job_id=result.job_id,
+    )
+
+
+@router.post(
+    "/downloads/{job_id}/cancel",
+    response_model=CancelDownloadResponse,
+)
+async def cancel_download_request(
+    job_id: UUID,
+    payload: CancelDownloadRequest,
+    telegram_auth_client: Annotated[TelegramAuthClient, Depends(get_telegram_auth_client)],
+    dubbing_service: Annotated[
+        SyncDubbingWorkflowService, Depends(get_dubbing_workflow_service)
+    ],
+) -> CancelDownloadResponse:
+    await telegram_auth_client.check_user(payload.telegram_user_id)
+    cancelled = await run_in_threadpool(
+        dubbing_service.cancel,
+        job_id=job_id,
+        telegram_user_id=payload.telegram_user_id,
+    )
+    if not cancelled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active dubbing request was not found",
+        )
+    return CancelDownloadResponse(
+        status="cancelled",
+        cancelled=True,
+        job_id=job_id,
     )
 
 

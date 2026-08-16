@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -59,6 +60,10 @@ class MuxService:
         video_path: str,
         audio_path: str,
         subtitle_path: str,
+        subtitle_language: str | None = None,
+        subtitle_title: str | None = None,
+        audio_language: str | None = None,
+        audio_bitrate: str | None = None,
     ) -> str:
         video = Path(video_path)
         audio = Path(audio_path)
@@ -84,6 +89,12 @@ class MuxService:
             f".{output_path.stem}.part{output_path.suffix}"
         )
         ass_path = output_path.with_name(f".{output_path.stem}.ass")
+        subtitle_language_tag = self._language_tag(subtitle_language, default="eng")
+        audio_language_tag = self._language_tag(audio_language, default="und")
+        safe_subtitle_title = self._metadata_title(
+            subtitle_title or subtitle_language,
+            default="English",
+        )
 
         try:
             self._write_styled_ass(
@@ -115,13 +126,15 @@ class MuxService:
                     "-c:a",
                     "aac",
                     "-b:a",
-                    "128k",
+                    audio_bitrate or "128k",
+                    "-metadata:s:a:0",
+                    f"language={audio_language_tag}",
                     "-c:s",
                     "ass",
                     "-metadata:s:s:0",
-                    "language=eng",
+                    f"language={subtitle_language_tag}",
                     "-metadata:s:s:0",
-                    "title=English",
+                    f"title={safe_subtitle_title}",
                     "-disposition:s:0",
                     "default",
                     "-f",
@@ -143,6 +156,20 @@ class MuxService:
             ass_path.unlink(missing_ok=True)
 
         return str(output_path)
+
+    @staticmethod
+    def _language_tag(value: str | None, *, default: str) -> str:
+        if value is None:
+            return default
+        normalized = re.sub(r"[^a-z0-9-]", "", value.strip().lower())[:32]
+        return normalized or default
+
+    @staticmethod
+    def _metadata_title(value: str | None, *, default: str) -> str:
+        if value is None:
+            return default
+        normalized = " ".join(value.split())[:128]
+        return normalized or default
 
     def _write_styled_ass(
         self,

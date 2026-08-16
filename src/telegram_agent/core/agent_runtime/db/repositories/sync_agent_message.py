@@ -20,14 +20,14 @@ class SyncSqlAlchemyAgentMessageRepository:
     def get_by_id(self, message_id: UUID) -> AgentMessage | None:
         return self._session.get(AgentMessage, message_id)
 
-    def get_by_group_and_role(
+    def get_by_ingress_message_and_role(
         self,
         *,
-        group_id: UUID,
+        ingress_message_id: UUID,
         role: AgentMessageRole,
     ) -> AgentMessage | None:
         statement = select(AgentMessage).where(
-            AgentMessage.group_id == group_id,
+            AgentMessage.ingress_message_id == ingress_message_id,
             AgentMessage.role == role,
         )
         return self._session.scalar(statement)

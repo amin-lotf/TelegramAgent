@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -37,6 +37,13 @@ from telegram_agent.core.content_processing.services.sync_subtitle_translation_s
     SyncSubtitleTranslationService,
 )
 
+
+class DubbingWorkflowStarter(Protocol):
+    def start(
+        self, *, job_id: UUID, source_job_id: UUID, target_language: str
+    ) -> None: ...
+
+
 _VIDEO_ATTACHMENT_TYPES = frozenset(
     {
         TelegramAttachmentType.VIDEO.value,
@@ -62,8 +69,8 @@ class SyncDownloadPreparationService:
     Extension points:
     - ``requested_subtitle_language`` / transcript language: translated via
       SyncSubtitleTranslationService before SubtitlePreparationService.
-    - ``requested_dub_language``: later produce a dub track and pass it as
-      MuxService ``audio_path`` instead of the original audio asset.
+    - ``requested_dub_language``: starts the durable dubbing workflow; that
+      workflow supplies the synthesized/mixed audio to MuxService.
     - ``requested_format`` / ``requested_language``: later convert audio/document.
     """
 
@@ -78,6 +85,7 @@ class SyncDownloadPreparationService:
         subtitle_service: SubtitlePreparationService | None = None,
         translation_service: SyncSubtitleTranslationService | None = None,
         mux_service: MuxService | None = None,
+        dubbing_service: DubbingWorkflowStarter | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._settings = settings
@@ -93,6 +101,17 @@ class SyncDownloadPreparationService:
             )
         )
         self._mux_service = mux_service or MuxService.from_settings(settings)
+        if dubbing_service is None:
+            from telegram_agent.core.content_processing.services.sync_dubbing_workflow_service import (
+                SyncDubbingWorkflowService,
+            )
+
+            dubbing_service = SyncDubbingWorkflowService(
+                uow_factory=uow_factory,
+                settings=settings,
+                translation_service=self._translation_service,
+            )
+        self._dubbing_service = dubbing_service
 
     @classmethod
     def from_settings(cls) -> "SyncDownloadPreparationService":
@@ -113,7 +132,8 @@ class SyncDownloadPreparationService:
                 return StageExecutionResult()
 
             final_path = self._prepare(download_request)
-            self._record_success(job_id=job_id, final_path=final_path)
+            if final_path is not None:
+                self._record_success(job_id=job_id, final_path=final_path)
             return StageExecutionResult()
         except PermanentContentProcessingError as exc:
             self._mark_failed(job_id, str(exc))
@@ -159,14 +179,22 @@ class SyncDownloadPreparationService:
                 requested_language=request.requested_language,
                 requested_format=request.requested_format,
                 assistant_text=request.assistant_text,
+                reply_to_message_id=request.reply_to_message_id,
                 final_path=request.final_path,
             )
 
-    def _prepare(self, request: DownloadRequest) -> str:
+    def _prepare(self, request: DownloadRequest) -> str | None:
         source_job_id = self._resolve_source_job_id(request)
         media_type = request.media_type
 
         if media_type == DownloadMediaType.VIDEO.value:
+            if request.requested_dub_language:
+                self._dubbing_service.start(
+                    job_id=request.job_id,
+                    source_job_id=source_job_id,
+                    target_language=request.requested_dub_language,
+                )
+                return None
             return self._prepare_video(request=request, source_job_id=source_job_id)
         if media_type == DownloadMediaType.AUDIO.value:
             return self._prepare_audio(source_job_id=source_job_id, request=request)
@@ -338,8 +366,6 @@ class SyncDownloadPreparationService:
 
             video_path = video_asset.local_path
             audio_path = audio_asset.local_path
-            # Extension point: requested_dub_language would replace audio_path.
-            _ = request.requested_dub_language
             subtitle_language = (
                 request.requested_subtitle_language or transcript.language
             )

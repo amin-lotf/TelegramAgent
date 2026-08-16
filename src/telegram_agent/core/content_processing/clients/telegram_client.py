@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,7 +11,11 @@ from telegram_agent.core.common.exceptions import (
     TelegramDownloadError,
     TelegramDownloadPermanentError,
 )
-from telegram_agent.core.content_processing.common.results import TelegramFile, TelegramFileStream
+from telegram_agent.core.content_processing.common.results import (
+    TelegramDeliveryResult,
+    TelegramFile,
+    TelegramFileStream,
+)
 from telegram_agent.core.content_processing.common.settings import Settings
 
 
@@ -33,13 +38,15 @@ class TelegramClient:
         chat_id: int,
         file_path: str,
         caption: str | None = None,
-    ) -> None:
-        self._send_media(
+        reply_to_message_id: int | None = None,
+    ) -> TelegramDeliveryResult:
+        return self._send_media(
             method="sendVideo",
             field_name="video",
             chat_id=chat_id,
             file_path=file_path,
             caption=caption,
+            reply_to_message_id=reply_to_message_id,
         )
 
     def send_audio(
@@ -48,13 +55,15 @@ class TelegramClient:
         chat_id: int,
         file_path: str,
         caption: str | None = None,
-    ) -> None:
-        self._send_media(
+        reply_to_message_id: int | None = None,
+    ) -> TelegramDeliveryResult:
+        return self._send_media(
             method="sendAudio",
             field_name="audio",
             chat_id=chat_id,
             file_path=file_path,
             caption=caption,
+            reply_to_message_id=reply_to_message_id,
         )
 
     def send_document(
@@ -63,13 +72,15 @@ class TelegramClient:
         chat_id: int,
         file_path: str,
         caption: str | None = None,
-    ) -> None:
-        self._send_media(
+        reply_to_message_id: int | None = None,
+    ) -> TelegramDeliveryResult:
+        return self._send_media(
             method="sendDocument",
             field_name="document",
             chat_id=chat_id,
             file_path=file_path,
             caption=caption,
+            reply_to_message_id=reply_to_message_id,
         )
 
     def _send_media(
@@ -80,16 +91,20 @@ class TelegramClient:
         chat_id: int,
         file_path: str,
         caption: str | None,
-    ) -> None:
+        reply_to_message_id: int | None = None,
+    ) -> TelegramDeliveryResult:
         path = Path(file_path)
         if not path.is_file() or path.is_symlink() or path.stat().st_size <= 0:
             raise TelegramDownloadPermanentError(
                 "Prepared download file is missing or invalid"
             )
 
+        # Multipart form fields must be strings; nested reply_parameters is JSON.
         data: dict[str, str] = {"chat_id": str(chat_id)}
         if caption:
             data["caption"] = caption[:1024]
+        if reply_to_message_id is not None:
+            data["reply_parameters"] = self._reply_parameters_json(reply_to_message_id)
 
         try:
             with path.open("rb") as handle:
@@ -121,6 +136,63 @@ class TelegramClient:
             raise TelegramDownloadPermanentError(
                 f"Telegram could not accept the {method} upload{detail}"
             )
+        return self._delivery_result(payload, operation=method)
+
+    def send_message(
+        self,
+        *,
+        chat_id: int,
+        text: str,
+        reply_to_message_id: int | None = None,
+    ) -> TelegramDeliveryResult:
+        body: dict[str, object] = {"chat_id": chat_id, "text": text[:4096]}
+        if reply_to_message_id is not None:
+            body["reply_parameters"] = self._reply_parameters(reply_to_message_id)
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.post(
+                    f"{self._base_url}/bot{self._token}/sendMessage",
+                    json=body,
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise TelegramDownloadError(
+                "Telegram API is temporarily unavailable while sending a message"
+            ) from exc
+        self._raise_for_telegram_status(response, operation="sendMessage")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise TelegramDownloadPermanentError(
+                "Telegram returned an invalid sendMessage response"
+            ) from exc
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise TelegramDownloadPermanentError(
+                "Telegram could not accept the delivery status message"
+            )
+        return self._delivery_result(payload, operation="sendMessage")
+
+    @staticmethod
+    def _reply_parameters(message_id: int) -> dict[str, object]:
+        return {
+            "message_id": message_id,
+            "allow_sending_without_reply": True,
+        }
+
+    @classmethod
+    def _reply_parameters_json(cls, message_id: int) -> str:
+        return json.dumps(cls._reply_parameters(message_id), separators=(",", ":"))
+
+    @staticmethod
+    def _delivery_result(
+        payload: dict[str, object], *, operation: str
+    ) -> TelegramDeliveryResult:
+        result = payload.get("result")
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if not isinstance(message_id, int):
+            raise TelegramDownloadPermanentError(
+                f"Telegram returned an invalid {operation} result"
+            )
+        return TelegramDeliveryResult(message_id=message_id)
 
     def get_file(self, file_id: str) -> TelegramFile:
         try:

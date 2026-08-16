@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import importlib
 import json
+import logging
 import os
 import signal
 import sys
@@ -20,6 +21,12 @@ EXIT_PERMANENT_FAILURE = 20
 EXIT_RETRYABLE_FAILURE = 21
 EXIT_CUDA_OUT_OF_MEMORY = 22
 EXIT_INVALID_DESCRIPTOR = 23
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 def _write_failure(path: Path | None, *, kind: str, message: str) -> None:
@@ -94,6 +101,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         _set_parent_death_signal(parent_process_id)
+        logger.info(
+            "gpu_workload_start job_id=%s workload_type=%s",
+            descriptor.get("job_id", "-"),
+            workload_type,
+        )
         module = importlib.import_module(definition.handler_module)
         handler = module.create_handler()
         temporary_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,14 +125,22 @@ def main(argv: list[str] | None = None) -> int:
             )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         os.replace(temporary_output_path, output_path)
+        logger.info(
+            "gpu_workload_succeeded job_id=%s workload_type=%s",
+            descriptor.get("job_id", "-"),
+            workload_type,
+        )
         return 0
     except GpuWorkloadPermanentError as exc:
+        logger.error("gpu_workload_permanent_failure: %s", exc)
         _write_failure(failure_path, kind="workload_error", message=str(exc))
         return EXIT_PERMANENT_FAILURE
     except GpuWorkloadRetryableError as exc:
+        logger.error("gpu_workload_retryable_failure: %s", exc)
         _write_failure(failure_path, kind="workload_error", message=str(exc))
         return EXIT_RETRYABLE_FAILURE
     except BaseException as exc:
+        logger.exception("gpu_workload_crashed")
         if _is_cuda_out_of_memory(exc):
             _write_failure(
                 failure_path,

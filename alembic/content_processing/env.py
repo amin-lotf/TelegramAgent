@@ -19,6 +19,8 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
     SubtitleTranslation,
     TranslationBatch,
     TranslatedSegment,
+    DubbingWorkflow,
+    DubbingArtifact,
 )
 
 load_dotenv()

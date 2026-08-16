@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.selectable import Exists
 
 from telegram_agent.core.agent_runtime.common.types import (
     ClaimStatus,
@@ -67,7 +68,7 @@ class SyncSqlAlchemyOutboxRepository:
         rows = self._session.execute(statement).all()
         return [(int(row.chat_id), row.oldest) for row in rows]
 
-    def _active_claim_exists(self, *, claim_token: UUID) -> exists:
+    def _active_claim_exists(self, *, claim_token: UUID) -> Exists:
         return exists(
             select(ConversationClaim.chat_id).where(
                 ConversationClaim.chat_id == OutboxEvent.chat_id,
@@ -109,44 +110,6 @@ class SyncSqlAlchemyOutboxRepository:
             .returning(OutboxEvent)
         )
         return self._session.execute(statement).scalar_one_or_none()
-
-    def mark_published_for_messages(
-        self,
-        *,
-        runtime_message_ids: list[UUID],
-        claim_token: UUID,
-        event_type: OutboxEventType | str,
-    ) -> int:
-        """Publish unresolved outbox rows for many messages under an active claim.
-
-        Used when download handling completes for a group so sibling per-message
-        download-handler events do not stay stuck behind content-processing handoff.
-        """
-        if not runtime_message_ids:
-            return 0
-        event_type_value = (
-            event_type.value if isinstance(event_type, OutboxEventType) else event_type
-        )
-        statement = (
-            update(OutboxEvent)
-            .where(
-                OutboxEvent.runtime_message_id.in_(runtime_message_ids),
-                OutboxEvent.event_type == event_type_value,
-                OutboxEvent.status.in_(
-                    (OutboxEventStatus.PENDING, OutboxEventStatus.PROCESSING)
-                ),
-                self._active_claim_exists(claim_token=claim_token),
-            )
-            .values(
-                status=OutboxEventStatus.PUBLISHED,
-                published_at=func.now(),
-                locked_at=None,
-                locked_by=None,
-                last_error=None,
-            )
-        )
-        result = self._session.execute(statement)
-        return int(cast(CursorResult, result).rowcount or 0)
 
     def record_failure_for_message(
         self,

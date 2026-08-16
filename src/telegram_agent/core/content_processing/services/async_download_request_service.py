@@ -83,6 +83,7 @@ class AsyncDownloadRequestService:
                     requested_language=command.requested_language,
                     requested_format=command.requested_format,
                     assistant_text=command.assistant_text,
+                    reply_to_message_id=command.reply_to_message_id,
                     final_path=None,
                 )
                 await uow.download_requests.add(download_request)
@@ -100,10 +101,18 @@ class AsyncDownloadRequestService:
                 # Download prep includes ffmpeg mux; use a longer SLA than the
                 # default attachment expectation (often 60s) so the sweeper does
                 # not time the job out mid-mux.
-                expectation_seconds = max(
-                    self._settings.job_expectation_default_seconds,
-                    600,
-                )
+                if command.requested_dub_language:
+                    expectation_seconds = max(
+                        self._settings.job_expectation_default_seconds,
+                        int(self._settings.cosyvoice_request_timeout_seconds)
+                        + int(self._settings.sam_audio_request_timeout_seconds)
+                        + 1800,
+                    )
+                else:
+                    expectation_seconds = max(
+                        self._settings.job_expectation_default_seconds,
+                        600,
+                    )
                 await uow.job_expectations.add(
                     JobCompletionExpectation(
                         job_id=job.id,

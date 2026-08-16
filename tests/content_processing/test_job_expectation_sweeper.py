@@ -11,12 +11,16 @@ from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.content_processing.common.types import (
     JobCompletionExpectationKind,
     JobCompletionExpectationStatus,
+    DownloadMediaType,
+    DubbingStatus,
     JobKind,
     JobStatus,
     MediaAssetRole,
     OutboxEventType,
 )
 from telegram_agent.core.content_processing.db.models.content_processing import (
+    DownloadRequest,
+    DubbingWorkflow,
     Job,
     JobCompletionExpectation,
     MediaAsset,
@@ -285,6 +289,91 @@ def test_sweeper_with_zero_retention_deletes_just_timed_out_row(
     assert job is not None and job.status == JobStatus.TIMED_OUT
     assert expectation is None
     assert finished is not None
+
+
+def test_sweeper_requests_gpu_dub_cancellation_and_user_delivery_on_timeout(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+) -> None:
+    source_job_id = uuid4()
+    download_job_id = uuid4()
+    with content_sync_sessionmaker() as session:
+        session.add_all(
+            [
+                Job(
+                    id=source_job_id,
+                    kind=JobKind.TELEGRAM_ATTACHMENT,
+                    status=JobStatus.COMPLETED,
+                    idempotency_key=f"timeout-source-{source_job_id}",
+                    callback_required=True,
+                ),
+                Job(
+                    id=download_job_id,
+                    kind=JobKind.DOWNLOAD_PREPARATION,
+                    status=JobStatus.RUNNING,
+                    idempotency_key=f"timeout-dub-{download_job_id}",
+                    callback_required=False,
+                ),
+            ]
+        )
+        session.flush()
+        session.add(
+            DownloadRequest(
+                job_id=download_job_id,
+                chat_id=99,
+                telegram_user_id=7,
+                group_id=uuid4(),
+                agent_message_id=uuid4(),
+                media_ingress_message_id=uuid4(),
+                media_type=DownloadMediaType.VIDEO.value,
+                requested_dub_language="es",
+                assistant_text="dub",
+            )
+        )
+        session.add(
+            DubbingWorkflow(
+                job_id=download_job_id,
+                source_job_id=source_job_id,
+                target_language="es",
+                status=DubbingStatus.TTS_RUNNING,
+                active_gpu_job_id=uuid4(),
+                cosyvoice_model="cosy",
+                sam_model="sam",
+            )
+        )
+        session.add(
+            JobCompletionExpectation(
+                job_id=download_job_id,
+                kind=JobCompletionExpectationKind.JOB_COMPLETION,
+                status=JobCompletionExpectationStatus.OPEN,
+                due_at=utcnow() - timedelta(seconds=5),
+            )
+        )
+        session.commit()
+
+    result = _sweeper(
+        content_sync_uow_factory,
+        retention=timedelta(hours=1),
+    ).sweep_once()
+
+    with content_sync_sessionmaker() as session:
+        job = session.get(Job, download_job_id)
+        workflow = session.scalar(
+            select(DubbingWorkflow).where(
+                DubbingWorkflow.job_id == download_job_id
+            )
+        )
+        event = session.scalar(
+            select(OutboxEvent).where(
+                OutboxEvent.job_id == download_job_id,
+                OutboxEvent.event_type
+                == OutboxEventType.DUBBING_CANCELLATION_REQUESTED.value,
+            )
+        )
+    assert result.timed_out == 1
+    assert job is not None and job.status == JobStatus.TIMED_OUT
+    assert workflow is not None and workflow.status == DubbingStatus.CANCELLING
+    assert event is not None
 
 
 def _seed_job_with_expectation(

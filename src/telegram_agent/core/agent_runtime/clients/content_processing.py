@@ -39,6 +39,7 @@ class ContentProcessingClient:
         requested_subtitle_language: str | None,
         requested_dub_language: str | None,
         idempotency_key: str,
+        reply_to_message_id: int | None = None,
     ) -> None:
         self._post_download(
             path="/downloads/video",
@@ -49,6 +50,7 @@ class ContentProcessingClient:
                 "agent_message_id": str(agent_message_id),
                 "media_ingress_message_id": str(media_ingress_message_id),
                 "assistant_text": assistant_text,
+                "reply_to_message_id": reply_to_message_id,
                 "requested_subtitle_language": requested_subtitle_language,
                 "requested_dub_language": requested_dub_language,
             },
@@ -66,6 +68,7 @@ class ContentProcessingClient:
         assistant_text: str,
         requested_language: str | None,
         idempotency_key: str,
+        reply_to_message_id: int | None = None,
     ) -> None:
         self._post_download(
             path="/downloads/audio",
@@ -76,6 +79,7 @@ class ContentProcessingClient:
                 "agent_message_id": str(agent_message_id),
                 "media_ingress_message_id": str(media_ingress_message_id),
                 "assistant_text": assistant_text,
+                "reply_to_message_id": reply_to_message_id,
                 "requested_language": requested_language,
             },
             idempotency_key=idempotency_key,
@@ -92,6 +96,7 @@ class ContentProcessingClient:
         assistant_text: str,
         requested_format: str | None,
         idempotency_key: str,
+        reply_to_message_id: int | None = None,
     ) -> None:
         self._post_download(
             path="/downloads/documents",
@@ -102,6 +107,7 @@ class ContentProcessingClient:
                 "agent_message_id": str(agent_message_id),
                 "media_ingress_message_id": str(media_ingress_message_id),
                 "assistant_text": assistant_text,
+                "reply_to_message_id": reply_to_message_id,
                 "requested_format": requested_format,
             },
             idempotency_key=idempotency_key,

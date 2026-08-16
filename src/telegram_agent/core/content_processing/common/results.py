@@ -197,6 +197,7 @@ class EmbeddingResult:
 @dataclass(frozen=True)
 class StageExecutionResult:
     retryable: bool = False
+    deferred: bool = False
     error_message: str | None = None
 
 
@@ -211,3 +212,8 @@ class TelegramFileStream:
     mime_type: str | None
     content_length: int | None
     chunks: Iterator[bytes]
+
+
+@dataclass(frozen=True)
+class TelegramDeliveryResult:
+    message_id: int

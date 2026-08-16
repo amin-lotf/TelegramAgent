@@ -22,6 +22,7 @@ def create_celery_app() -> Celery:
             "telegram_agent.core.content_processing.celery.tasks.job_expectation_sweep",
             "telegram_agent.core.content_processing.celery.tasks.download_preparation",
             "telegram_agent.core.content_processing.celery.tasks.download_delivery",
+            "telegram_agent.core.content_processing.celery.tasks.dubbing",
         ],
     )
 
@@ -87,6 +88,11 @@ def create_celery_app() -> Celery:
                 Exchange("content_processing", type="direct"),
                 routing_key="download.deliver",
             ),
+            Queue(
+                "dubbing",
+                Exchange("content_processing", type="direct"),
+                routing_key="dubbing.advance",
+            ),
         ),
 
         task_routes={
@@ -129,6 +135,10 @@ def create_celery_app() -> Celery:
             "download.deliver": {
                 "queue": "download_delivery",
                 "routing_key": "download.deliver",
+            },
+            "dubbing.advance": {
+                "queue": "dubbing",
+                "routing_key": "dubbing.advance",
             },
         },
 

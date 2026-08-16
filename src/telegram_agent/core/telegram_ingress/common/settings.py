@@ -16,6 +16,7 @@ from telegram_agent.core.telegram_ingress.common.const import (
     DEFAULT_OUTBOX_RETRY_BASE_SECONDS,
     DEFAULT_OUTBOX_RETRY_MAX_SECONDS,
     DEFAULT_REDIS_URL,
+    DEFAULT_TELEGRAM_API_BASE_URL,
 )
 
 
@@ -80,6 +81,16 @@ class Settings(BaseSettings):
         default=DEFAULT_AGENT_RUNTIME_REQUEST_TIMEOUT_SECONDS,
         validation_alias=AliasChoices("AGENT_RUNTIME_REQUEST_TIMEOUT_SECONDS", "agent_runtime_request_timeout_seconds"),
         gt=0,
+    )
+
+    telegram_bot_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
+        description="Bot token used to send progressive user notifications.",
+    )
+    telegram_api_base_url: str = Field(
+        default=DEFAULT_TELEGRAM_API_BASE_URL,
+        validation_alias=AliasChoices("TELEGRAM_API_BASE_URL", "telegram_api_base_url"),
     )
 
     sqlalchemy_database_url: str = Field(

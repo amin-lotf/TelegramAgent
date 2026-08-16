@@ -589,7 +589,7 @@ def build_timeline(
         )
 
     # Runtime
-    outbox_events = ()
+    outbox_events: tuple[OutboxRow, ...] = ()
     if runtime is not None:
         if runtime.outbox_events:
             outbox_events = runtime.outbox_events
@@ -610,7 +610,14 @@ def build_timeline(
     )
     agent_messages = runtime.agent_messages if runtime is not None else ()
     download_agent_message = next(
-        (item for item in agent_messages if item.role == "download_agent"),
+        (
+            item
+            for item in agent_messages
+            if item.role == "download_agent"
+            and runtime is not None
+            and runtime.message is not None
+            and item.ingress_message_id == runtime.message.ingress_message_id
+        ),
         None,
     )
 

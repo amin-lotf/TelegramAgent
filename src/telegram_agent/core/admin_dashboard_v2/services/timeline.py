@@ -307,8 +307,10 @@ def build_lifecycle_and_timeline(
                 item
                 for item in agent_messages
                 if str(item.get("role") or "") == "download_agent"
+                and item.get("ingress_message_id")
+                == runtime_message.get("ingress_message_id")
             ),
-            agent_messages[0] if agent_messages else None,
+            None,
         )
         intent = str(runtime_message.get("intent") or "")
 

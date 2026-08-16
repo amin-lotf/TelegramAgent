@@ -13,10 +13,12 @@ from telegram_agent.core.agent_runtime.common.commands import (
     IngestMessageCommand,
 )
 from telegram_agent.core.agent_runtime.common.types import (
+    AgentMessageRole,
     OutboxEventStatus,
     OutboxEventType,
 )
 from telegram_agent.core.agent_runtime.db.models.runtime import (
+    AgentMessage,
     ConversationClaim,
     ConversationGroup,
     OutboxEvent,
@@ -146,6 +148,51 @@ def test_same_group_number_allowed_across_chats(
         session.add(ConversationGroup(id=uuid4(), chat_id=8301, group_number=1))
         session.add(ConversationGroup(id=uuid4(), chat_id=8302, group_number=1))
         session.commit()
+
+
+def test_agent_messages_are_unique_per_request_and_role(
+    agent_runtime_sync_sessionmaker: sessionmaker[Session],
+) -> None:
+    group_id = uuid4()
+    first_ingress_id = uuid4()
+    with agent_runtime_sync_sessionmaker() as session:
+        session.add(ConversationGroup(id=group_id, chat_id=8351, group_number=1))
+        session.flush()
+        session.add_all(
+            [
+                AgentMessage(
+                    ingress_message_id=first_ingress_id,
+                    chat_id=8351,
+                    telegram_user_id=1,
+                    group_id=group_id,
+                    text="first",
+                    role=AgentMessageRole.DOWNLOAD_AGENT,
+                ),
+                AgentMessage(
+                    ingress_message_id=uuid4(),
+                    chat_id=8351,
+                    telegram_user_id=1,
+                    group_id=group_id,
+                    text="second",
+                    role=AgentMessageRole.DOWNLOAD_AGENT,
+                ),
+            ]
+        )
+        session.commit()
+
+        session.add(
+            AgentMessage(
+                ingress_message_id=first_ingress_id,
+                chat_id=8351,
+                telegram_user_id=1,
+                group_id=group_id,
+                text="duplicate",
+                role=AgentMessageRole.DOWNLOAD_AGENT,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
 
 
 def test_composite_group_fk_allows_same_chat_assignment(

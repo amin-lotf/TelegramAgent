@@ -62,6 +62,14 @@ class OutboxEventType(StrEnum):
     CONTENT_PROCESSING_JOB_FINISHED = "content_processing.job.finished"
     DOWNLOAD_PREPARATION_READY = "content_processing.download_preparation.ready"
     DOWNLOAD_READY_FOR_DELIVERY = "content_processing.download.ready_for_delivery"
+    DUBBING_SOURCE_RESOLVED = "content_processing.dubbing.source_resolved"
+    DUBBING_INPUTS_PREPARED = "content_processing.dubbing.inputs_prepared"
+    DUBBING_SPEECH_SYNTHESIZED = "content_processing.dubbing.speech_synthesized"
+    DUBBING_BACKGROUND_SEPARATED = "content_processing.dubbing.background_separated"
+    DUBBING_CANCELLATION_REQUESTED = (
+        "content_processing.dubbing.cancellation_requested"
+    )
+    DOWNLOAD_FAILED_FOR_DELIVERY = "content_processing.download.failed_for_delivery"
 
 
 class OutboxEventStatus(StrEnum):
@@ -83,4 +91,26 @@ class TranslationBatchStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class DubbingStatus(StrEnum):
+    SOURCE_READY = "source_ready"
+    PREPARING_INPUTS = "preparing_inputs"
+    TTS_READY = "tts_ready"
+    TTS_RUNNING = "tts_running"
+    SAM_READY = "sam_ready"
+    SAM_RUNNING = "sam_running"
+    ASSEMBLY_READY = "assembly_ready"
+    ASSEMBLING = "assembling"
+    READY_FOR_DELIVERY = "ready_for_delivery"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class DownloadDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    SENDING = "sending"
+    DELIVERED = "delivered"
     FAILED = "failed"

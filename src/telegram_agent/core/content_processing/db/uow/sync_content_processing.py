@@ -13,6 +13,9 @@ from telegram_agent.core.content_processing.db.repositories.sync_content_chunk i
 from telegram_agent.core.content_processing.db.repositories.sync_download_request import (
     SyncSqlAlchemyDownloadRequestRepository,
 )
+from telegram_agent.core.content_processing.db.repositories.sync_dubbing import (
+    SyncSqlAlchemyDubbingRepository,
+)
 from telegram_agent.core.content_processing.db.repositories.sync_job import SyncSqlAlchemyJobRepository
 from telegram_agent.core.content_processing.db.repositories.sync_job_expectation import (
     SyncSqlAlchemyJobExpectationRepository,
@@ -37,6 +40,7 @@ class SyncSqlAlchemyContentProcessingUnitOfWork:
         self.content_chunks = SyncSqlAlchemyContentChunkRepository(session)
         self.chunk_embeddings = SyncSqlAlchemyChunkEmbeddingRepository(session)
         self.download_requests = SyncSqlAlchemyDownloadRequestRepository(session)
+        self.dubbing = SyncSqlAlchemyDubbingRepository(session)
         self.subtitle_translations = SyncSqlAlchemySubtitleTranslationRepository(session)
         self.outbox_events = SyncSqlAlchemyOutboxRepository(session)
 

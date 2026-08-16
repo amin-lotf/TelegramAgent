@@ -5,6 +5,9 @@ from telegram_agent.core.content_processing.services.async_download_request_serv
     AsyncDownloadRequestService,
 )
 from telegram_agent.core.content_processing.services.async_telegram_job_service import AsyncTelegramJobService
+from telegram_agent.core.content_processing.services.sync_dubbing_workflow_service import (
+    SyncDubbingWorkflowService,
+)
 
 
 def get_telegram_auth_client():
@@ -24,3 +27,7 @@ def get_download_request_service() -> AsyncDownloadRequestService:
     return AsyncDownloadRequestService(
         uow_factory=async_content_processing_uow_factory,
     )
+
+
+def get_dubbing_workflow_service() -> SyncDubbingWorkflowService:
+    return SyncDubbingWorkflowService.from_settings()
