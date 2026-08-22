@@ -47,6 +47,11 @@ services:
       COSYVOICE_MODEL_ID: ${COSYVOICE_MODEL_ID:-FunAudioLLM/Fun-CosyVoice3-0.5B-2512}
       COSYVOICE_MODEL_DIR: /opt/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B
       SAM_AUDIO_MODEL: ${SAM_AUDIO_MODEL:-facebook/sam-audio-small}
+      SAM_AUDIO_CHECKPOINTS_DIR: /app/.checkpoints
+      MADLAD_MODEL_ID: ${MADLAD_MODEL_ID:-google/madlad400-3b-mt}
+      MADLAD_ADAPTER_DIR: /adapters
+      MADLAD_HF_HOME: /opt/madlad-hf-cache
+      MADLAD_DEVICE: auto
     deploy:
       resources:
         reservations:
@@ -58,7 +63,12 @@ services:
       - ../../.cache/huggingface:/root/.cache/huggingface
       - ../../.cache/modelscope:/root/.cache/modelscope
       - ../../.cache/cosyvoice:/opt/CosyVoice/pretrained_models
+      - ../../pretrained_models/madlad/adapter:/adapters:ro
+      - ../../pretrained_models/madlad-hf-cache:/opt/madlad-hf-cache
       - ../..:/app
+      # ImageBind writes CWD/.checkpoints (WORKDIR=/app), not HF_HOME.
+      # Persist it or every container recreate re-downloads ~4.5 GiB.
+      - ../../pretrained_models/sam-audio-checkpoints:/app/.checkpoints
     ipc: host
     depends_on:
       gpu-execution-migrate:
@@ -86,6 +96,7 @@ services:
       COSYVOICE_MODEL_ID: ${COSYVOICE_MODEL_ID:-FunAudioLLM/Fun-CosyVoice3-0.5B-2512}
       COSYVOICE_MODEL_DIR: /opt/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B
       SAM_AUDIO_MODEL: ${SAM_AUDIO_MODEL:-facebook/sam-audio-small}
+      SAM_AUDIO_CHECKPOINTS_DIR: /app/.checkpoints
     command: >
       sh -c "/opt/cosyvoice/bin/python /app/docker/app/download_cosyvoice_models.py
       && /opt/sam-audio/bin/python /app/docker/app/download_sam_audio_model.py"
@@ -93,6 +104,7 @@ services:
       - ../../.cache/huggingface:/root/.cache/huggingface
       - ../../.cache/cosyvoice:/opt/CosyVoice/pretrained_models
       - ../..:/app:ro
+      - ../../pretrained_models/sam-audio-checkpoints:/app/.checkpoints
     networks:
       - fatol-net
 

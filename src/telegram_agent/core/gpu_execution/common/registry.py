@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from telegram_agent.core.common.gpu_workloads import (
     COSYVOICE_DUBBING_BATCH_WORKLOAD,
+    MADLAD_TRANSLATION_WORKLOAD,
     SAM_AUDIO_RESIDUAL_WORKLOAD,
     SENSEVOICE_EMOTION_BATCH_WORKLOAD,
     WHISPERX_TRANSCRIPTION_WORKLOAD,
@@ -42,6 +43,11 @@ WORKLOAD_REGISTRY: dict[str, WorkloadDefinition] = {
         handler_module="telegram_agent.core.gpu_execution.workloads.sam_audio_residual",
         output_kind="json",
         python_executable="/opt/sam-audio/bin/python",
+    ),
+    MADLAD_TRANSLATION_WORKLOAD: WorkloadDefinition(
+        handler_module="telegram_agent.core.gpu_execution.workloads.madlad_translation",
+        output_kind="json",
+        python_executable="/opt/madlad/bin/python",
     ),
 }
 

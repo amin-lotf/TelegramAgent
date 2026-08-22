@@ -11,6 +11,14 @@ from telegram_agent.core.common.exceptions import (
     RetryableContentProcessingError,
 )
 from telegram_agent.core.content_processing.clients.llm_gateway import LlmGatewayClient
+from telegram_agent.core.content_processing.clients.madlad import (
+    MadladClient,
+    MadladGeneration,
+)
+from telegram_agent.core.content_processing.common.language_codes import (
+    canonical_madlad_language,
+    uses_madlad_pair,
+)
 from telegram_agent.core.content_processing.common.settings import Settings, settings
 from telegram_agent.core.content_processing.common.types import SubtitleTranslationStatus
 from telegram_agent.core.content_processing.db.models.content_processing import (
@@ -59,16 +67,19 @@ class SyncSubtitleTranslationService:
         ],
         settings: Settings,
         llm_gateway_client: LlmGatewayClient | None,
+        madlad_client: MadladClient | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._settings = settings
         self._llm_gateway_client = llm_gateway_client
+        self._madlad_client = madlad_client
 
     @classmethod
     def from_settings(
         cls,
         *,
         llm_gateway_client: LlmGatewayClient | None = None,
+        madlad_client: MadladClient | None = None,
     ) -> "SyncSubtitleTranslationService":
         from telegram_agent.core.content_processing.db.uow.sync_uow_factory import (
             sync_content_processing_uow_factory,
@@ -84,10 +95,13 @@ class SyncSubtitleTranslationService:
                     token=settings.llm_gateway_service_token,
                     timeout_seconds=settings.llm_gateway_request_timeout_seconds,
                 )
+        if madlad_client is None and settings.madlad_language_pairs.strip():
+            madlad_client = MadladClient.from_settings(settings)
         return cls(
             uow_factory=sync_content_processing_uow_factory,
             settings=settings,
             llm_gateway_client=llm_gateway_client,
+            madlad_client=madlad_client,
         )
 
     def ensure_translated(
@@ -120,6 +134,12 @@ class SyncSubtitleTranslationService:
         if target_norm is None:
             return self._as_subtitle_segments(source_segments)
 
+        use_madlad = uses_madlad_pair(
+            configured_pairs=self._settings.madlad_language_pairs,
+            source_language=source_language,
+            target_language=target_norm,
+        )
+
         translation = self._get_or_create_translation(
             source_job_id=source_job_id,
             source_language=source_language,
@@ -133,22 +153,27 @@ class SyncSubtitleTranslationService:
             self._prepare_failed_for_resume(translation.id)
 
         if translation.glossary is None:
-            self._build_glossary(
-                translation_id=translation.id,
-                source_language=source_language,
-                target_language=target_norm,
-                source_segments=source_segments,
-            )
+            if use_madlad:
+                self._set_empty_glossary(translation.id)
+            else:
+                self._build_glossary(
+                    translation_id=translation.id,
+                    source_language=source_language,
+                    target_language=target_norm,
+                    source_segments=source_segments,
+                )
 
         self._ensure_batches_planned(
             translation_id=translation.id,
             source_segments=source_segments,
+            use_madlad=use_madlad,
         )
         self._translate_remaining_batches(
             translation_id=translation.id,
             source_language=source_language,
             target_language=target_norm,
             source_segments=source_segments,
+            use_madlad=use_madlad,
         )
         return self._load_completed_segments(translation.id)
 
@@ -264,6 +289,18 @@ class SyncSubtitleTranslationService:
         )
         return self._llm_gateway_client
 
+    def _require_madlad_client(self) -> MadladClient:
+        if self._madlad_client is None:
+            self._madlad_client = MadladClient.from_settings(self._settings)
+        return self._madlad_client
+
+    def _set_empty_glossary(self, translation_id: UUID) -> None:
+        with self._uow_factory() as uow:
+            uow.subtitle_translations.set_glossary(
+                translation_id=translation_id,
+                glossary=empty_glossary(),
+            )
+
     def _build_glossary(
         self,
         *,
@@ -348,11 +385,18 @@ class SyncSubtitleTranslationService:
         *,
         translation_id: UUID,
         source_segments: list[SourceSegmentView],
+        use_madlad: bool,
     ) -> None:
+        if use_madlad:
+            max_source_tokens = 10**9
+            max_segments = max(len(source_segments), 1)
+        else:
+            max_source_tokens = self._settings.subtitle_translation_max_source_tokens
+            max_segments = self._settings.subtitle_translation_max_segments_per_batch
         plans = plan_translation_batches(
             source_segments,
-            max_source_tokens=self._settings.subtitle_translation_max_source_tokens,
-            max_segments=self._settings.subtitle_translation_max_segments_per_batch,
+            max_source_tokens=max_source_tokens,
+            max_segments=max_segments,
         )
         with self._uow_factory() as uow:
             uow.subtitle_translations.ensure_batches(
@@ -371,10 +415,12 @@ class SyncSubtitleTranslationService:
         source_language: str | None,
         target_language: str,
         source_segments: list[SourceSegmentView],
+        use_madlad: bool,
     ) -> None:
         by_index = {segment.segment_index: segment for segment in source_segments}
         ordered_indexes = [segment.segment_index for segment in source_segments]
-        client = self._require_llm_client()
+        llm_client = None if use_madlad else self._require_llm_client()
+        madlad_client = self._require_madlad_client() if use_madlad else None
         lease_owner = f"subtitle-translation:{uuid4()}"
         lease_timeout = timedelta(
             seconds=self._settings.subtitle_translation_batch_lease_seconds
@@ -414,11 +460,13 @@ class SyncSubtitleTranslationService:
                 start_index = batch.start_segment_index
                 end_index = batch.end_segment_index
                 translation = uow.subtitle_translations.get_by_id(translation_id)
-                if translation is None or translation.glossary is None:
+                if translation is None or (
+                    not use_madlad and translation.glossary is None
+                ):
                     raise PermanentContentProcessingError(
                         "Subtitle translation glossary is missing before batch translate"
                     )
-                glossary_payload = dict(translation.glossary)
+                glossary_payload = dict(translation.glossary or empty_glossary())
 
             batch_indexes = [
                 index
@@ -453,43 +501,60 @@ class SyncSubtitleTranslationService:
                     )
                 }
 
-            previous_context = []
-            for index in prev_indexes:
-                translated_text = prev_translated.get(index)
-                if translated_text is None:
-                    continue
-                previous_context.append(
-                    context_pair_payload(
-                        source=by_index[index],
-                        translated_text=translated_text,
-                    )
-                )
-
             translate_segments = [
                 segment_payload(by_index[index]) for index in batch_indexes
             ]
-            upcoming_segments = [
-                segment_payload(by_index[index]) for index in upcoming_indexes
-            ]
-
-            prompts = build_subtitle_translation_prompts(
-                source_language=source_language,
-                target_language=target_language,
-                glossary=glossary_payload,
-                previous_context=previous_context,
-                translate_segments=translate_segments,
-                upcoming_segments=upcoming_segments,
-            )
 
             try:
-                generation = client.translate_subtitle_batch(
-                    system_prompt=prompts.system_prompt,
-                    user_prompt=prompts.user_prompt,
-                )
-                validated = validate_batch_translations(
-                    expected_indexes=set(batch_indexes),
-                    output=generation.output,
-                )
+                if use_madlad:
+                    assert madlad_client is not None
+                    generation = self._translate_with_madlad(
+                        client=madlad_client,
+                        source_language=source_language,
+                        target_language=target_language,
+                        batch_indexes=batch_indexes,
+                        by_index=by_index,
+                        request_id=f"{translation_id}/{batch_id}",
+                    )
+                    validated = list(zip(batch_indexes, generation.translations))
+                    provider_request_id = None
+                    input_tokens = None
+                    output_tokens = None
+                else:
+                    assert llm_client is not None
+                    previous_context = []
+                    for index in prev_indexes:
+                        translated_text = prev_translated.get(index)
+                        if translated_text is None:
+                            continue
+                        previous_context.append(
+                            context_pair_payload(
+                                source=by_index[index],
+                                translated_text=translated_text,
+                            )
+                        )
+                    upcoming_segments = [
+                        segment_payload(by_index[index]) for index in upcoming_indexes
+                    ]
+                    prompts = build_subtitle_translation_prompts(
+                        source_language=source_language,
+                        target_language=target_language,
+                        glossary=glossary_payload,
+                        previous_context=previous_context,
+                        translate_segments=translate_segments,
+                        upcoming_segments=upcoming_segments,
+                    )
+                    generation = llm_client.translate_subtitle_batch(
+                        system_prompt=prompts.system_prompt,
+                        user_prompt=prompts.user_prompt,
+                    )
+                    validated = validate_batch_translations(
+                        expected_indexes=set(batch_indexes),
+                        output=generation.output,
+                    )
+                    provider_request_id = generation.provider_request_id
+                    input_tokens = generation.usage.input_tokens
+                    output_tokens = generation.usage.output_tokens
             except RetryableContentProcessingError as exc:
                 with self._uow_factory() as uow:
                     uow.subtitle_translations.mark_batch_failed(
@@ -530,9 +595,9 @@ class SyncSubtitleTranslationService:
                 if not uow.subtitle_translations.mark_batch_succeeded(
                     batch_id=batch_id,
                     lease_owner=lease_owner,
-                    provider_request_id=generation.provider_request_id,
-                    input_tokens=generation.usage.input_tokens,
-                    output_tokens=generation.usage.output_tokens,
+                    provider_request_id=provider_request_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
                 ):
                     raise RetryableContentProcessingError(
                         "Failed to mark translation batch succeeded under lease"
@@ -565,6 +630,52 @@ class SyncSubtitleTranslationService:
                 translation_id=translation_id,
                 model_name=last_model,
             )
+
+    def _translate_with_madlad(
+        self,
+        *,
+        client: MadladClient,
+        source_language: str | None,
+        target_language: str,
+        batch_indexes: list[int],
+        by_index: dict[int, SourceSegmentView],
+        request_id: str,
+    ) -> MadladGeneration:
+        if source_language is None:
+            raise PermanentContentProcessingError(
+                "Source language is required for local MADLAD translation"
+            )
+        source_code = canonical_madlad_language(source_language)
+        target_code = canonical_madlad_language(target_language)
+        generation = client.translate(
+            [by_index[index].text for index in batch_indexes],
+            source_lang=source_code,
+            target_lang=target_code,
+            request_id=request_id,
+        )
+        cleaned = [text.strip() for text in generation.translations]
+        if len(cleaned) != len(batch_indexes) or any(not text for text in cleaned):
+            raise RetryableContentProcessingError(
+                "MADLAD returned empty or incomplete subtitle translations"
+            )
+        logger.info(
+            "Completed local MADLAD subtitle translation",
+            extra={
+                "segment_count": len(cleaned),
+                "source_language": source_code,
+                "target_language": target_code,
+                "adapter_sha256": generation.adapter_sha256,
+            },
+        )
+        return MadladGeneration(
+            translations=cleaned,
+            source_lang=generation.source_lang,
+            target_lang=generation.target_lang,
+            target_token=generation.target_token,
+            model=generation.model,
+            count=len(cleaned),
+            adapter_sha256=generation.adapter_sha256,
+        )
 
     def _load_completed_segments(self, translation_id: UUID) -> list[SubtitleSegment]:
         with self._uow_factory() as uow:

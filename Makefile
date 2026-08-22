@@ -3,10 +3,14 @@ HOST_GID := $(shell id -g)
 
 COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 DUBBING_WORKLOAD_LOG_ROOT ?= media/.gpu-control
+MADLAD_ENV_FILE ?= docker/madlad/.env.madlad.docker
 
-.PHONY: up up-build setup-dubbing up-dubbing build-dubbing init-dubbing-models down down-v restart ps logs \
+.PHONY: up up-build setup-dubbing up-dubbing build-dubbing init-dubbing-models \
+        prepare-madlad-storage sync-madlad-weights build-madlad up-madlad up-with-madlad rebuild-madlad \
+        stop-madlad restart-madlad reload-madlad-adapter \
+        down down-v restart ps logs \
         logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx logs-sensevoice logs-gpu-execution \
-        logs-dubbing logs-cosyvoice logs-sam \
+        logs-dubbing logs-cosyvoice logs-sam logs-madlad \
         logs-chunking logs-embedding logs-admin-dashboard logs-admin-dashboard-v2 \
         logs-telegram-bot-api \
         shell-celery \
@@ -37,6 +41,34 @@ build-dubbing:
 
 init-dubbing-models:
 	$(COMPOSE) --profile dubbing-init run --rm gpu-dubbing-models-init
+
+prepare-madlad-storage:
+	mkdir -p pretrained_models/madlad/adapter pretrained_models/madlad-hf-cache
+
+sync-madlad-weights: prepare-madlad-storage
+	python3 scripts/sync_madlad_adapter.py --env-file $(MADLAD_ENV_FILE)
+
+build-madlad:
+	$(COMPOSE) build madlad
+
+up-madlad: prepare-madlad-storage
+	$(COMPOSE) --profile madlad up -d madlad
+
+up-with-madlad: prepare-madlad-storage
+	$(COMPOSE) --profile madlad up -d
+
+rebuild-madlad:
+	$(MAKE) sync-madlad-weights
+	$(COMPOSE) --profile madlad up -d --build --force-recreate madlad
+
+stop-madlad:
+	$(COMPOSE) --profile madlad stop madlad
+
+restart-madlad:
+	$(COMPOSE) --profile madlad restart madlad
+
+reload-madlad-adapter:
+	$(COMPOSE) --profile madlad exec -T madlad python -c "import urllib.request; print(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/v1/reload-adapter', method='POST'), timeout=30).read().decode())"
 
 down:
 	$(COMPOSE) down
@@ -120,6 +152,9 @@ logs-sam:
 		exit 0; \
 	fi; \
 	tail -F $$logs
+
+logs-madlad:
+	$(COMPOSE) --profile madlad logs -f --tail=100 madlad
 
 logs-telegram-bot-api:
 	$(COMPOSE) logs -f --tail=100 telegram-bot-api

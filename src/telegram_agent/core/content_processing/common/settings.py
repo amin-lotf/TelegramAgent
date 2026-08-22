@@ -32,6 +32,14 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_JOB_EXPECTATION_VOICE_VIDEO_NOTE_SECONDS,
     DEFAULT_LLM_GATEWAY_BASE_URL,
     DEFAULT_LLM_GATEWAY_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_MADLAD_BASE_URL,
+    DEFAULT_MADLAD_BEAM_SIZE,
+    DEFAULT_MADLAD_CLIENT_BATCH_SIZE,
+    DEFAULT_MADLAD_LANGUAGE_PAIRS,
+    DEFAULT_MADLAD_MAX_NEW_TOKENS,
+    DEFAULT_MADLAD_REQUEST_MAX_ATTEMPTS,
+    DEFAULT_MADLAD_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_MADLAD_RETRY_BACKOFF_SECONDS,
     DEFAULT_SUBTITLE_GLOSSARY_MAX_ENTRIES,
     DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS,
     DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS_LONG,
@@ -60,6 +68,8 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_COSYVOICE_SHORT_TEXT_MAX_ATTEMPTS,
     DEFAULT_COSYVOICE_DURATION_FIT_MAX_SPEED,
     DEFAULT_COSYVOICE_DURATION_FIT_TARGET_RATIO,
+    DEFAULT_COSYVOICE_MAX_IN_FLIGHT_SEGMENTS,
+    DEFAULT_COSYVOICE_MAX_IN_FLIGHT_SEGMENTS_LIMIT,
     DEFAULT_SAM_AUDIO_MODEL,
     DEFAULT_SAM_AUDIO_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_SAM_AUDIO_DESCRIPTION,
@@ -71,6 +81,9 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_DUBBING_CHANNELS,
     DEFAULT_DUBBING_FADE_MILLISECONDS,
     DEFAULT_DUBBING_AUDIO_BITRATE,
+)
+from telegram_agent.core.content_processing.common.language_codes import (
+    parse_madlad_language_pairs,
 )
 
 
@@ -541,6 +554,59 @@ class Settings(BaseSettings):
         gt=0,
     )
 
+    madlad_language_pairs: str = Field(
+        default=DEFAULT_MADLAD_LANGUAGE_PAIRS,
+        validation_alias=AliasChoices(
+            "MADLAD_LANGUAGE_PAIRS", "madlad_language_pairs"
+        ),
+        description="Comma-separated source:target pairs routed to local MADLAD.",
+    )
+    madlad_base_url: str = Field(
+        default=DEFAULT_MADLAD_BASE_URL,
+        validation_alias=AliasChoices("MADLAD_BASE_URL", "madlad_base_url"),
+        min_length=1,
+    )
+    madlad_request_timeout_seconds: float = Field(
+        default=DEFAULT_MADLAD_REQUEST_TIMEOUT_SECONDS,
+        validation_alias=AliasChoices(
+            "MADLAD_REQUEST_TIMEOUT_SECONDS", "madlad_request_timeout_seconds"
+        ),
+        gt=0,
+    )
+    madlad_request_max_attempts: int = Field(
+        default=DEFAULT_MADLAD_REQUEST_MAX_ATTEMPTS,
+        validation_alias=AliasChoices(
+            "MADLAD_REQUEST_MAX_ATTEMPTS", "madlad_request_max_attempts"
+        ),
+        gt=0,
+    )
+    madlad_retry_backoff_seconds: float = Field(
+        default=DEFAULT_MADLAD_RETRY_BACKOFF_SECONDS,
+        validation_alias=AliasChoices(
+            "MADLAD_RETRY_BACKOFF_SECONDS", "madlad_retry_backoff_seconds"
+        ),
+        ge=0,
+    )
+    madlad_client_batch_size: int = Field(
+        default=DEFAULT_MADLAD_CLIENT_BATCH_SIZE,
+        validation_alias=AliasChoices(
+            "MADLAD_CLIENT_BATCH_SIZE", "madlad_client_batch_size"
+        ),
+        gt=0,
+    )
+    madlad_beam_size: int = Field(
+        default=DEFAULT_MADLAD_BEAM_SIZE,
+        validation_alias=AliasChoices("MADLAD_BEAM_SIZE", "madlad_beam_size"),
+        gt=0,
+    )
+    madlad_max_new_tokens: int = Field(
+        default=DEFAULT_MADLAD_MAX_NEW_TOKENS,
+        validation_alias=AliasChoices(
+            "MADLAD_MAX_NEW_TOKENS", "madlad_max_new_tokens"
+        ),
+        gt=0,
+    )
+
     cosyvoice_model: str = Field(
         default=DEFAULT_COSYVOICE_MODEL,
         validation_alias=AliasChoices("COSYVOICE_MODEL", "cosyvoice_model"),
@@ -594,6 +660,20 @@ class Settings(BaseSettings):
         ),
         gt=0,
         le=1,
+    )
+    cosyvoice_max_in_flight_segments: int = Field(
+        default=DEFAULT_COSYVOICE_MAX_IN_FLIGHT_SEGMENTS,
+        validation_alias=AliasChoices(
+            "COSYVOICE_MAX_IN_FLIGHT_SEGMENTS",
+            "cosyvoice_max_in_flight_segments",
+        ),
+        gt=0,
+        le=DEFAULT_COSYVOICE_MAX_IN_FLIGHT_SEGMENTS_LIMIT,
+        description=(
+            "Max transcript segments synthesized at once. GPU inference stays "
+            "serial in the CosyVoice worker; extra in-flight work overlaps "
+            "prompt ffmpeg and duration-fit CPU with the current GPU call."
+        ),
     )
     sam_audio_model: str = Field(
         default=DEFAULT_SAM_AUDIO_MODEL,
@@ -670,6 +750,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_dubbing_settings(self) -> "Settings":
+        parse_madlad_language_pairs(self.madlad_language_pairs)
         if self.sam_audio_overlap_seconds >= self.sam_audio_chunk_seconds:
             raise ValueError(
                 "SAM_AUDIO_OVERLAP_SECONDS must be shorter than SAM_AUDIO_CHUNK_SECONDS"

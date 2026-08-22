@@ -63,6 +63,36 @@ RUN /opt/sam-audio/bin/python -m pip install --upgrade "pip<25" "setuptools>=70,
        "git+https://github.com/facebookresearch/sam-audio.git@${SAM_AUDIO_REPO_REF}"
 
 
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04 AS madlad-runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update -y --fix-missing \
+    && apt-get install -y --no-install-recommends \
+       build-essential ca-certificates curl git wget \
+    && rm -rf /var/lib/apt/lists/*
+RUN wget --quiet \
+      https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+      -O /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge \
+    && rm /tmp/miniforge.sh \
+    && /opt/miniforge/bin/conda create -y -p /opt/madlad python=3.11 \
+    && /opt/miniforge/bin/conda clean -afy
+COPY docker/madlad/requirements.txt /tmp/madlad-requirements.txt
+RUN /opt/madlad/bin/python -m pip install --upgrade "pip<25" "setuptools>=70,<82" wheel \
+    && /opt/madlad/bin/python -m pip install --no-cache-dir \
+       torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128 \
+    && /opt/madlad/bin/python -m pip install --no-cache-dir \
+       -r /tmp/madlad-requirements.txt
+
+
 FROM python:3.12-slim AS base
 
 WORKDIR /app
@@ -155,6 +185,7 @@ RUN uv sync --extra gpu-execution --extra whisperx --extra sensevoice --extra ap
 COPY --from=cosyvoice-runtime /opt/cosyvoice /opt/cosyvoice
 COPY --from=cosyvoice-runtime /opt/CosyVoice /opt/CosyVoice
 COPY --from=sam-audio-runtime /opt/sam-audio /opt/sam-audio
+COPY --from=madlad-runtime /opt/madlad /opt/madlad
 
 ENV PYTHONPATH="/app/src:/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS"
 

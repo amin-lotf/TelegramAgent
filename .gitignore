@@ -198,7 +198,11 @@ celerybeat.pid
 .env.*
 !docker/app/.env.llm_gateway.docker.example
 !docker/app/.env.gpu_execution.docker.example
+!docker/madlad/.env.madlad.docker.example
 venv/
+
+# Local model weights copied from training projects.
+pretrained_models/
 
 env.bak/
 venv.bak/

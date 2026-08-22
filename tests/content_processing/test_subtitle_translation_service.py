@@ -11,6 +11,7 @@ from telegram_agent.core.content_processing.clients.llm_gateway import (
     LlmGatewayGeneration,
     LlmGatewayTokenUsage,
 )
+from telegram_agent.core.content_processing.clients.madlad import MadladGeneration
 from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import (
     JobKind,
@@ -67,7 +68,6 @@ class FakeLlmClient:
     ) -> LlmGatewayGeneration:
         self.translate_calls += 1
         self.translate_prompts.append(user_prompt)
-        # Mirror source indexes with a "FA:" prefix for determinism.
         import json
 
         payload = json.loads(user_prompt)
@@ -85,6 +85,35 @@ class FakeLlmClient:
             model="stub-model",
             provider_request_id="prov-t",
             usage=LlmGatewayTokenUsage(input_tokens=20, output_tokens=12, total_tokens=32),
+        )
+
+
+class FakeMadladClient:
+    def __init__(self, *, fail: Exception | None = None) -> None:
+        self.calls: list[tuple[list[str], str, str]] = []
+        self.fail = fail
+
+    def translate(
+        self,
+        texts: list[str],
+        *,
+        source_lang: str,
+        target_lang: str,
+        request_id: str = "",
+        heartbeat=None,
+    ) -> MadladGeneration:
+        del request_id, heartbeat
+        self.calls.append((list(texts), source_lang, target_lang))
+        if self.fail is not None:
+            raise self.fail
+        return MadladGeneration(
+            translations=[f"LOCAL:{text}" for text in texts],
+            source_lang=source_lang,
+            target_lang=target_lang,
+            target_token=f"<2{target_lang}>",
+            model="google/madlad400-3b-mt",
+            count=len(texts),
+            adapter_sha256="adapter-sha",
         )
 
 
@@ -224,6 +253,104 @@ def test_multi_batch_translation_persists_all_segments(
         assert all(batch.status == TranslationBatchStatus.SUCCEEDED for batch in batches)
         translated = list(session.scalars(select(TranslatedSegment)))
         assert len(translated) == 6
+
+
+def test_configured_pair_uses_madlad_without_llm_calls(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    job_id = _seed_transcript(
+        content_sync_sessionmaker,
+        language="en",
+        texts=["Hello", "world", "again"],
+    )
+    monkeypatch.setattr(settings, "madlad_language_pairs", "en:fa")
+    monkeypatch.setattr(settings, "madlad_client_batch_size", 2)
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient()
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
+    )
+
+    segments = service.ensure_translated(
+        source_job_id=job_id, target_language="Persian"
+    )
+
+    assert [segment.text for segment in segments] == [
+        "LOCAL:Hello",
+        "LOCAL:world",
+        "LOCAL:again",
+    ]
+    assert [len(call[0]) for call in madlad.calls] == [3]
+    assert all(call[1:] == ("en", "fa") for call in madlad.calls)
+    assert llm.glossary_calls == 0
+    assert llm.translate_calls == 0
+    with content_sync_sessionmaker() as session:
+        translation = session.scalar(
+            select(SubtitleTranslation).where(SubtitleTranslation.job_id == job_id)
+        )
+        assert translation is not None
+        assert translation.glossary == {"entries": [], "tone_guidance": None}
+        assert translation.model_name == "google/madlad400-3b-mt"
+        batches = list(session.scalars(select(TranslationBatch)))
+        assert len(batches) == 1
+        assert all(batch.input_tokens is None for batch in batches)
+        assert all(batch.output_tokens is None for batch in batches)
+
+
+def test_unlisted_pair_keeps_existing_external_translation(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    monkeypatch.setattr(settings, "madlad_language_pairs", "en:fa")
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient()
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
+    )
+
+    service.ensure_translated(source_job_id=job_id, target_language="es")
+
+    assert llm.glossary_calls > 0
+    assert llm.translate_calls > 0
+    assert madlad.calls == []
+
+
+def test_madlad_retryable_failure_does_not_call_llm(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    from telegram_agent.core.common.exceptions import RetryableContentProcessingError
+
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    monkeypatch.setattr(settings, "madlad_language_pairs", "en:fa")
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient(
+        fail=RetryableContentProcessingError("MADLAD unavailable")
+    )
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RetryableContentProcessingError):
+        service.ensure_translated(source_job_id=job_id, target_language="fa")
+
+    assert madlad.calls
+    assert llm.glossary_calls == 0
+    assert llm.translate_calls == 0
 
 
 def test_overwrite_rejected(

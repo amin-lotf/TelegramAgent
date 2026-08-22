@@ -1,0 +1,8 @@
+**
+!docker/
+!docker/madlad/
+!docker/madlad/requirements.txt
+!docker/madlad/app/
+!docker/madlad/app/**
+!src/
+!src/**

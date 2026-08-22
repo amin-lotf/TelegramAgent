@@ -382,6 +382,7 @@ class SyncDubbingWorkflowService:
                 "short_text_max_attempts": self._settings.cosyvoice_short_text_max_attempts,
                 "duration_fit_max_speed": self._settings.cosyvoice_duration_fit_max_speed,
                 "duration_fit_target_ratio": self._settings.cosyvoice_duration_fit_target_ratio,
+                "max_in_flight_segments": self._settings.cosyvoice_max_in_flight_segments,
             },
             timeout_seconds=self._settings.cosyvoice_request_timeout_seconds,
             max_attempts=self._settings.dubbing_gpu_max_attempts,

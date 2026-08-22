@@ -20,6 +20,8 @@ from telegram_agent.core.gpu_execution.workloads.protocol import (
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_SAM_AUDIO_CHECKPOINTS_DIR = "/app/.checkpoints"
+
 
 class SamAudioResidualWorkload:
     def execute(
@@ -73,7 +75,12 @@ class SamAudioResidualWorkload:
                 raise GpuWorkloadPermanentError("CUDA is unavailable for SAM Audio")
             login(token=hf_token, add_to_git_credential=False)
             dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-            logger.info("Loading SAM Audio model model=%s", model_name)
+            checkpoint_dir = _prepare_imagebind_checkpoint_dir()
+            logger.info(
+                "Loading SAM Audio model model=%s imagebind_checkpoints=%s",
+                model_name,
+                checkpoint_dir,
+            )
             model = SAMAudio.from_pretrained(model_name).to(
                 device="cuda", dtype=dtype
             ).eval()
@@ -219,6 +226,27 @@ def _match_length(value: np.ndarray, expected: int) -> np.ndarray:
     if value.size < expected:
         return np.pad(value, (0, expected - value.size))
     return value
+
+
+def _prepare_imagebind_checkpoint_dir() -> Path:
+    """Point ImageBind at a persistent CWD/.checkpoints directory.
+
+    ``imagebind_huge(pretrained=True)`` writes ``imagebind_huge.pth`` relative
+    to the process CWD, not ``HF_HOME``. Without this, each SAM run can
+    re-download ~4.5 GiB.
+    """
+    raw = os.getenv(
+        "SAM_AUDIO_CHECKPOINTS_DIR", _DEFAULT_SAM_AUDIO_CHECKPOINTS_DIR
+    ).strip()
+    checkpoint_dir = Path(raw or _DEFAULT_SAM_AUDIO_CHECKPOINTS_DIR).expanduser()
+    try:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise GpuWorkloadPermanentError(
+            f"Unable to create SAM ImageBind checkpoint directory: {checkpoint_dir}"
+        ) from exc
+    os.chdir(checkpoint_dir.parent)
+    return checkpoint_dir.resolve()
 
 
 def _extract_chunk(

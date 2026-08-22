@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -24,6 +25,28 @@ _MIN_DURATION_MS = 1_000
 _MAX_DURATION_MS = 7_000
 _TARGET_CPS = 17.0  # characters per second
 _MIN_GAP_MS = 80
+
+# SRT players treat cue text as LTR. Neutral marks (. ! ? ؟) at the end of a
+# Persian line then visually jump to the start. Force an RTL run per text line.
+_ARABIC_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
+_BIDI_CONTROL_RE = re.compile(r"[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069]")
+_PERSIAN_PUNCTUATION = str.maketrans({
+    ",": "\u060C",
+    ";": "\u061B",
+    "?": "\u061F",
+})
+_RLE = "\u202B"
+_PDF = "\u202C"
+_ALM = "\u061C"
+
+
+def _format_rtl_srt_line(line: str) -> str:
+    """Keep terminal punctuation attached to a Persian/Arabic SRT line."""
+    if not _ARABIC_LETTER_RE.search(line):
+        return line
+    text = _BIDI_CONTROL_RE.sub("", line)
+    text = text.translate(_PERSIAN_PUNCTUATION)
+    return f"{_RLE}{text}{_ALM}{_PDF}"
 
 
 @dataclass(frozen=True)
@@ -272,11 +295,14 @@ class SubtitlePreparationService:
     def _render_srt(self, cues: list[SubtitleSegment]) -> str:
         blocks: list[str] = []
         for index, cue in enumerate(cues, start=1):
+            text = "\n".join(
+                _format_rtl_srt_line(line) for line in cue.text.split("\n")
+            )
             blocks.append(
                 f"{index}\n"
                 f"{self._format_timestamp(cue.start_ms)} --> "
                 f"{self._format_timestamp(cue.end_ms)}\n"
-                f"{cue.text}"
+                f"{text}"
             )
         return "\n\n".join(blocks) + "\n"
 

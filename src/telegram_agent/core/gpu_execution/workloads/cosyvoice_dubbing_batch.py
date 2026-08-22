@@ -6,7 +6,9 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import wave
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -21,12 +23,18 @@ from telegram_agent.core.gpu_execution.workloads.protocol import (
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MAX_IN_FLIGHT_SEGMENTS = 2
+_MAX_IN_FLIGHT_SEGMENTS_LIMIT = 8
+
 
 class _OutputTooShort(RuntimeError):
     pass
 
 
 class CosyVoiceDubbingBatchWorkload:
+    def __init__(self) -> None:
+        self._inference_lock = threading.Lock()
+
     def execute(
         self,
         *,
@@ -49,6 +57,13 @@ class CosyVoiceDubbingBatchWorkload:
             raise GpuWorkloadPermanentError(
                 f"CosyVoice model {model_id!r} is not installed in this worker"
             )
+        mode = str(parameters.get("inference_mode") or "cross_lingual")
+        if mode not in ("cross_lingual", "zero_shot"):
+            raise GpuWorkloadPermanentError(
+                f"Unsupported CosyVoice inference mode: {mode}"
+            )
+        max_in_flight_segments = _max_in_flight_segments(parameters)
+
         model_dir = Path(
             os.getenv(
                 "COSYVOICE_MODEL_DIR",
@@ -63,11 +78,6 @@ class CosyVoiceDubbingBatchWorkload:
         output_dir = _shared_path(payload.get("output_dir"), must_exist=False)
         output_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = output_dir / "tts_manifest.json"
-        mode = str(parameters.get("inference_mode") or "cross_lingual")
-        if mode not in ("cross_lingual", "zero_shot"):
-            raise GpuWorkloadPermanentError(
-                f"Unsupported CosyVoice inference mode: {mode}"
-            )
 
         try:
             from cosyvoice.cli.cosyvoice import AutoModel
@@ -79,69 +89,17 @@ class CosyVoiceDubbingBatchWorkload:
                 f"Unable to load CosyVoice model: {type(exc).__name__}: {exc}"
             ) from exc
 
-        completed = _load_completed_manifest(manifest_path)
-        results: list[dict[str, object]] = []
         try:
-            for raw in segments:
-                segment = _segment_object(raw)
-                index = int(segment["index"])
-                logger.info(
-                    "Synthesizing CosyVoice segment index=%s total=%s",
-                    index,
-                    len(segments),
-                )
-                clip_path = output_dir / f"segment_{index:05d}.wav"
-                cached = completed.get(index)
-                if cached is not None and _valid_wav(clip_path):
-                    results.append(cached)
-                    continue
-
-                prompt_path = _shared_path(segment.get("prompt_path"), must_exist=True)
-                target_text = str(segment.get("target_text") or "").strip()
-                source_text = str(segment.get("source_text") or "").strip()
-                if not target_text:
-                    raise GpuWorkloadPermanentError(
-                        f"Dubbing segment {index} has empty target text"
-                    )
-                target_seconds = max(
-                    (
-                        int(str(segment["end_ms"]))
-                        - int(str(segment["start_ms"]))
-                    )
-                    / 1000.0,
-                    0.05,
-                )
-                synthesis = self._synthesize_segment(
-                    model=model,
-                    mode=mode,
-                    prompt_path=prompt_path,
-                    source_text=source_text,
-                    target_text=target_text,
-                    target_seconds=target_seconds,
-                    output_path=clip_path,
-                    parameters=parameters,
-                )
-                entry: dict[str, object] = {
-                    "index": index,
-                    "start_ms": int(str(segment["start_ms"])),
-                    "end_ms": int(str(segment["end_ms"])),
-                    "speaker": segment.get("speaker"),
-                    "source_text": source_text,
-                    "target_text": target_text,
-                    "tts_clip_path": str(clip_path),
-                    **synthesis,
-                }
-                results.append(entry)
-                _write_json_atomic(
-                    manifest_path,
-                    {
-                        "model": installed_model,
-                        "inference_mode": mode,
-                        "segments": sorted(
-                            results, key=lambda item: int(str(item["index"]))
-                        ),
-                    },
-                )
+            results = self._synthesize_all_segments(
+                model=model,
+                segments=segments,
+                output_dir=output_dir,
+                manifest_path=manifest_path,
+                installed_model=installed_model,
+                mode=mode,
+                parameters=parameters,
+                max_in_flight_segments=max_in_flight_segments,
+            )
         finally:
             del model
             try:
@@ -163,6 +121,129 @@ class CosyVoiceDubbingBatchWorkload:
             },
         )
         logger.info("CosyVoice batch complete segment_count=%s", len(results))
+
+    def _synthesize_all_segments(
+        self,
+        *,
+        model: Any,
+        segments: list[object],
+        output_dir: Path,
+        manifest_path: Path,
+        installed_model: str,
+        mode: str,
+        parameters: dict[str, object],
+        max_in_flight_segments: int,
+    ) -> list[dict[str, object]]:
+        completed = _load_completed_manifest(manifest_path)
+        results: dict[int, dict[str, object]] = {}
+        results_lock = threading.Lock()
+
+        def persist(entry: dict[str, object]) -> None:
+            with results_lock:
+                results[int(str(entry["index"]))] = entry
+                _write_json_atomic(
+                    manifest_path,
+                    {
+                        "model": installed_model,
+                        "inference_mode": mode,
+                        "segments": [
+                            results[index] for index in sorted(results)
+                        ],
+                    },
+                )
+
+        def run_segment(raw: object) -> None:
+            persist(
+                self._process_segment(
+                    raw,
+                    model=model,
+                    output_dir=output_dir,
+                    completed=completed,
+                    mode=mode,
+                    parameters=parameters,
+                    segment_count=len(segments),
+                )
+            )
+
+        workers = min(max_in_flight_segments, len(segments)) or 1
+        logger.info(
+            "CosyVoice in-flight segments workers=%s total=%s",
+            workers,
+            len(segments),
+        )
+        if workers <= 1 or len(segments) <= 1:
+            for raw in segments:
+                run_segment(raw)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(run_segment, raw) for raw in segments]
+                try:
+                    for future in as_completed(futures):
+                        future.result()
+                except BaseException:
+                    for future in futures:
+                        future.cancel()
+                    raise
+        return [results[index] for index in sorted(results)]
+
+    def _process_segment(
+        self,
+        raw: object,
+        *,
+        model: Any,
+        output_dir: Path,
+        completed: dict[int, dict[str, object]],
+        mode: str,
+        parameters: dict[str, object],
+        segment_count: int,
+    ) -> dict[str, object]:
+        segment = _segment_object(raw)
+        index = int(segment["index"])
+        logger.info(
+            "Synthesizing CosyVoice segment index=%s total=%s",
+            index,
+            segment_count,
+        )
+        clip_path = output_dir / f"segment_{index:05d}.wav"
+        cached = completed.get(index)
+        if cached is not None and _valid_wav(clip_path):
+            return cached
+
+        prompt_path = _shared_path(segment.get("prompt_path"), must_exist=True)
+        target_text = str(segment.get("target_text") or "").strip()
+        source_text = str(segment.get("source_text") or "").strip()
+        if not target_text:
+            raise GpuWorkloadPermanentError(
+                f"Dubbing segment {index} has empty target text"
+            )
+        target_seconds = max(
+            (
+                int(str(segment["end_ms"]))
+                - int(str(segment["start_ms"]))
+            )
+            / 1000.0,
+            0.05,
+        )
+        synthesis = self._synthesize_segment(
+            model=model,
+            mode=mode,
+            prompt_path=prompt_path,
+            source_text=source_text,
+            target_text=target_text,
+            target_seconds=target_seconds,
+            output_path=clip_path,
+            parameters=parameters,
+        )
+        return {
+            "index": index,
+            "start_ms": int(str(segment["start_ms"])),
+            "end_ms": int(str(segment["end_ms"])),
+            "speaker": segment.get("speaker"),
+            "source_text": source_text,
+            "target_text": target_text,
+            "tts_clip_path": str(clip_path),
+            **synthesis,
+        }
 
     def _synthesize_segment(
         self,
@@ -206,16 +287,13 @@ class CosyVoiceDubbingBatchWorkload:
                 speed = min(max_speed, initial_speed * (1.12 ** attempt))
                 candidate = temporary_dir / f"candidate-{attempt}.wav"
                 try:
-                    pcm, sample_rate = _collect_model_audio(
-                        _invoke_model(
-                            model=model,
-                            mode=mode,
-                            target_text=f"{prefix}{target_text}",
-                            prompt_text=f"{prefix}{source_text}",
-                            prompt_path=normalized_prompt,
-                            speed=speed,
-                        ),
-                        sample_rate=int(getattr(model, "sample_rate", 24_000)),
+                    pcm, sample_rate = self._infer_locked(
+                        model=model,
+                        mode=mode,
+                        target_text=f"{prefix}{target_text}",
+                        prompt_text=f"{prefix}{source_text}",
+                        prompt_path=normalized_prompt,
+                        speed=speed,
                     )
                     _write_pcm_wav(candidate, pcm=pcm, sample_rate=sample_rate)
                 except _OutputTooShort as exc:
@@ -278,6 +356,45 @@ class CosyVoiceDubbingBatchWorkload:
                 "duration_seconds": fitted_duration,
                 "target_duration_seconds": target_seconds,
             }
+
+    def _infer_locked(
+        self,
+        *,
+        model: Any,
+        mode: str,
+        target_text: str,
+        prompt_text: str,
+        prompt_path: Path,
+        speed: float,
+    ) -> tuple[bytes, int]:
+        with self._inference_lock:
+            return _collect_model_audio(
+                _invoke_model(
+                    model=model,
+                    mode=mode,
+                    target_text=target_text,
+                    prompt_text=prompt_text,
+                    prompt_path=prompt_path,
+                    speed=speed,
+                ),
+                sample_rate=int(getattr(model, "sample_rate", 24_000)),
+            )
+
+
+def _max_in_flight_segments(parameters: dict[str, object]) -> int:
+    raw = parameters.get("max_in_flight_segments", _DEFAULT_MAX_IN_FLIGHT_SEGMENTS)
+    try:
+        value = int(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise GpuWorkloadPermanentError(
+            f"Invalid CosyVoice max_in_flight_segments: {raw!r}"
+        ) from exc
+    if value < 1 or value > _MAX_IN_FLIGHT_SEGMENTS_LIMIT:
+        raise GpuWorkloadPermanentError(
+            "CosyVoice max_in_flight_segments must be between "
+            f"1 and {_MAX_IN_FLIGHT_SEGMENTS_LIMIT}"
+        )
+    return value
 
 
 def _invoke_model(
