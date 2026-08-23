@@ -54,13 +54,39 @@ async def check_telegram_user(
 ) -> TelegramCheckResponse:
     verified = await service.check_user(payload.telegram_user_id)
 
+    if  verified:
+        return TelegramCheckResponse(
+            verified=True,
+            was_verification_request=False,
+            message=None,
+        )
+    if not payload.password:
+        return TelegramCheckResponse(
+            verified=False,
+            was_verification_request=True,
+            message="Please provide a password",
+        )
+
+    command = VerifyTelegramUserCommand(
+        telegram_user_id=payload.telegram_user_id,
+        chat_id=payload.chat_id,
+        password=payload.password,
+        username=payload.username,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        is_bot=payload.is_bot,
+        language_code=payload.language_code,
+    )
+    verified = await service.verify_user(command)
     if not verified:
         return TelegramCheckResponse(
             verified=False,
-            message="Please verify first using /verify password",
+            was_verification_request=True,
+            message="Wrong password",
         )
 
     return TelegramCheckResponse(
         verified=True,
-        message=None,
+        was_verification_request=True,
+        message="Verified successfully",
     )

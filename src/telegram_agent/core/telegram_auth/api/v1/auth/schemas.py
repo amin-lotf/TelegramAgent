@@ -21,9 +21,19 @@ class TelegramVerifyResponse(BaseModel):
 
 class TelegramCheckRequest(BaseModel):
     telegram_user_id: int = Field(..., description="Telegram user ID from message.from.id")
+    chat_id: int  | None = None
+
+    password: str   | None = None
+
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    is_bot: bool = False
+    language_code: str | None = None
 
 
 class TelegramCheckResponse(BaseModel):
     verified: bool
+    was_verification_request:bool
     message: str | None = None
 
