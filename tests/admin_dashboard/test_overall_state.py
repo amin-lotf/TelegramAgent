@@ -199,7 +199,7 @@ def test_processing_media_from_job_status() -> None:
     assert state == OverallState.PROCESSING_MEDIA
 
 
-def test_processing_media_while_transcribing_or_extracting_emotion() -> None:
+def test_processing_media_while_downloading_or_transcribing() -> None:
     msg = _message(
         attachment=AttachmentRow(
             id=uuid4(),
@@ -216,8 +216,6 @@ def test_processing_media_while_transcribing_or_extracting_emotion() -> None:
         "running",
         "downloaded",
         "transcribing",
-        "transcribed",
-        "emotion_extracting",
     ):
         content = ContentProcessingView(
             job=JobRow(
@@ -236,8 +234,8 @@ def test_processing_media_while_transcribing_or_extracting_emotion() -> None:
         assert state == OverallState.PROCESSING_MEDIA, status
 
 
-def test_emotion_extracted_is_not_processing_media() -> None:
-    """Emotion extraction is the final CP stage; completed jobs are not in-flight."""
+def test_transcribed_is_not_processing_media() -> None:
+    """Transcription is the final CP media stage; completed jobs are not in-flight."""
     msg = _message(
         attachment=AttachmentRow(
             id=uuid4(),
@@ -253,8 +251,8 @@ def test_emotion_extracted_is_not_processing_media() -> None:
         job=JobRow(
             id=uuid4(),
             kind="telegram attachment",
-            status="emotion_extracted",
-            idempotency_key="k-emotion-extracted",
+            status="transcribed",
+            idempotency_key="k-transcribed",
             error_message=None,
             callback_required=True,
             created_at=_now(),

@@ -301,10 +301,7 @@ class SyncTelegramMediaDownloadService:
             or not job.callback_required
             or job.status
             not in (
-                JobStatus.EMOTION_EXTRACTED,
-                # Historical terminals from when chunking/embedding were active.
-                JobStatus.CHUNKED,
-                JobStatus.EMBEDDED,
+                JobStatus.TRANSCRIBED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,

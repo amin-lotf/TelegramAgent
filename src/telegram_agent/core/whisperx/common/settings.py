@@ -5,8 +5,7 @@ from typing import Any,  get_args
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.whisperx.common.const import DEFAULT_ALLOWED_ORIGINS, DEFAULT_WHISPERX_BASE_URL, \
-    DEFAULT_WHISPERX_MODEL
+from telegram_agent.core.whisperx.common.const import DEFAULT_WHISPERX_MODEL
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -24,18 +23,6 @@ class Settings(BaseSettings):
         case_sensitive=True,
         env_parse_none_str="None",
         extra="ignore",
-    )
-
-    whisperx_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("WHISPERX_SERVICE_TOKEN", "whisperx_service_token"),
-        description="API token for accessing the whisperx service API.",
-    )
-
-    whisperx_base_url: str = Field(
-        default=DEFAULT_WHISPERX_BASE_URL,
-        validation_alias=AliasChoices("WHISPERX_BASE_URL", "whisperx_base_url"),
-        description="Base URL for the WhisperX transcription service.",
     )
 
     whisperx_model: str = Field(
@@ -96,17 +83,6 @@ class Settings(BaseSettings):
         description="Maximum concurrent WhisperX transcriptions per service process.",
         gt=0,
     )
-
-
-    allowed_origins: str = Field(
-        default=DEFAULT_ALLOWED_ORIGINS,
-        validation_alias=AliasChoices(
-            "ALLOWED_ORIGINS",
-            "allowed_origins",
-        ),
-        description="List of allowed origins (for CORS)"
-    )
-
 
     LOG_LEVEL: str = Field(
         default="DEBUG",

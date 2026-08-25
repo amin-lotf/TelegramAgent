@@ -13,8 +13,6 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
     OutboxEvent,
     Transcript,
     TranscriptSegment,
-    ContentChunk,
-    ChunkEmbedding,
     DownloadRequest,
     SubtitleTranslation,
     TranslationBatch,

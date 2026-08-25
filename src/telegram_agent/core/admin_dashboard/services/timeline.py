@@ -19,9 +19,6 @@ _STAGE_ORDER = (
     StageKey.MEDIA_DOWNLOADED,
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
-    StageKey.EMOTION_EXTRACTION_DONE,
-    StageKey.CHUNKING_DONE,
-    StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
     StageKey.ATTACHMENT_RESULT_APPLIED,
     StageKey.CONVERSATION_ENQUEUED,
@@ -38,9 +35,6 @@ _CP_PIPELINE_STAGES = (
     StageKey.MEDIA_DOWNLOADED,
     StageKey.MEDIA_DEMUXED,
     StageKey.TRANSCRIPTION_DONE,
-    StageKey.EMOTION_EXTRACTION_DONE,
-    StageKey.CHUNKING_DONE,
-    StageKey.EMBEDDING_DONE,
     StageKey.CP_FINISHED,
 )
 
@@ -51,9 +45,6 @@ _LABELS = {
     StageKey.MEDIA_DOWNLOADED: "Media downloaded",
     StageKey.MEDIA_DEMUXED: "Audio/video demuxed",
     StageKey.TRANSCRIPTION_DONE: "Transcription performed",
-    StageKey.EMOTION_EXTRACTION_DONE: "Emotion extraction performed",
-    StageKey.CHUNKING_DONE: "Transcript chunked",
-    StageKey.EMBEDDING_DONE: "Chunks embedded",
     StageKey.CP_FINISHED: "Content-processing finished",
     StageKey.ATTACHMENT_RESULT_APPLIED: "Attachment result applied",
     StageKey.CONVERSATION_ENQUEUED: "Conversation enqueued",
@@ -70,26 +61,10 @@ _POST_DOWNLOAD_STATUSES = frozenset(
         "downloaded",
         "transcribing",
         "transcribed",
-        "emotion_extracting",
-        "emotion_extracted",
-        "chunking",
-        "chunked",
-        "embedding",
-        "embedded",
         "completed",
     }
 )
-# Terminal success for content-processing jobs (happy path + historical pipelines).
-_SUCCESS_JOB_STATUSES = frozenset(
-    {"emotion_extracted", "transcribed", "chunked", "embedded", "completed"}
-)
-# Statuses that mean emotion extraction finished (or the job predates that stage
-# but completed a later historical stage).
-_EMOTION_DONE_STATUSES = frozenset(
-    {"emotion_extracted", "chunked", "embedded", "completed"}
-)
-_EMOTION_OUTBOX_TYPE = "content_processing.transcript.ready_for_emotion_extraction"
-_CP_FINISHED_OUTBOX_TYPE = "content_processing.job.finished"
+_SUCCESS_JOB_STATUSES = frozenset({"transcribed", "completed"})
 
 
 def _event(
@@ -182,9 +157,6 @@ def build_timeline(
                 StageKey.MEDIA_DOWNLOADED,
                 StageKey.MEDIA_DEMUXED,
                 StageKey.TRANSCRIPTION_DONE,
-                StageKey.EMOTION_EXTRACTION_DONE,
-                StageKey.CHUNKING_DONE,
-                StageKey.EMBEDDING_DONE,
                 StageKey.CP_FINISHED,
             ):
                 events.append(_event(key, StageStatus.NOT_STARTED))
@@ -319,144 +291,7 @@ def build_timeline(
                     _event(StageKey.TRANSCRIPTION_DONE, StageStatus.NOT_APPLICABLE)
                 )
 
-            # Emotion extraction is the final active CP stage after transcription.
-            emotion_expected = transcription_expected or content.transcript is not None
-            segments = (
-                content.transcript.segments
-                if content.transcript is not None
-                else ()
-            )
-            segments_with_emotion = sum(
-                1 for segment in segments if segment.emotion is not None
-            )
-            emotion_evt = _outbox_by_type(content.outbox_events, _EMOTION_OUTBOX_TYPE)
-            emotion_detail = None
-            if segments:
-                emotion_detail = (
-                    f"{segments_with_emotion}/{len(segments)} segment emotion(s)"
-                )
-
-            if not emotion_expected:
-                events.append(
-                    _event(
-                        StageKey.EMOTION_EXTRACTION_DONE,
-                        StageStatus.NOT_APPLICABLE,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif job.status in _EMOTION_DONE_STATUSES or (
-                segments
-                and segments_with_emotion == len(segments)
-                and segments_with_emotion > 0
-            ):
-                events.append(
-                    _event(
-                        StageKey.EMOTION_EXTRACTION_DONE,
-                        StageStatus.COMPLETED,
-                        job.updated_at if job.status in _EMOTION_DONE_STATUSES else None,
-                        detail=emotion_detail,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif job.status == "emotion_extracting" or (
-                job.status == "transcribed" and emotion_evt is not None
-            ):
-                events.append(
-                    _event(
-                        StageKey.EMOTION_EXTRACTION_DONE,
-                        StageStatus.PENDING,
-                        detail=emotion_detail or "awaiting emotion extraction",
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif job.status == "transcribed":
-                # Historical jobs ended at transcribed before emotion extraction existed.
-                events.append(
-                    _event(
-                        StageKey.EMOTION_EXTRACTION_DONE,
-                        StageStatus.NOT_APPLICABLE,
-                        detail="legacy job (pre-emotion stage)",
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            elif job.status in {"failed", "timed_out"} and emotion_evt is not None:
-                events.append(
-                    _event(
-                        StageKey.EMOTION_EXTRACTION_DONE,
-                        StageStatus.FAILED,
-                        job.updated_at,
-                        detail=job.error_message,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            else:
-                events.append(
-                    _event(
-                        StageKey.EMOTION_EXTRACTION_DONE,
-                        StageStatus.NOT_STARTED,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-
-            # Chunking/embedding are retained for historical jobs but are not part of
-            # the active pipeline (emotion extraction is the final stage).
-            if content.chunks:
-                strategy = content.chunks[0].strategy if content.chunks else None
-                detail = f"{len(content.chunks)} chunk(s)"
-                if strategy:
-                    detail = f"{detail} · {strategy}"
-                events.append(
-                    _event(
-                        StageKey.CHUNKING_DONE,
-                        StageStatus.COMPLETED,
-                        content.chunks[0].created_at,
-                        detail=detail,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            else:
-                events.append(
-                    _event(
-                        StageKey.CHUNKING_DONE,
-                        StageStatus.NOT_APPLICABLE,
-                        detail="Chunking skipped",
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-
-            if content.embeddings:
-                first = content.embeddings[0]
-                detail = (
-                    f"{len(content.embeddings)} embedding(s)"
-                    f" · {first.provider}/{first.model}"
-                    f" · {first.dimensions}d"
-                )
-                events.append(
-                    _event(
-                        StageKey.EMBEDDING_DONE,
-                        StageStatus.COMPLETED,
-                        first.created_at,
-                        detail=detail,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-            else:
-                events.append(
-                    _event(
-                        StageKey.EMBEDDING_DONE,
-                        StageStatus.NOT_APPLICABLE,
-                        detail="Embedding skipped",
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
-
-            # CP finished after emotion extraction terminal success (or historical terminal).
-            finished_evt = _outbox_by_type(
-                content.outbox_events, _CP_FINISHED_OUTBOX_TYPE
-            )
-            if job.status in _EMOTION_DONE_STATUSES or (
-                job.status == "transcribed" and emotion_evt is None
-            ):
+            if job.status in _SUCCESS_JOB_STATUSES:
                 events.append(
                     _event(
                         StageKey.CP_FINISHED,
@@ -476,22 +311,12 @@ def build_timeline(
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )
-            elif job.status in {"transcribed", "emotion_extracting"} or (
-                finished_evt is None and emotion_evt is not None
-            ):
-                events.append(
-                    _event(
-                        StageKey.CP_FINISHED,
-                        StageStatus.PENDING,
-                        detail=job.status,
-                        source_db=DbName.CONTENT_PROCESSING,
-                    )
-                )
             else:
                 events.append(
                     _event(
                         StageKey.CP_FINISHED,
                         StageStatus.PENDING,
+                        detail=job.status,
                         source_db=DbName.CONTENT_PROCESSING,
                     )
                 )

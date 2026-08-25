@@ -38,19 +38,7 @@ class StubTelegramIngressClient:
             "hello from voice",
         ),
         (
-            JobStatus.EMOTION_EXTRACTED,
-            True,
-            AttachmentProcessingResultStatus.COMPLETED,
-            "hello from voice",
-        ),
-        (
             JobStatus.TRANSCRIBED,
-            True,
-            AttachmentProcessingResultStatus.COMPLETED,
-            "hello from voice",
-        ),
-        (
-            JobStatus.CHUNKED,
             True,
             AttachmentProcessingResultStatus.COMPLETED,
             "hello from voice",

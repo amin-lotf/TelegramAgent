@@ -8,8 +8,6 @@ from pydantic import ValidationError
 from telegram_agent.core.common.exceptions import (
     AgentRuntimeBatchConflictError,
     JobCreationError,
-    SenseVoiceBackendBusyError,
-    SenseVoiceBackendUnavailableError,
     TelegramAuthBadResponseError,
     TelegramAuthUnavailableError,
     TelegramUserUnauthorizedError,
@@ -93,30 +91,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "WhisperX backend is unavailable"},
-        )
-
-    @app.exception_handler(SenseVoiceBackendBusyError)
-    async def sensevoice_backend_busy_handler(
-        _: Request,
-        exc: SenseVoiceBackendBusyError,
-    ) -> JSONResponse:
-        logger.warning("SenseVoice backend is busy: %s", exc)
-
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "SenseVoice backend is busy"},
-        )
-
-    @app.exception_handler(SenseVoiceBackendUnavailableError)
-    async def sensevoice_backend_unavailable_handler(
-        _: Request,
-        exc: SenseVoiceBackendUnavailableError,
-    ) -> JSONResponse:
-        logger.error("SenseVoice backend is unavailable: %s", exc)
-
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "SenseVoice backend is unavailable"},
         )
 
     @app.exception_handler(AgentRuntimeBatchConflictError)

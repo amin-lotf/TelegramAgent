@@ -16,9 +16,6 @@ _ACTIVE_JOB = frozenset(
         "running",
         "downloaded",
         "transcribing",
-        # Waiting for / running SenseVoice emotion extraction after transcription.
-        "transcribed",
-        "emotion_extracting",
     }
 )
 _FAILED_JOB = frozenset({"failed", "cancelled", "timed_out"})

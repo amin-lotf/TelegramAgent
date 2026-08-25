@@ -8,11 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from telegram_agent.core.content_processing.common.const import DEFAULT_SQLALCHEMY_DATABASE_URL, \
     DEFAULT_ALLOWED_ORIGINS, \
     DEFAULT_TELEGRAM_AUTH_BASE_URL, DEFAULT_REDIS_URL, DEFAULT_MEDIA_STORAGE_ROOT, \
-    DEFAULT_TELEGRAM_API_BASE_URL, DEFAULT_WHISPERX_BASE_URL, DEFAULT_SENSEVOICE_BASE_URL, \
-    DEFAULT_SENSEVOICE_MODEL, DEFAULT_SENSEVOICE_REQUEST_TIMEOUT_SECONDS, \
-    DEFAULT_CHUNKING_BASE_URL, \
-    DEFAULT_CHUNKING_REQUEST_TIMEOUT_SECONDS, DEFAULT_EMBEDDING_BASE_URL, \
-    DEFAULT_EMBEDDING_REQUEST_TIMEOUT_SECONDS, DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, \
+    DEFAULT_TELEGRAM_API_BASE_URL, DEFAULT_MEDIA_DOWNLOAD_MAX_BYTES, \
     DEFAULT_MEDIA_DOWNLOAD_CHUNK_SIZE, DEFAULT_MEDIA_HTTP_CONNECT_TIMEOUT_SECONDS, \
     DEFAULT_MEDIA_HTTP_READ_TIMEOUT_SECONDS, DEFAULT_MEDIA_HTTP_WRITE_TIMEOUT_SECONDS, \
     DEFAULT_MEDIA_HTTP_POOL_TIMEOUT_SECONDS, DEFAULT_MEDIA_PROCESSING_LEASE_SECONDS, \
@@ -127,21 +123,6 @@ class Settings(BaseSettings):
         description="API token for accessing the Telegram bot API.",
     )
 
-    whisperx_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("WHISPERX_SERVICE_TOKEN", "whisperx_service_token"),
-        description="API token for accessing the whisperx service API.",
-    )
-
-    sensevoice_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "SENSEVOICE_SERVICE_TOKEN",
-            "sensevoice_service_token",
-        ),
-        description="API token for accessing the sensevoice service API.",
-    )
-
     gpu_execution_service_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -149,18 +130,6 @@ class Settings(BaseSettings):
             "gpu_execution_service_token",
         ),
         description="API token for the central GPU execution service.",
-    )
-
-    chunking_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CHUNKING_SERVICE_TOKEN", "chunking_service_token"),
-        description="API token for accessing the chunking service API.",
-    )
-
-    embedding_service_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("EMBEDDING_SERVICE_TOKEN", "embedding_service_token"),
-        description="API token for accessing the embedding service API.",
     )
 
     telegram_api_base_url: str = Field(default=DEFAULT_TELEGRAM_API_BASE_URL, validation_alias=AliasChoices("TELEGRAM_API_BASE_URL", "telegram_api_base_url"))
@@ -183,12 +152,6 @@ class Settings(BaseSettings):
         default=DEFAULT_FFMPEG_TIMEOUT_SECONDS,
         validation_alias=AliasChoices("FFMPEG_TIMEOUT_SECONDS", "ffmpeg_timeout_seconds"),
         gt=0,
-    )
-    whisperx_base_url: str = Field(default=DEFAULT_WHISPERX_BASE_URL, validation_alias=AliasChoices("WHISPERX_BASE_URL", "whisperx_base_url"))
-    sensevoice_base_url: str = Field(
-        default=DEFAULT_SENSEVOICE_BASE_URL,
-        validation_alias=AliasChoices("SENSEVOICE_BASE_URL", "sensevoice_base_url"),
-        description="Base URL for the SenseVoice emotion extraction service API.",
     )
     gpu_execution_base_url: str = Field(
         default=DEFAULT_GPU_EXECUTION_BASE_URL,
@@ -237,32 +200,6 @@ class Settings(BaseSettings):
         ),
         gt=0,
     )
-    chunking_base_url: str = Field(
-        default=DEFAULT_CHUNKING_BASE_URL,
-        validation_alias=AliasChoices("CHUNKING_BASE_URL", "chunking_base_url"),
-        description="Base URL for the chunking service API.",
-    )
-    chunking_request_timeout_seconds: float = Field(
-        default=DEFAULT_CHUNKING_REQUEST_TIMEOUT_SECONDS,
-        validation_alias=AliasChoices(
-            "CHUNKING_REQUEST_TIMEOUT_SECONDS",
-            "chunking_request_timeout_seconds",
-        ),
-        gt=0,
-    )
-    embedding_base_url: str = Field(
-        default=DEFAULT_EMBEDDING_BASE_URL,
-        validation_alias=AliasChoices("EMBEDDING_BASE_URL", "embedding_base_url"),
-        description="Base URL for the embedding service API.",
-    )
-    embedding_request_timeout_seconds: float = Field(
-        default=DEFAULT_EMBEDDING_REQUEST_TIMEOUT_SECONDS,
-        validation_alias=AliasChoices(
-            "EMBEDDING_REQUEST_TIMEOUT_SECONDS",
-            "embedding_request_timeout_seconds",
-        ),
-        gt=0,
-    )
     telegram_ingress_base_url: str = Field(
         default=DEFAULT_TELEGRAM_INGRESS_BASE_URL,
         validation_alias=AliasChoices(
@@ -297,19 +234,6 @@ class Settings(BaseSettings):
     )
     whisperx_model: str = Field(default=DEFAULT_WHISPERX_MODEL, validation_alias=AliasChoices("WHISPERX_MODEL", "whisperx_model"), min_length=1)
     whisperx_request_timeout_seconds: float = Field(default=DEFAULT_WHISPERX_REQUEST_TIMEOUT_SECONDS, validation_alias=AliasChoices("WHISPERX_REQUEST_TIMEOUT_SECONDS", "whisperx_request_timeout_seconds"), gt=0)
-    sensevoice_model: str = Field(
-        default=DEFAULT_SENSEVOICE_MODEL,
-        validation_alias=AliasChoices("SENSEVOICE_MODEL", "sensevoice_model"),
-        min_length=1,
-    )
-    sensevoice_request_timeout_seconds: float = Field(
-        default=DEFAULT_SENSEVOICE_REQUEST_TIMEOUT_SECONDS,
-        validation_alias=AliasChoices(
-            "SENSEVOICE_REQUEST_TIMEOUT_SECONDS",
-            "sensevoice_request_timeout_seconds",
-        ),
-        gt=0,
-    )
 
     sqlalchemy_database_url: str = Field(
         default=DEFAULT_SQLALCHEMY_DATABASE_URL,

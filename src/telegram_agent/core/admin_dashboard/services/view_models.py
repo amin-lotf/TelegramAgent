@@ -112,8 +112,6 @@ class TranscriptSegmentRow:
     language_probability: float | None
     speaker: str | None
     speaker_confidence: float | None
-    emotion: str | None = None
-    audio_events: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,37 +123,6 @@ class TranscriptRow:
     language_probability: float | None
     duration_ms: int | None
     segments: tuple[TranscriptSegmentRow, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class ContentChunkRow:
-    id: UUID
-    job_id: UUID
-    content_type: str
-    chunk_index: int
-    text: str
-    start_ms: int | None
-    end_ms: int | None
-    char_count: int
-    token_count: int | None
-    segment_index_start: int | None
-    segment_index_end: int | None
-    speakers: tuple[str, ...] | None
-    strategy: str
-    created_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class ChunkEmbeddingRow:
-    id: UUID
-    job_id: UUID
-    chunk_id: UUID
-    chunk_index: int | None
-    provider: str
-    model: str
-    dimensions: int
-    embedding_preview: tuple[float, ...]
-    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,8 +223,6 @@ class ContentProcessingView:
     assets: tuple[MediaAssetRow, ...] = ()
     outbox_events: tuple[OutboxRow, ...] = ()
     transcript: TranscriptRow | None = None
-    chunks: tuple[ContentChunkRow, ...] = ()
-    embeddings: tuple[ChunkEmbeddingRow, ...] = ()
     not_applicable: bool = False
 
 

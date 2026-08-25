@@ -82,56 +82,6 @@ class RecordTranscriptCommand:
     segments: tuple[RecordTranscriptSegmentCommand, ...]
 
 
-@dataclass(frozen=True)
-class UpdateTranscriptSegmentEmotionCommand:
-    segment_index: int
-    emotion: str | None
-    audio_events: tuple[str, ...] | None
-
-
-@dataclass(frozen=True)
-class RecordSegmentEmotionsCommand:
-    job_id: UUID
-    segments: tuple[UpdateTranscriptSegmentEmotionCommand, ...]
-
-
-@dataclass(frozen=True)
-class RecordContentChunkCommand:
-    chunk_index: int
-    text: str
-    start_ms: int | None
-    end_ms: int | None
-    char_count: int
-    token_count: int | None
-    segment_index_start: int | None
-    segment_index_end: int | None
-    speakers: tuple[str, ...] | None
-    strategy: str
-    metadata: dict[str, object] | None = None
-
-
-@dataclass(frozen=True)
-class RecordContentChunksCommand:
-    job_id: UUID
-    content_type: str
-    chunks: tuple[RecordContentChunkCommand, ...]
-
-
-@dataclass(frozen=True)
-class RecordChunkEmbeddingCommand:
-    chunk_id: UUID
-    provider: str
-    model: str
-    dimensions: int
-    embedding: tuple[float, ...]
-
-
-@dataclass(frozen=True)
-class RecordChunkEmbeddingsCommand:
-    job_id: UUID
-    embeddings: tuple[RecordChunkEmbeddingCommand, ...]
-
-
 class NotifyAttachmentProcessingResultCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 

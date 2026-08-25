@@ -293,10 +293,10 @@ def test_transcription_service_persists_complete_supported_result(
     assert transcript is not None and transcript.duration_ms == 1500
     assert segment_count == 1
     assert [event.event_type for event in events] == [
-        OutboxEventType.TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION.value
+        OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value
     ]
     assert events[0].idempotency_key == (
-        f"{OutboxEventType.TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION.value}:{job_id}"
+        f"{OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value}:{job_id}"
     )
 
 

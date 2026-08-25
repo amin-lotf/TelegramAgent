@@ -163,34 +163,6 @@ def test_transcription_event_is_published_to_generic_transcription_task(
     assert event is not None and event.status == OutboxEventStatus.PUBLISHED
 
 
-def test_emotion_extraction_event_is_published_to_emotion_task(
-    content_sync_sessionmaker: sessionmaker[Session],
-    content_sync_uow_factory,
-    monkeypatch,
-) -> None:
-    from telegram_agent.core.content_processing.celery.tasks.emotion_extraction import (
-        extract_emotions_task,
-    )
-
-    job_id, event_id = _seed_job_and_event(
-        content_sync_sessionmaker,
-        event_type=OutboxEventType.TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION.value,
-    )
-    published_args: list[tuple[str]] = []
-
-    def fake_apply_async(*, args, **kwargs) -> None:
-        published_args.append(args)
-
-    monkeypatch.setattr(extract_emotions_task, "apply_async", fake_apply_async)
-    result = _dispatcher(content_sync_uow_factory).dispatch_once()
-
-    with content_sync_sessionmaker() as session:
-        event = session.get(OutboxEvent, event_id)
-    assert result.published == 1
-    assert published_args == [(str(job_id),)]
-    assert event is not None and event.status == OutboxEventStatus.PUBLISHED
-
-
 def test_dubbing_stage_event_is_published_to_durable_coordinator_task(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,
@@ -219,14 +191,13 @@ def test_dubbing_stage_event_is_published_to_durable_coordinator_task(
     assert event is not None and event.status == OutboxEventStatus.PUBLISHED
 
 
-def test_chunking_event_is_not_dispatched(
+def test_unknown_event_is_not_dispatched(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,
 ) -> None:
-    """Chunking/embedding outbox events are no longer mapped while those stages are skipped."""
     _job_id, event_id = _seed_job_and_event(
         content_sync_sessionmaker,
-        event_type=OutboxEventType.TRANSCRIPT_READY_FOR_CHUNKING.value,
+        event_type="content_processing.unknown.event",
     )
     result = _dispatcher(content_sync_uow_factory).dispatch_once()
 

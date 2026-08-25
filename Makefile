@@ -9,9 +9,9 @@ MADLAD_ENV_FILE ?= docker/madlad/.env.madlad.docker
         prepare-madlad-storage sync-madlad-weights build-madlad up-madlad up-with-madlad rebuild-madlad \
         stop-madlad restart-madlad reload-madlad-adapter \
         down down-v restart ps logs \
-        logs-storage logs-app logs-celery logs-n8n logs-vllm logs-whisperx logs-sensevoice logs-gpu-execution \
+        logs-storage logs-app logs-celery logs-n8n logs-gpu-execution \
         logs-dubbing logs-cosyvoice logs-sam logs-madlad \
-        logs-chunking logs-embedding logs-admin-dashboard logs-admin-dashboard-v2 \
+        logs-admin-dashboard \
         logs-telegram-bot-api \
         shell-celery \
         migrate-telegram-auth migrate-telegram-ingress migrate-content_processing migrate-agent-runtime migrate-gpu-execution \
@@ -90,34 +90,16 @@ logs-storage:
 	$(COMPOSE) logs -f --tail=100 telegram-ingress-migrate telegram-auth-migrate gpu-execution-migrate n8n_postgres telegram_auth_postgres telegram_ingress_postgres agent_runtime_postgres gpu_execution_postgres redis
 
 logs-app:
-	$(COMPOSE) logs -f --tail=100 telegram-auth telegram-ingress content-processing agent-runtime llm_gateway chunking embedding gpu-execution
-
-logs-chunking:
-	$(COMPOSE) logs -f --tail=100 chunking
-
-logs-embedding:
-	$(COMPOSE) logs -f --tail=100 embedding
+	$(COMPOSE) logs -f --tail=100 telegram-auth telegram-ingress content-processing agent-runtime llm_gateway gpu-execution
 
 logs-admin-dashboard:
 	$(COMPOSE) logs -f --tail=100 admin-dashboard
-
-logs-admin-dashboard-v2:
-	$(COMPOSE) logs -f --tail=100 admin-dashboard-v2
 
 logs-celery:
 	$(COMPOSE) logs -f --tail=100 content-processing-worker content-processing-beat telegram-ingress-worker telegram-ingress-beat agent-runtime-worker agent-runtime-beat gpu-execution-worker gpu-execution-control-worker gpu-execution-beat
 
 logs-n8n:
 	$(COMPOSE) logs -f --tail=100 n8n
-
-logs-vllm:
-	$(COMPOSE) logs -f --tail=100 vllm-whisper
-
-logs-whisperx:
-	$(COMPOSE) logs -f --tail=100 whisperx
-
-logs-sensevoice:
-	$(COMPOSE) logs -f --tail=100 sensevoice
 
 logs-gpu-execution:
 	$(COMPOSE) logs -f --tail=100 gpu-execution gpu-execution-worker gpu-execution-control-worker gpu-execution-beat

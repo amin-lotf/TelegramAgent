@@ -221,26 +221,15 @@
 
             <h3>Transcript</h3>
             {% if cp.transcript %}
-              {% set emotion_labeled = cp.transcript.segments|selectattr('emotion')|list %}
               <table class="kv">
                 <tr><th>Language</th><td>{{ cp.transcript.language or '—' }}</td></tr>
                 <tr><th>Duration (ms)</th><td>{{ cp.transcript.duration_ms or '—' }}</td></tr>
                 <tr><th>Job status</th><td><code>{{ cp.job.status }}</code></td></tr>
-                <tr>
-                  <th>Emotion coverage</th>
-                  <td>
-                    {% if cp.transcript.segments %}
-                      {{ emotion_labeled|length }} / {{ cp.transcript.segments|length }} segments labeled
-                    {% else %}
-                      No segments
-                    {% endif %}
-                  </td>
-                </tr>
                 <tr><th>Text</th><td class="pre">{{ cp.transcript.text }}</td></tr>
               </table>
               {% if cp.transcript.segments %}
                 <details open>
-                  <summary>{{ cp.transcript.segments|length }} segments · emotion results</summary>
+                  <summary>{{ cp.transcript.segments|length }} segments</summary>
                   <div class="table-wrap">
                     <table class="data">
                       <thead>
@@ -249,8 +238,6 @@
                           <th>Start</th>
                           <th>End</th>
                           <th>Speaker</th>
-                          <th>Emotion</th>
-                          <th>Audio events</th>
                           <th>Text</th>
                         </tr>
                       </thead>
@@ -261,20 +248,6 @@
                             <td>{{ s.start_ms }}</td>
                             <td>{{ s.end_ms }}</td>
                             <td>{{ s.speaker or '—' }}</td>
-                            <td>
-                              {% if s.emotion %}
-                                <span class="badge emotion-{{ s.emotion|lower }}">{{ s.emotion }}</span>
-                              {% else %}
-                                <span class="muted">—</span>
-                              {% endif %}
-                            </td>
-                            <td>
-                              {% if s.audio_events %}
-                                {{ s.audio_events|join(', ') }}
-                              {% else %}
-                                <span class="muted">—</span>
-                              {% endif %}
-                            </td>
                             <td>{{ s.text }}</td>
                           </tr>
                         {% endfor %}
@@ -285,109 +258,6 @@
               {% endif %}
             {% else %}
               <p class="muted">No transcript.</p>
-            {% endif %}
-
-            <h3>Content chunks</h3>
-            {% if cp.chunks %}
-              <p class="meta" style="margin-bottom: 0.75rem;">
-                {{ cp.chunks|length }} chunk{{ 's' if cp.chunks|length != 1 else '' }}
-                · strategy <code>{{ cp.chunks[0].strategy }}</code>
-                · type <code>{{ cp.chunks[0].content_type }}</code>
-              </p>
-              <div class="table-wrap">
-                <table class="data">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Start (ms)</th>
-                      <th>End (ms)</th>
-                      <th>Segments</th>
-                      <th>Tokens</th>
-                      <th>Speakers</th>
-                      <th>Text</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for c in cp.chunks %}
-                      <tr>
-                        <td>{{ c.chunk_index }}</td>
-                        <td>{{ c.start_ms if c.start_ms is not none else '—' }}</td>
-                        <td>{{ c.end_ms if c.end_ms is not none else '—' }}</td>
-                        <td>
-                          {% if c.segment_index_start is not none and c.segment_index_end is not none %}
-                            {{ c.segment_index_start }}–{{ c.segment_index_end }}
-                          {% else %}
-                            —
-                          {% endif %}
-                        </td>
-                        <td>{{ c.token_count if c.token_count is not none else '—' }}</td>
-                        <td>
-                          {% if c.speakers %}
-                            {{ c.speakers|join(', ') }}
-                          {% else %}
-                            —
-                          {% endif %}
-                        </td>
-                        <td class="pre">{{ c.text }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% else %}
-              <p class="muted">No content chunks
-                {% if cp.transcript or cp.job.status in ['transcribed', 'emotion_extracting', 'emotion_extracted', 'chunked', 'embedded', 'completed'] %}
-                  (chunking skipped).
-                {% else %}
-                  .
-                {% endif %}
-              </p>
-            {% endif %}
-
-            <h3>Chunk embeddings</h3>
-            {% if cp.embeddings %}
-              <p class="meta" style="margin-bottom: 0.75rem;">
-                {{ cp.embeddings|length }} embedding{{ 's' if cp.embeddings|length != 1 else '' }}
-                · provider <code>{{ cp.embeddings[0].provider }}</code>
-                · model <code>{{ cp.embeddings[0].model }}</code>
-                · {{ cp.embeddings[0].dimensions }} dimensions
-              </p>
-              <div class="table-wrap">
-                <table class="data">
-                  <thead>
-                    <tr>
-                      <th>Chunk #</th>
-                      <th>Chunk ID</th>
-                      <th>Provider</th>
-                      <th>Model</th>
-                      <th>Dims</th>
-                      <th>Preview</th>
-                      <th>Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for e in cp.embeddings %}
-                      <tr>
-                        <td>{{ e.chunk_index if e.chunk_index is not none else '—' }}</td>
-                        <td><code>{{ e.chunk_id }}</code></td>
-                        <td>{{ e.provider }}</td>
-                        <td><code>{{ e.model }}</code></td>
-                        <td>{{ e.dimensions }}</td>
-                        <td class="pre">
-                          {% if e.embedding_preview %}
-                            [{{ e.embedding_preview|join(', ') }}{% if e.dimensions > e.embedding_preview|length %}, …{% endif %}]
-                          {% else %}
-                            —
-                          {% endif %}
-                        </td>
-                        <td class="dt">{{ e.created_at|dt }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% else %}
-              <p class="muted">No chunk embeddings (embedding skipped).</p>
             {% endif %}
           {% endif %}
           </div>

@@ -587,8 +587,6 @@ class SyncDubbingWorkflowService:
                     language_probability=item.language_probability,
                     speaker=item.speaker,
                     speaker_confidence=item.speaker_confidence,
-                    emotion=item.emotion,
-                    audio_events=item.audio_events,
                 )
                 for item in transcript.segments
             ]

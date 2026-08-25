@@ -192,29 +192,12 @@ class SyncTranscriptionService:
                 raise RetryableContentProcessingError(
                     "Transcription result could not be applied to job state"
                 )
-            # Next stage: emotion extraction. Do not satisfy expectation or fire job.finished yet.
-            self._enqueue_ready_for_emotion_extraction_in_uow(uow, context.job_id)
+            uow.job_expectations.mark_satisfied(job_id=context.job_id)
+            self._enqueue_terminal_callback_in_uow(uow, context.job_id)
 
     def _enqueue_terminal_callback(self, job_id: UUID) -> None:
         with self._uow_factory() as uow:
             self._enqueue_terminal_callback_in_uow(uow, job_id)
-
-    @staticmethod
-    def _enqueue_ready_for_emotion_extraction_in_uow(
-        uow: SyncSqlAlchemyContentProcessingUnitOfWork,
-        job_id: UUID,
-    ) -> None:
-        event_type = OutboxEventType.TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION
-        idempotency_key = f"{event_type.value}:{job_id}"
-        if uow.outbox_events.get_by_idempotency_key(idempotency_key) is None:
-            uow.outbox_events.add(
-                OutboxEvent(
-                    event_type=event_type,
-                    job_id=job_id,
-                    idempotency_key=idempotency_key,
-                    payload={},
-                )
-            )
 
     @staticmethod
     def _enqueue_terminal_callback_in_uow(
@@ -227,10 +210,7 @@ class SyncTranscriptionService:
             or not job.callback_required
             or job.status
             not in (
-                JobStatus.EMOTION_EXTRACTED,
-                # Historical terminals from when chunking/embedding were active.
-                JobStatus.CHUNKED,
-                JobStatus.EMBEDDED,
+                JobStatus.TRANSCRIBED,
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.TIMED_OUT,

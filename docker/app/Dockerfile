@@ -176,11 +176,11 @@ RUN apt-get update -o Acquire::Retries=5 \
     sox \
  && rm -rf /var/lib/apt/lists/*
 
-RUN uv sync --extra gpu-execution --extra whisperx --extra sensevoice --extra apps --no-dev --frozen --no-install-project
+RUN uv sync --extra gpu-execution --extra whisperx --extra apps --no-dev --frozen --no-install-project
 
 COPY src ./src
 
-RUN uv sync --extra gpu-execution --extra whisperx --extra sensevoice --extra apps --no-dev --frozen
+RUN uv sync --extra gpu-execution --extra whisperx --extra apps --no-dev --frozen
 
 COPY --from=cosyvoice-runtime /opt/cosyvoice /opt/cosyvoice
 COPY --from=cosyvoice-runtime /opt/CosyVoice /opt/CosyVoice
@@ -188,40 +188,6 @@ COPY --from=sam-audio-runtime /opt/sam-audio /opt/sam-audio
 COPY --from=madlad-runtime /opt/madlad /opt/madlad
 
 ENV PYTHONPATH="/app/src:/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS"
-
-
-FROM base AS whisperx
-
-RUN apt-get update -o Acquire::Retries=5 \
- && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    git \
-    libgl1 \
-    libglib2.0-0 \
- && rm -rf /var/lib/apt/lists/*
-
-RUN uv sync --extra whisperx --extra apps --no-dev --frozen --no-install-project
-
-COPY src ./src
-
-RUN uv sync --extra whisperx --extra apps --no-dev --frozen
-
-
-FROM base AS sensevoice
-
-RUN apt-get update -o Acquire::Retries=5 \
- && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    git \
-    libgl1 \
-    libglib2.0-0 \
- && rm -rf /var/lib/apt/lists/*
-
-RUN uv sync --extra sensevoice --extra apps --no-dev --frozen --no-install-project
-
-COPY src ./src
-
-RUN uv sync --extra sensevoice --extra apps --no-dev --frozen
 
 
 FROM base AS agent-runtime
@@ -240,24 +206,6 @@ RUN uv sync --extra llm-gateway --extra apps --no-dev --frozen --no-install-proj
 COPY src ./src
 
 RUN uv sync --extra llm-gateway --extra apps --no-dev --frozen
-
-
-FROM base AS chunking
-
-RUN uv sync --extra chunking --extra apps --no-dev --frozen --no-install-project
-
-COPY src ./src
-
-RUN uv sync --extra chunking --extra apps --no-dev --frozen
-
-
-FROM base AS embedding
-
-RUN uv sync --extra embedding --extra apps --no-dev --frozen --no-install-project
-
-COPY src ./src
-
-RUN uv sync --extra embedding --extra apps --no-dev --frozen
 
 
 FROM base AS admin-dashboard

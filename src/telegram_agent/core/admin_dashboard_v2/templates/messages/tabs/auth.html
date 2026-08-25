@@ -1,3 +1,0 @@
-{% set data = source.data %}
-<div class="panel-heading"><h3>Telegram auth</h3><span>Current profile, not a historical message snapshot</span></div>
-<section class="record-section"><dl class="record-grid">{% for key, value in data.items() %}<dt>{{ key|replace('_',' ') }}</dt><dd>{{ value|datetime if key.endswith('_at') else value if value is not none else '—' }}</dd>{% endfor %}</dl></section>

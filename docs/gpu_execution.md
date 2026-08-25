@@ -82,16 +82,6 @@ records the terminal canceled state.
 JSON consumed by content processing. One child owns transcription, alignment,
 and diarization for the complete media job.
 
-`sensevoice.emotion_batch` accepts a JSON manifest of persistent segment clip
-paths. It constructs SenseVoice once, processes every segment in the logical
-content job, writes one result JSON, and exits. This integration is included
-because the existing repository configured SenseVoice for CUDA; leaving its old
-long-lived container enabled would violate global single-GPU execution.
-
-The old WhisperX and SenseVoice FastAPI source remains reusable for local API
-compatibility, but their compose files are no longer included by the root
-deployment.
-
 ## Adding a workload type
 
 1. Define a stable integration identifier in

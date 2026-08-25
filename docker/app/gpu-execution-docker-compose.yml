@@ -33,10 +33,6 @@ services:
     env_file:
       - path: .env.gpu_execution.docker
         required: false
-      - path: .env.whisperx.docker
-        required: false
-      - path: .env.sensevoice.docker
-        required: false
     environment:
       GPU_EXECUTION_SERVICE_TOKEN: ${GPU_EXECUTION_SERVICE_TOKEN:-replace-me}
       SQLALCHEMY_DATABASE_URL: postgresql://telegram:Telegram2026@gpu_execution_postgres:5432/telegram_agent

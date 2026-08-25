@@ -22,9 +22,6 @@ from telegram_agent.core.content_processing.celery.tasks.download_preparation im
 )
 from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
 from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
-from telegram_agent.core.content_processing.celery.tasks.emotion_extraction import (
-    extract_emotions_task,
-)
 from telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback import notify_telegram_ingress_task
 from telegram_agent.core.content_processing.celery.tasks.dubbing import advance_dubbing_task
 from telegram_agent.core.content_processing.db.models.content_processing import OutboxEvent
@@ -53,12 +50,9 @@ class OutboxDispatcher:
         self._retry_base_delay = retry_base_delay
         self._retry_max_delay = retry_max_delay
         self._lease_owner = lease_owner or self._default_lease_owner()
-        # Chunking/embedding tasks remain registered in Celery but are not dispatched:
-        # emotion extraction is the final pipeline stage for now.
         self._task_by_event_type: dict[str, Task] = {
             OutboxEventType.CONTENT_PROCESSING_JOB_READY.value: download_telegram_media_task,
             OutboxEventType.MEDIA_READY_FOR_TRANSCRIPTION.value: transcribe_media_task,
-            OutboxEventType.TRANSCRIPT_READY_FOR_EMOTION_EXTRACTION.value: extract_emotions_task,
             OutboxEventType.CONTENT_PROCESSING_JOB_FINISHED.value: notify_telegram_ingress_task,
             OutboxEventType.DOWNLOAD_PREPARATION_READY.value: prepare_download_task,
             OutboxEventType.DOWNLOAD_READY_FOR_DELIVERY.value: deliver_download_task,

@@ -260,8 +260,6 @@ class MessageTraceService:
                     assets = await reader.list_assets(source.job_id)
                     outbox_events = await reader.list_outbox(source.job_id)
                     transcript = await reader.get_transcript(source.job_id)
-                    chunks = await reader.list_chunks(source.job_id)
-                    embeddings = await reader.list_embeddings(source.job_id)
                     masked_assets = tuple(
                         MediaAssetRow(
                             id=asset.id,
@@ -285,8 +283,6 @@ class MessageTraceService:
                         assets=masked_assets,
                         outbox_events=tuple(outbox_events),
                         transcript=transcript,
-                        chunks=tuple(chunks),
-                        embeddings=tuple(embeddings),
                     )
 
                 view = await asyncio.wait_for(
