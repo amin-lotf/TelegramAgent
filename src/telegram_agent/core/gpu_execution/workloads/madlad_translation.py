@@ -11,6 +11,7 @@ from typing import Any
 from telegram_agent.core.gpu_execution.workloads.madlad_engine import MadladEngine
 from telegram_agent.core.gpu_execution.workloads.madlad_languages import (
     UnknownLanguageError,
+    parse_lora_languages,
     target_language_token,
 )
 from telegram_agent.core.gpu_execution.workloads.protocol import (
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL_ID = "google/madlad400-3b-mt"
 _DEFAULT_ADAPTER_DIR = "/adapters"
+_DEFAULT_LOAD_LORA_FOR = "fa"
 _DEFAULT_MAX_BATCH_SIZE = 8
 _DEFAULT_BEAM_SIZE = 4
 _DEFAULT_MAX_NEW_TOKENS = 256
@@ -104,8 +106,6 @@ class MadladTranslationWorkload:
                 except ValueError as exc:
                     raise GpuWorkloadPermanentError(str(exc)) from exc
             adapter_sha256 = engine.adapter_sha256
-        except FileNotFoundError as exc:
-            raise GpuWorkloadPermanentError(str(exc)) from exc
         except GpuWorkloadPermanentError:
             raise
         except RuntimeError as exc:
@@ -153,6 +153,9 @@ def _build_engine(
     max_new_tokens: int,
 ) -> MadladEngine:
     adapter_dir = os.getenv("MADLAD_ADAPTER_DIR", _DEFAULT_ADAPTER_DIR).strip()
+    lora_languages = parse_lora_languages(
+        os.getenv("MADLAD_LOAD_LORA_FOR", _DEFAULT_LOAD_LORA_FOR)
+    )
     device = os.getenv("MADLAD_DEVICE", "auto").strip() or "auto"
     max_source_length = _positive_int(
         os.getenv("MADLAD_MAX_SOURCE_LENGTH"),
@@ -167,6 +170,7 @@ def _build_engine(
     return MadladEngine(
         model_id=model_id,
         adapter_dir=adapter_dir,
+        lora_languages=lora_languages,
         device=device,
         max_batch_size=max_batch_size,
         default_beam_size=beam_size,

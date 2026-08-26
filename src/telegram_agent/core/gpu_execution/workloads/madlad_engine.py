@@ -1,4 +1,4 @@
-"""4-bit MADLAD-400 inference with a host-mounted PEFT LoRA adapter."""
+"""4-bit MADLAD-400 inference with optional per-language PEFT LoRA adapters."""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from telegram_agent.core.gpu_execution.workloads.madlad_languages import (
     UnknownLanguageError,
     normalize_to_madlad,
+    parse_lora_languages,
     target_language_token,
 )
 
@@ -31,10 +33,22 @@ def fix_madlad_embeddings(model: Any) -> Any:
     return model
 
 
-def load_peft_adapter(base_model: Any, adapter_path: str) -> Any:
+def load_peft_adapter(
+    base_model: Any, adapter_path: str, *, adapter_name: str = "default"
+) -> Any:
     from peft import PeftModel
 
-    return PeftModel.from_pretrained(base_model, adapter_path)
+    return PeftModel.from_pretrained(
+        base_model, adapter_path, adapter_name=adapter_name
+    )
+
+
+def adapter_files_complete(adapter_dir: str | Path) -> bool:
+    path = Path(adapter_dir)
+    return path.is_dir() and all(
+        (path / name).is_file()
+        for name in (ADAPTER_CONFIG_NAME, ADAPTER_WEIGHTS_NAME)
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -76,9 +90,16 @@ class MadladEngine:
         max_input_chars: int,
         gpu_concurrency: int = 1,
         hf_token: str | None = None,
+        lora_languages: Sequence[str] | str | None = None,
     ) -> None:
         self.model_id = model_id
         self.adapter_dir = adapter_dir
+        if isinstance(lora_languages, str) or lora_languages is None:
+            self.lora_languages = parse_lora_languages(lora_languages)
+        else:
+            self.lora_languages = parse_lora_languages(
+                ",".join(str(item) for item in lora_languages)
+            )
         self.requested_device = device
         self.max_batch_size = max_batch_size
         self.default_beam_size = default_beam_size
@@ -96,6 +117,9 @@ class MadladEngine:
         self.ready = False
         self.adapter_loaded = False
         self.adapter_sha256: str | None = None
+        self._loaded_adapters: dict[str, Path] = {}
+        self._adapter_hashes: dict[str, str] = {}
+        self._active_adapter: str | None = None
 
     def resolve_lang(self, code: str) -> str:
         lang = normalize_to_madlad(code)
@@ -112,31 +136,34 @@ class MadladEngine:
                 f"Target token {token!r} is not in the MADLAD tokenizer vocabulary"
             )
 
-    def _require_adapter_files(self) -> Path:
-        adapter_path = Path(self.adapter_dir)
-        if not adapter_path.is_dir():
-            raise FileNotFoundError(f"Adapter directory not found: {self.adapter_dir}")
-        missing = [
+    def _language_adapter_dir(self, lang: str) -> Path:
+        return Path(self.adapter_dir) / lang
+
+    def _missing_adapter_files(self, adapter_path: Path) -> list[str]:
+        return [
             name
             for name in (ADAPTER_CONFIG_NAME, ADAPTER_WEIGHTS_NAME)
             if not (adapter_path / name).is_file()
         ]
-        if missing:
-            raise FileNotFoundError(
-                f"Adapter directory {self.adapter_dir} is missing: {', '.join(missing)}"
-            )
+
+    def _complete_adapter_dir(self, lang: str) -> Path | None:
+        adapter_path = self._language_adapter_dir(lang)
+        if not adapter_path.is_dir() or self._missing_adapter_files(adapter_path):
+            return None
         return adapter_path
 
-    def _refresh_adapter_sha(self) -> None:
-        weights = Path(self.adapter_dir) / ADAPTER_WEIGHTS_NAME
-        self.adapter_sha256 = sha256_file(weights) if weights.is_file() else None
+    def _preferred_tokenizer_source(self) -> str:
+        for lang in self.lora_languages:
+            adapter_path = self._complete_adapter_dir(lang)
+            if adapter_path is not None and (adapter_path / "tokenizer.json").is_file():
+                return str(adapter_path)
+        return self.model_id
 
     def load(self) -> None:
         import torch
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, BitsAndBytesConfig
 
         configure_madlad_hf_home()
-        adapter_path = self._require_adapter_files()
         self.cuda_available = torch.cuda.is_available()
         if self.requested_device == "auto":
             self.device = "cuda" if self.cuda_available else "cpu"
@@ -147,13 +174,9 @@ class MadladEngine:
         else:
             self.device = "cpu"
         if self.device != "cuda":
-            raise RuntimeError("4-bit MADLAD + QLoRA inference requires a CUDA GPU")
+            raise RuntimeError("4-bit MADLAD inference requires a CUDA GPU")
 
-        tokenizer_source = (
-            str(adapter_path)
-            if (adapter_path / "tokenizer.json").is_file()
-            else self.model_id
-        )
+        tokenizer_source = self._preferred_tokenizer_source()
         logger.info("Loading MADLAD tokenizer from %s", tokenizer_source)
         self._tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_source, token=self._hf_token
@@ -183,34 +206,122 @@ class MadladEngine:
             token=self._hf_token,
         )
         self._base_model = fix_madlad_embeddings(base)
-        self._attach_adapter(adapter_path)
+        self._attach_available_adapters()
         self.ready = True
+        loaded = ",".join(self._loaded_adapters) or "none"
         logger.info(
-            "MADLAD ready model_id=%s adapter=%s sha256=%s",
+            "MADLAD ready model_id=%s loaded_adapters=%s sha256=%s",
             self.model_id,
-            adapter_path,
+            loaded,
             self.adapter_sha256,
         )
 
-    def _attach_adapter(self, adapter_path: Path) -> None:
+    def _register_adapter(self, lang: str, adapter_path: Path) -> None:
+        self._loaded_adapters[lang] = adapter_path
+        weights = adapter_path / ADAPTER_WEIGHTS_NAME
+        self._adapter_hashes[lang] = sha256_file(weights)
+
+    def _use_base_model(self) -> None:
         if self._base_model is None:
             raise RuntimeError("Base MADLAD model is not loaded")
-        self._model = load_peft_adapter(self._base_model, str(adapter_path))
+        self._model = self._base_model
         self._model.eval()
         self._model.config.use_cache = True
+        self._loaded_adapters = {}
+        self._adapter_hashes = {}
+        self._active_adapter = None
+        self.adapter_loaded = False
+        self.adapter_sha256 = None
+
+    def _attach_available_adapters(self) -> None:
+        if self._base_model is None:
+            raise RuntimeError("Base MADLAD model is not loaded")
+
+        complete: list[tuple[str, Path]] = []
+        for lang in self.lora_languages:
+            adapter_path = self._language_adapter_dir(lang)
+            if not adapter_path.is_dir():
+                logger.warning(
+                    "MADLAD LoRA for %s not found at %s; using base model for that language",
+                    lang,
+                    adapter_path,
+                )
+                continue
+            missing = self._missing_adapter_files(adapter_path)
+            if missing:
+                logger.warning(
+                    "MADLAD LoRA for %s at %s is missing %s; using base model for that language",
+                    lang,
+                    adapter_path,
+                    ", ".join(missing),
+                )
+                continue
+            complete.append((lang, adapter_path))
+
+        if not complete:
+            self._use_base_model()
+            return
+
+        wrapped: Any = None
+        self._loaded_adapters = {}
+        self._adapter_hashes = {}
+        for lang, adapter_path in complete:
+            try:
+                if wrapped is None:
+                    wrapped = load_peft_adapter(
+                        self._base_model, str(adapter_path), adapter_name=lang
+                    )
+                else:
+                    wrapped.load_adapter(str(adapter_path), adapter_name=lang)
+            except Exception:
+                logger.exception(
+                    "Failed to load MADLAD LoRA for %s from %s; skipping",
+                    lang,
+                    adapter_path,
+                )
+                continue
+            self._register_adapter(lang, adapter_path)
+
+        if wrapped is None or not self._loaded_adapters:
+            self._use_base_model()
+            return
+
+        wrapped.eval()
+        wrapped.config.use_cache = True
+        self._model = wrapped
         self.adapter_loaded = True
-        self._refresh_adapter_sha()
+        first_lang = next(iter(self._loaded_adapters))
+        self._activate_adapter(first_lang)
+
+    def _activate_adapter(self, lang: str) -> None:
+        if lang in self._loaded_adapters:
+            set_adapter = getattr(self._model, "set_adapter", None)
+            enable = getattr(self._model, "enable_adapter_layers", None)
+            if callable(set_adapter):
+                set_adapter(lang)
+            if callable(enable):
+                enable()
+            self._active_adapter = lang
+            self.adapter_sha256 = self._adapter_hashes.get(lang)
+            return
+        disable = getattr(self._model, "disable_adapter_layers", None)
+        if callable(disable):
+            disable()
+        self._active_adapter = None
+        self.adapter_sha256 = None
 
     def reload_adapter(self) -> str | None:
-        adapter_path = self._require_adapter_files()
         with self._semaphore:
             if self._base_model is None:
                 raise RuntimeError("Base MADLAD model is not loaded")
             previous = self._model
-            self._attach_adapter(adapter_path)
+            self._attach_available_adapters()
             if previous is not None and previous is not self._model:
                 del previous
-        logger.info("Reloaded MADLAD adapter sha256=%s", self.adapter_sha256)
+        loaded = ",".join(self._loaded_adapters) or "none"
+        logger.info(
+            "Reloaded MADLAD adapters=%s sha256=%s", loaded, self.adapter_sha256
+        )
         return self.adapter_sha256
 
     def translate_batch(
@@ -232,7 +343,8 @@ class MadladEngine:
                 f"Batch size {len(texts)} exceeds max_batch_size={self.max_batch_size}"
             )
 
-        prefix = target_language_token(self.resolve_lang(target_lang))
+        resolved_target = self.resolve_lang(target_lang)
+        prefix = target_language_token(resolved_target)
         beam = beam_size or self.default_beam_size
         max_tokens = max_new_tokens or self.default_max_new_tokens
         non_empty_indexes: list[int] = []
@@ -253,6 +365,7 @@ class MadladEngine:
         if not non_empty_texts:
             return results
         with self._semaphore:
+            self._activate_adapter(resolved_target)
             translated = self._translate_non_empty(
                 non_empty_texts,
                 target_token=prefix,

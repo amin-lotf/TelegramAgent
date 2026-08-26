@@ -60,3 +60,24 @@ def test_reads_configured_source_from_env_file(tmp_path: Path, monkeypatch) -> N
 
     assert exit_code == 0
     assert (dest / "adapter_model.safetensors").is_file()
+
+
+def test_default_dest_uses_language_directory(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "training-output"
+    source.mkdir()
+    (source / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (source / "adapter_model.safetensors").write_bytes(b"weights")
+    env_file = tmp_path / ".env.madlad.docker"
+    env_file.write_text(f"MADLAD_WEIGHTS_SOURCE_PATH={source}\n", encoding="utf-8")
+    monkeypatch.delenv("MADLAD_WEIGHTS_SOURCE_PATH", raising=False)
+    dest = tmp_path / "madlad" / "es"
+
+    exit_code = _MODULE.main(
+        ["--env-file", str(env_file), "--lang", "es", "--dest", str(dest)]
+    )
+
+    assert exit_code == 0
+    assert dest == tmp_path / "madlad" / "es"
+    assert (dest / "adapter_model.safetensors").is_file()
+    assert _MODULE.DEFAULT_ADAPTERS_ROOT.name == "madlad"
+    assert _MODULE.DEFAULT_LANG == "fa"

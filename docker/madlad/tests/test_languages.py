@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.languages import UnknownLanguageError, normalize_to_madlad, target_language_token
+from app.languages import (
+    UnknownLanguageError,
+    normalize_to_madlad,
+    parse_lora_languages,
+    target_language_token,
+)
 
 
 def test_normalizes_aliases_tokens_and_generic_codes() -> None:
@@ -17,3 +22,9 @@ def test_normalizes_aliases_tokens_and_generic_codes() -> None:
 def test_rejects_invalid_code() -> None:
     with pytest.raises(UnknownLanguageError):
         normalize_to_madlad("not a language")
+
+
+def test_parse_lora_languages() -> None:
+    assert parse_lora_languages("") == ()
+    assert parse_lora_languages("fa, Persian, es") == ("fa", "es")
+    assert parse_lora_languages("not a language") == ()

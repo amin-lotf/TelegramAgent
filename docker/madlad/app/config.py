@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     madlad_adapter_dir: str = Field(
         default="/adapters", validation_alias="MADLAD_ADAPTER_DIR"
     )
+    madlad_load_lora_for: str = Field(
+        default="fa", validation_alias="MADLAD_LOAD_LORA_FOR"
+    )
     madlad_device: Literal["cuda", "cpu", "auto"] = Field(
         default="auto", validation_alias="MADLAD_DEVICE"
     )

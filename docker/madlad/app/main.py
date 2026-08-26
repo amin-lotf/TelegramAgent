@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.config import Settings, get_settings
 from app.engine import MadladEngine
+from app.languages import parse_lora_languages
 from app.routes import router
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
         engine = MadladEngine(
             model_id=settings.madlad_model_id,
             adapter_dir=settings.madlad_adapter_dir,
+            lora_languages=parse_lora_languages(settings.madlad_load_lora_for),
             device=settings.madlad_device,
             max_batch_size=settings.madlad_max_batch_size,
             default_beam_size=settings.madlad_beam_size,

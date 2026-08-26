@@ -2,26 +2,34 @@
 
 Production translation uses the central GPU worker workload
 `madlad.translation.v1`. The worker subprocess loads
-`google/madlad400-3b-mt` (4-bit + LoRA) for the job, then exits so VRAM is
-released. Copy the adapter with `make sync-madlad-weights` before the first
-translation job.
+`google/madlad400-3b-mt` (4-bit, with optional per-language LoRA) for the job,
+then exits so VRAM is released. Copy a language adapter with
+`make sync-madlad-weights` if you have one; translation still runs on the base
+model when the adapter is missing.
 
 This directory still contains an optional always-on HTTP service for debugging.
 It is **not** started by `make up`. Starting it pins ~4.5 GB of VRAM for as
 long as the container runs.
 
-## Configure and copy the adapter
+## Configure and copy optional LoRA adapters
 
 Copy `.env.madlad.docker.example` to `.env.madlad.docker`, then set
 `MADLAD_WEIGHTS_SOURCE_PATH` to the exported adapter directory. The source is
-read only when copying; the runtime uses the copy under
-`pretrained_models/madlad/adapter`.
+read only when copying; the runtime looks under
+`pretrained_models/madlad/<lang>` (for example `pretrained_models/madlad/fa`).
+
+`MADLAD_LOAD_LORA_FOR` is a comma-separated list of target languages that may
+use LoRA. The default is `fa`. An adapter is attached only when that language
+is listed **and** `adapter_config.json` plus `adapter_model.safetensors` exist.
+Missing adapters log a warning and fall back to base MADLAD.
 
 ```bash
 make sync-madlad-weights
 ```
 
-Only `adapter_config.json`, `adapter_model.safetensors`, and optional tokenizer
+`make sync-madlad-weights` copies into `pretrained_models/madlad/fa` by default
+(`scripts/sync_madlad_adapter.py --lang es` for another language). Only
+`adapter_config.json`, `adapter_model.safetensors`, and optional tokenizer
 files are copied. `adapter_meta.json` records the source, timestamp, and SHA-256.
 
 ## Optional HTTP service

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 LANGUAGE_ALIASES: dict[str, str] = {
@@ -32,6 +33,7 @@ LANGUAGE_ALIASES: dict[str, str] = {
 }
 
 _LANGUAGE_CODE_PATTERN = re.compile(r"^[a-z]{2,3}(?:_[A-Za-z]{4})?$")
+logger = logging.getLogger(__name__)
 
 
 class UnknownLanguageError(ValueError):
@@ -67,3 +69,22 @@ def normalize_to_madlad(code: str) -> str:
 
 def list_aliases() -> dict[str, str]:
     return dict(sorted(LANGUAGE_ALIASES.items()))
+
+
+def parse_lora_languages(value: str | None) -> tuple[str, ...]:
+    """Parse comma-separated MADLAD_LOAD_LORA_FOR language codes."""
+    if value is None or not str(value).strip():
+        return ()
+    seen: list[str] = []
+    for item in str(value).split(","):
+        raw = item.strip()
+        if not raw:
+            continue
+        try:
+            lang = normalize_to_madlad(raw)
+        except UnknownLanguageError:
+            logger.warning("Ignoring invalid MADLAD_LOAD_LORA_FOR entry %r", raw)
+            continue
+        if lang not in seen:
+            seen.append(lang)
+    return tuple(seen)

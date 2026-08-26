@@ -39,6 +39,17 @@ def test_madlad_compose_uses_container_env_file_without_interpolation() -> None:
     assert 'profiles: ["madlad"]' in compose
     assert "${MADLAD_" not in compose
     assert '"127.0.0.1:8003:8000"' in compose
+    assert "../../pretrained_models/madlad:/adapters:ro" in compose
+    assert "../../pretrained_models/madlad/adapter:/adapters:ro" not in compose
+
+
+def test_gpu_worker_mounts_language_adapter_root() -> None:
+    compose = (
+        _REPO_ROOT / "docker" / "app" / "gpu-execution-docker-compose.yml"
+    ).read_text(encoding="utf-8")
+    assert "../../pretrained_models/madlad:/adapters:ro" in compose
+    assert "../../pretrained_models/madlad/adapter:/adapters:ro" not in compose
+    assert "MADLAD_LOAD_LORA_FOR: ${MADLAD_LOAD_LORA_FOR:-fa}" in compose
 
 
 def test_madlad_make_targets_use_standard_compose_command() -> None:
@@ -49,3 +60,5 @@ def test_madlad_make_targets_use_standard_compose_command() -> None:
     assert "$(COMPOSE) --profile madlad up -d madlad" in makefile
     assert "$(COMPOSE) --profile madlad stop madlad" in makefile
     assert "$(COMPOSE) build madlad" in makefile
+    assert "pretrained_models/madlad/fa" in makefile
+    assert "pretrained_models/madlad/adapter" not in makefile

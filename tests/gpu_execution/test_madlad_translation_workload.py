@@ -10,6 +10,7 @@ from telegram_agent.core.gpu_execution.common.registry import get_workload_defin
 from telegram_agent.core.gpu_execution.workloads.madlad_languages import UnknownLanguageError
 from telegram_agent.core.gpu_execution.workloads.madlad_translation import (
     MadladTranslationWorkload,
+    _build_engine,
 )
 from telegram_agent.core.gpu_execution.workloads.protocol import GpuWorkloadPermanentError
 
@@ -101,6 +102,35 @@ def test_unknown_language_is_permanent(
             output_path=tmp_path / "output.json",
             parameters={"model": "google/madlad400-3b-mt"},
         )
+
+
+def test_build_engine_parses_lora_languages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_ADAPTER_DIR", str(tmp_path))
+    monkeypatch.setenv("MADLAD_LOAD_LORA_FOR", "Persian, es")
+    engine = _build_engine(
+        model_id="google/madlad400-3b-mt",
+        max_batch_size=8,
+        beam_size=4,
+        max_new_tokens=256,
+    )
+    assert engine.lora_languages == ("fa", "es")
+    assert engine.adapter_dir == str(tmp_path)
+
+
+def test_build_engine_empty_lora_list_loads_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_ADAPTER_DIR", str(tmp_path))
+    monkeypatch.setenv("MADLAD_LOAD_LORA_FOR", "")
+    engine = _build_engine(
+        model_id="google/madlad400-3b-mt",
+        max_batch_size=8,
+        beam_size=4,
+        max_new_tokens=256,
+    )
+    assert engine.lora_languages == ()
 
 
 def test_empty_texts_are_permanent(tmp_path: Path) -> None:

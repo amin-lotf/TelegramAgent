@@ -5,6 +5,7 @@ from telegram_agent.core.gpu_execution.workloads.madlad_languages import (
     UnknownLanguageError,
     list_aliases,
     normalize_to_madlad,
+    parse_lora_languages,
     strip_target_token,
     target_language_token,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "UnknownLanguageError",
     "list_aliases",
     "normalize_to_madlad",
+    "parse_lora_languages",
     "strip_target_token",
     "target_language_token",
 ]

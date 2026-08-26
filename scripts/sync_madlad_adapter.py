@@ -3,7 +3,9 @@
 
 The default source is read from docker/madlad/.env.madlad.docker and falls
 back to the sibling LanguageTranslator export. Relative paths are resolved
-from the TelegramAgent repository root. The source is never modified.
+from the TelegramAgent repository root. The default destination is
+pretrained_models/madlad/<lang> (lang defaults to fa). The source is never
+modified.
 """
 
 from __future__ import annotations
@@ -28,7 +30,8 @@ DEFAULT_SOURCE = (
     / "training"
     / "madlad-qlora-adapter"
 )
-DEFAULT_DEST = REPO_ROOT / "pretrained_models" / "madlad" / "adapter"
+DEFAULT_ADAPTERS_ROOT = REPO_ROOT / "pretrained_models" / "madlad"
+DEFAULT_LANG = "fa"
 REQUIRED_FILES = ("adapter_config.json", "adapter_model.safetensors")
 OPTIONAL_FILES = ("tokenizer.json", "tokenizer_config.json")
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -104,7 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--source", type=Path)
-    parser.add_argument("--dest", type=Path, default=DEFAULT_DEST)
+    parser.add_argument(
+        "--lang",
+        default=DEFAULT_LANG,
+        help="Target language code for the destination directory (default: fa)",
+    )
+    parser.add_argument("--dest", type=Path)
     args = parser.parse_args(argv)
 
     try:
@@ -118,7 +126,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         source = _resolve_from_repo(configured_source)
-        dest = _resolve_from_repo(args.dest)
+        lang = (args.lang or DEFAULT_LANG).strip() or DEFAULT_LANG
+        dest = _resolve_from_repo(
+            args.dest if args.dest is not None else DEFAULT_ADAPTERS_ROOT / lang
+        )
         synced = sync_adapter(source=source, dest=dest)
     except (FileNotFoundError, PermissionError, OSError, ValueError) as exc:
         print(f"MADLAD adapter sync failed: {exc}", file=sys.stderr)

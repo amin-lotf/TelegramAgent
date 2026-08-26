@@ -5,7 +5,7 @@ COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 DUBBING_WORKLOAD_LOG_ROOT ?= media/.gpu-control
 MADLAD_ENV_FILE ?= docker/madlad/.env.madlad.docker
 
-.PHONY: up up-build setup-dubbing up-dubbing build-dubbing init-dubbing-models \
+.PHONY: setup build download-models up up-build setup-dubbing up-dubbing build-dubbing init-dubbing-models \
         prepare-madlad-storage sync-madlad-weights build-madlad up-madlad up-with-madlad rebuild-madlad \
         stop-madlad restart-madlad reload-madlad-adapter \
         down down-v restart ps logs \
@@ -17,6 +17,15 @@ MADLAD_ENV_FILE ?= docker/madlad/.env.madlad.docker
         migrate-telegram-auth migrate-telegram-ingress migrate-content_processing migrate-agent-runtime migrate-gpu-execution \
         heads-telegram-ingress \
         revision-telegram-auth revision-telegram-ingress revision-content-processing revision-agent-runtime revision-gpu-execution
+
+setup:
+	python3 scripts/setup.py
+
+build:
+	$(COMPOSE) --profile dubbing-init --profile madlad build
+
+download-models:
+	python3 scripts/download_models.py
 
 up:
 	$(COMPOSE) up -d
@@ -40,10 +49,10 @@ build-dubbing:
 	$(COMPOSE) --profile dubbing-init build gpu-dubbing-models-init gpu-execution-worker content-processing content-processing-worker
 
 init-dubbing-models:
-	$(COMPOSE) --profile dubbing-init run --rm gpu-dubbing-models-init
+	python3 scripts/download_models.py --non-interactive
 
 prepare-madlad-storage:
-	mkdir -p pretrained_models/madlad/adapter pretrained_models/madlad-hf-cache
+	mkdir -p pretrained_models/madlad/fa pretrained_models/madlad-hf-cache
 
 sync-madlad-weights: prepare-madlad-storage
 	python3 scripts/sync_madlad_adapter.py --env-file $(MADLAD_ENV_FILE)
