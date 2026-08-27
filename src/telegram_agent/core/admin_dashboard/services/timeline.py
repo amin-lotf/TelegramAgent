@@ -4,9 +4,16 @@ from __future__ import annotations
 from datetime import datetime
 
 from telegram_agent.core.admin_dashboard.common.types import DbName, StageKey, StageStatus
+from telegram_agent.core.admin_dashboard.services.dubbing_status import (
+    dubbing_is_active,
+    dubbing_is_completed,
+    dubbing_is_failed,
+    delivery_is_active,
+)
 from telegram_agent.core.admin_dashboard.services.view_models import (
     AgentRuntimeView,
     ContentProcessingView,
+    DownloadRequestView,
     OutboxRow,
     TimelineEvent,
     UserMessageRow,
@@ -28,6 +35,7 @@ _STAGE_ORDER = (
     # Intent classification removed from the live pipeline (download agent validates).
     StageKey.DOWNLOAD_HANDLED,
     StageKey.CONTENT_PROCESSING_HANDOFF,
+    StageKey.DUBBING,
 )
 
 _CP_PIPELINE_STAGES = (
@@ -54,6 +62,7 @@ _LABELS = {
     StageKey.INTENT_CLASSIFIED: "Intent classified (legacy)",
     StageKey.DOWNLOAD_HANDLED: "Download request handled",
     StageKey.CONTENT_PROCESSING_HANDOFF: "Content-processing handoff",
+    StageKey.DUBBING: "Dubbing",
 }
 
 _POST_DOWNLOAD_STATUSES = frozenset(
@@ -706,7 +715,78 @@ def build_timeline(
                 )
             )
 
+    events.append(_dubbing_event(content=content, cp_available=cp_available))
+
     # Stable order
     by_key = {event.key: event for event in events}
     ordered = tuple(by_key[key] for key in _STAGE_ORDER if key in by_key)
     return ordered
+
+
+def _latest_download_request(
+    content: ContentProcessingView | None,
+) -> DownloadRequestView | None:
+    if content is None or not content.download_requests:
+        return None
+    return content.download_requests[0]
+
+
+def _dubbing_event(
+    *,
+    content: ContentProcessingView | None,
+    cp_available: bool,
+) -> TimelineEvent:
+    if not cp_available:
+        return _event(
+            StageKey.DUBBING,
+            StageStatus.UNAVAILABLE,
+            source_db=DbName.CONTENT_PROCESSING,
+        )
+    request = _latest_download_request(content)
+    if request is None or not request.requested_dub_language:
+        return _event(
+            StageKey.DUBBING,
+            StageStatus.NOT_APPLICABLE,
+            detail="no dubbing request",
+            source_db=DbName.CONTENT_PROCESSING,
+        )
+    workflow = request.dubbing
+    if workflow is None:
+        if request.job is not None and request.job.status in {"failed", "timed_out"}:
+            return _event(
+                StageKey.DUBBING,
+                StageStatus.FAILED,
+                request.job.updated_at,
+                detail=request.job.error_message or request.job.status,
+                source_db=DbName.CONTENT_PROCESSING,
+            )
+        return _event(
+            StageKey.DUBBING,
+            StageStatus.PENDING,
+            request.updated_at,
+            detail=f"target={request.requested_dub_language}",
+            source_db=DbName.CONTENT_PROCESSING,
+        )
+    detail = workflow.status_label
+    if workflow.active_gpu_job_id is not None and dubbing_is_active(workflow.status):
+        detail = f"{detail} · gpu {workflow.active_gpu_job_id}"
+    if workflow.error_message:
+        detail = f"{detail}: {workflow.error_message}"
+    if dubbing_is_failed(workflow.status):
+        status = StageStatus.FAILED
+    elif dubbing_is_completed(workflow.status) and not delivery_is_active(
+        request.delivery_status
+    ):
+        status = StageStatus.COMPLETED
+    elif dubbing_is_completed(workflow.status):
+        status = StageStatus.PENDING
+        detail = f"{detail} · delivery {request.delivery_status}"
+    else:
+        status = StageStatus.PENDING
+    return _event(
+        StageKey.DUBBING,
+        status,
+        workflow.updated_at,
+        detail=detail,
+        source_db=DbName.CONTENT_PROCESSING,
+    )

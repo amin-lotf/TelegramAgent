@@ -31,6 +31,8 @@ GPU_EXECUTION_ENV = Path("docker/app/.env.gpu_execution.docker")
 DEFAULT_COSYVOICE_MODEL_ID = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
 DEFAULT_COSYVOICE_MODEL_DIR = "/opt/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B"
 DEFAULT_SAM_AUDIO_MODEL = "facebook/sam-audio-small"
+DEFAULT_SAM_AUDIO_JUDGE_MODEL = "facebook/sam-audio-judge"
+DEFAULT_LAION_CLAP_MODEL = "lukewys/laion_clap"
 DEFAULT_MADLAD_MODEL_ID = "google/madlad400-3b-mt"
 DEFAULT_WHISPERX_MODEL = "large-v3"
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
@@ -119,6 +121,14 @@ def sam_audio_model_id() -> str:
     return _env("SAM_AUDIO_MODEL", DEFAULT_SAM_AUDIO_MODEL)
 
 
+def sam_audio_judge_model_id() -> str:
+    return _env("SAM_AUDIO_JUDGE_MODEL", DEFAULT_SAM_AUDIO_JUDGE_MODEL)
+
+
+def laion_clap_model_id() -> str:
+    return _env("LAION_CLAP_MODEL", DEFAULT_LAION_CLAP_MODEL)
+
+
 def madlad_model_id() -> str:
     return _env("MADLAD_MODEL_ID", DEFAULT_MADLAD_MODEL_ID)
 
@@ -148,6 +158,14 @@ def assets() -> list[Asset]:
         ),
         Asset("imagebind", "ImageBind", False, "imagebind"),
         Asset("sam", "SAM Audio", True, "hf", sam_audio_model_id()),
+        Asset(
+            "sam-judge",
+            "SAM Audio judge",
+            True,
+            "hf",
+            sam_audio_judge_model_id(),
+        ),
+        Asset("laion-clap", "LAION CLAP", False, "hf", laion_clap_model_id()),
         Asset(
             "whisper-diarization",
             "Whisper diarization",

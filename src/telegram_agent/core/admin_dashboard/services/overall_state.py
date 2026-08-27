@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from telegram_agent.core.admin_dashboard.common.types import OverallState
+from telegram_agent.core.admin_dashboard.services.dubbing_status import (
+    dubbing_is_active,
+    delivery_is_active,
+)
 from telegram_agent.core.admin_dashboard.services.view_models import (
     AgentRuntimeView,
     ContentProcessingView,
@@ -70,6 +74,16 @@ def derive_overall_state(
     # Attachment may still be "processing" while download/transcription runs.
     if job is not None and job.status in _ACTIVE_JOB:
         return OverallState.PROCESSING_MEDIA
+    if content is not None:
+        for request in content.download_requests:
+            if request.job is not None and request.job.status in _ACTIVE_JOB:
+                return OverallState.PROCESSING_MEDIA
+            if request.dubbing is not None and dubbing_is_active(request.dubbing.status):
+                return OverallState.PROCESSING_MEDIA
+            if delivery_is_active(request.delivery_status) and (
+                request.requested_dub_language or request.requested_subtitle_language
+            ):
+                return OverallState.PROCESSING_MEDIA
 
     if (
         attachment is not None

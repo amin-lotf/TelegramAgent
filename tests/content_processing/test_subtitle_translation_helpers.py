@@ -27,6 +27,9 @@ def _seg(index: int, text: str) -> SourceSegmentView:
 def test_normalize_and_match_languages() -> None:
     assert normalize_language(" EN ") == "en"
     assert languages_match("en", "EN")
+    assert languages_match("fa", "persian")
+    assert languages_match("Farsi", "fa")
+    assert languages_match("english", "en")
     assert not languages_match("en", "fa")
     assert not languages_match(None, "en")
 
@@ -125,6 +128,18 @@ def test_validate_batch_translations_accepts_exact_indexes() -> None:
         },
     )
     assert result == [(1, "one"), (2, "two")]
+
+
+def test_validate_batch_translations_sanitizes_spoken_text() -> None:
+    result = validate_batch_translations(
+        expected_indexes={0},
+        output={
+            "translations": [
+                {"segment_index": 0, "text": "It &apos;s recycled."},
+            ]
+        },
+    )
+    assert result == [(0, "It's recycled.")]
 
 
 def test_validate_batch_translations_rejects_missing_or_empty() -> None:

@@ -133,8 +133,8 @@
         <div class="tab-panel" data-panel="cp">
           <div class="section-card">
           {% if trace.content_processing and trace.content_processing.not_applicable %}
-            <p class="muted" style="margin:0">Not applicable — message has no attachment.</p>
-          {% elif not trace.content_processing or not trace.content_processing.job %}
+            <p class="muted" style="margin:0">Not applicable — message has no attachment or download request.</p>
+          {% elif not trace.content_processing or (not trace.content_processing.job and not trace.content_processing.download_requests) %}
             <p class="muted" style="margin:0">
               {% if db_status.content_processing in ['error','timeout'] %}
                 Content-processing database unavailable.
@@ -149,6 +149,7 @@
             </p>
           {% else %}
             {% set cp = trace.content_processing %}
+            {% if cp.job %}
             <h3 style="margin-top:0">Job</h3>
             <table class="kv">
               <tr><th>ID</th><td><code>{{ cp.job.id }}</code></td></tr>
@@ -159,6 +160,9 @@
               <tr><th>Created at</th><td class="dt">{{ cp.job.created_at|dt }}</td></tr>
               <tr><th>Updated at</th><td class="dt">{{ cp.job.updated_at|dt }}</td></tr>
             </table>
+            {% else %}
+            <p class="muted" style="margin-top:0">No source media job on this message (download/dubbing may still be attached below).</p>
+            {% endif %}
 
             {% if cp.source %}
               <h3>Telegram source</h3>
@@ -168,6 +172,38 @@
                 <tr><th>Attachment type</th><td>{{ cp.source.attachment_type }}</td></tr>
                 <tr><th>Telegram file ID</th><td><code>{{ cp.source.telegram_file_id }}</code></td></tr>
               </table>
+            {% endif %}
+
+            <h3>Download / dubbing</h3>
+            {% if cp.download_requests %}
+              {% for request in cp.download_requests %}
+                <table class="kv">
+                  <tr><th>Request ID</th><td><code>{{ request.id }}</code></td></tr>
+                  <tr><th>Job ID</th><td><code>{{ request.job_id }}</code></td></tr>
+                  <tr><th>Media type</th><td>{{ request.media_type }}</td></tr>
+                  <tr><th>Requested subtitles</th><td>{{ request.requested_subtitle_language or '—' }}</td></tr>
+                  <tr><th>Requested dub</th><td>{{ request.requested_dub_language or '—' }}</td></tr>
+                  <tr><th>Delivery</th><td>{{ request.delivery_status }}</td></tr>
+                  <tr><th>Status text</th><td>{{ request.assistant_text or '—' }}</td></tr>
+                  <tr><th>Delivery error</th><td>{{ request.delivery_error or '—' }}</td></tr>
+                  {% if request.job %}
+                    <tr><th>Download job</th><td>{{ request.job.kind }} / {{ request.job.status }}</td></tr>
+                    <tr><th>Download job error</th><td>{{ request.job.error_message or '—' }}</td></tr>
+                  {% endif %}
+                  {% if request.dubbing %}
+                    <tr><th>Dubbing stage</th><td><strong>{{ request.dubbing.status_label }}</strong> <code>{{ request.dubbing.status }}</code></td></tr>
+                    <tr><th>Target language</th><td>{{ request.dubbing.target_language }}</td></tr>
+                    <tr><th>Active GPU job</th><td><code>{{ request.dubbing.active_gpu_job_id or '—' }}</code></td></tr>
+                    <tr><th>CosyVoice model</th><td>{{ request.dubbing.cosyvoice_model }}</td></tr>
+                    <tr><th>SAM model</th><td>{{ request.dubbing.sam_model }}</td></tr>
+                    <tr><th>Dubbing error</th><td>{{ request.dubbing.error_message or '—' }}</td></tr>
+                    <tr><th>Dubbing updated</th><td class="dt">{{ request.dubbing.updated_at|dt }}</td></tr>
+                  {% endif %}
+                  <tr><th>Updated at</th><td class="dt">{{ request.updated_at|dt }}</td></tr>
+                </table>
+              {% endfor %}
+            {% else %}
+              <p class="muted">No download or dubbing request for this message.</p>
             {% endif %}
 
             <h3>Media assets</h3>

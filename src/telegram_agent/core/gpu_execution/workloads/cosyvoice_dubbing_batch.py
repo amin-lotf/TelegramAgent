@@ -14,6 +14,7 @@ from typing import Any, Iterator
 
 import numpy as np
 
+from telegram_agent.core.common.spoken_text import wrap_text_normalize
 from telegram_agent.core.gpu_execution.workloads.protocol import (
     GpuWorkloadHandler,
     GpuWorkloadPermanentError,
@@ -84,6 +85,7 @@ class CosyVoiceDubbingBatchWorkload:
 
             logger.info("Loading CosyVoice model model=%s", installed_model)
             model = AutoModel(model_dir=str(model_dir))
+            _wrap_frontend_text_normalize(model)
         except Exception as exc:
             raise GpuWorkloadRetryableError(
                 f"Unable to load CosyVoice model: {type(exc).__name__}: {exc}"
@@ -379,6 +381,13 @@ class CosyVoiceDubbingBatchWorkload:
                 ),
                 sample_rate=int(getattr(model, "sample_rate", 24_000)),
             )
+
+
+def _wrap_frontend_text_normalize(model: Any) -> None:
+    frontend = getattr(model, "frontend", None)
+    text_normalize = getattr(frontend, "text_normalize", None)
+    if callable(text_normalize):
+        frontend.text_normalize = wrap_text_normalize(text_normalize)
 
 
 def _max_in_flight_segments(parameters: dict[str, object]) -> int:

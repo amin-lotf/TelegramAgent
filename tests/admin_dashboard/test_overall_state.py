@@ -9,6 +9,8 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     AgentRuntimeView,
     AttachmentRow,
     ContentProcessingView,
+    DownloadRequestView,
+    DubbingWorkflowRow,
     JobRow,
     RuntimeMessageRow,
     UserMessageRow,
@@ -262,3 +264,52 @@ def test_transcribed_is_not_processing_media() -> None:
     )
     state = derive_overall_state(message=msg, content=content, runtime=None)
     assert state != OverallState.PROCESSING_MEDIA
+
+
+def test_active_dubbing_is_processing_media() -> None:
+    now = _now()
+    msg = _message(conversation_status="dispatched")
+    content = ContentProcessingView(
+        job=JobRow(
+            id=uuid4(),
+            kind="telegram attachment",
+            status="transcribed",
+            idempotency_key="k",
+            error_message=None,
+            callback_required=True,
+            created_at=now,
+            updated_at=now,
+        ),
+        source=None,
+        download_requests=(
+            DownloadRequestView(
+                id=uuid4(),
+                job_id=uuid4(),
+                media_ingress_message_id=msg.id,
+                media_type="video",
+                requested_subtitle_language=None,
+                requested_dub_language="persian",
+                delivery_status="pending",
+                delivery_error=None,
+                assistant_text="Preparing the video with Persian dub.",
+                created_at=now,
+                updated_at=now,
+                dubbing=DubbingWorkflowRow(
+                    id=uuid4(),
+                    job_id=uuid4(),
+                    source_job_id=uuid4(),
+                    target_language="persian",
+                    status="sam_running",
+                    status_label="Separating original audio (SAM Audio)",
+                    active_gpu_job_id=uuid4(),
+                    cosyvoice_model="Fun-CosyVoice3-0.5B",
+                    sam_model="facebook/sam-audio-small",
+                    error_message=None,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ),
+        ),
+    )
+    state = derive_overall_state(message=msg, content=content, runtime=None)
+    assert state == OverallState.PROCESSING_MEDIA

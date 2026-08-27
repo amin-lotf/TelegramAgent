@@ -217,12 +217,46 @@ class TimelineEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class DubbingWorkflowRow:
+    id: UUID
+    job_id: UUID
+    source_job_id: UUID
+    target_language: str
+    status: str
+    status_label: str
+    active_gpu_job_id: UUID | None
+    cosyvoice_model: str
+    sam_model: str
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadRequestView:
+    id: UUID
+    job_id: UUID
+    media_ingress_message_id: UUID
+    media_type: str
+    requested_subtitle_language: str | None
+    requested_dub_language: str | None
+    delivery_status: str
+    delivery_error: str | None
+    assistant_text: str | None
+    created_at: datetime
+    updated_at: datetime
+    job: JobRow | None = None
+    dubbing: DubbingWorkflowRow | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ContentProcessingView:
     job: JobRow | None
     source: TelegramSourceRow | None
     assets: tuple[MediaAssetRow, ...] = ()
     outbox_events: tuple[OutboxRow, ...] = ()
     transcript: TranscriptRow | None = None
+    download_requests: tuple[DownloadRequestView, ...] = ()
     not_applicable: bool = False
 
 

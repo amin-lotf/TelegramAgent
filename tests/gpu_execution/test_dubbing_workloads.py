@@ -19,6 +19,7 @@ from telegram_agent.core.gpu_execution.workloads import cosyvoice_dubbing_batch 
 from telegram_agent.core.gpu_execution.workloads.cosyvoice_dubbing_batch import (
     CosyVoiceDubbingBatchWorkload,
     _max_in_flight_segments,
+    _wrap_frontend_text_normalize,
 )
 from telegram_agent.core.gpu_execution.workloads.protocol import GpuWorkloadPermanentError
 from telegram_agent.core.gpu_execution.workloads.sam_audio_residual import (
@@ -67,6 +68,21 @@ def test_prepare_imagebind_checkpoint_dir_chdirs_to_parent(
         assert Path.cwd() == checkpoint_dir.parent.resolve()
     finally:
         os.chdir(original)
+
+
+def test_wrap_frontend_text_normalize_unescapes_tn_entity_leaks() -> None:
+    class Frontend:
+        def text_normalize(self, text: str) -> str:
+            return text
+
+    class Model:
+        def __init__(self) -> None:
+            self.frontend = Frontend()
+
+    model = Model()
+    _wrap_frontend_text_normalize(model)
+    assert model.frontend.text_normalize("It &apos;s recycled.") == "It's recycled."
+    assert model.frontend.text_normalize("do n't") == "don't"
 
 
 def test_max_in_flight_segments_defaults_and_rejects_out_of_range() -> None:

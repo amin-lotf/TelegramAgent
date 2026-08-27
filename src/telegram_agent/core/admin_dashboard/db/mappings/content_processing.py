@@ -86,6 +86,41 @@ transcripts = Table(
     Column("duration_ms", Integer, nullable=True),
 )
 
+download_requests = Table(
+    "download_requests",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("job_id", UUID(as_uuid=True), nullable=False),
+    Column("chat_id", BigInteger, nullable=False),
+    Column("telegram_user_id", BigInteger, nullable=False),
+    Column("media_ingress_message_id", UUID(as_uuid=True), nullable=False),
+    Column("media_type", String(32), nullable=False),
+    Column("requested_subtitle_language", String(64), nullable=True),
+    Column("requested_dub_language", String(64), nullable=True),
+    Column("assistant_text", Text, nullable=True),
+    Column("delivery_status", String(32), nullable=False),
+    Column("delivery_error", Text, nullable=True),
+    Column("reply_to_message_id", BigInteger, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+dubbing_workflows = Table(
+    "dubbing_workflows",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("job_id", UUID(as_uuid=True), nullable=False),
+    Column("source_job_id", UUID(as_uuid=True), nullable=False),
+    Column("target_language", String(64), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("active_gpu_job_id", UUID(as_uuid=True), nullable=True),
+    Column("cosyvoice_model", String(255), nullable=False),
+    Column("sam_model", String(255), nullable=False),
+    Column("error_message", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 transcript_segments = Table(
     "transcript_segments",
     metadata,

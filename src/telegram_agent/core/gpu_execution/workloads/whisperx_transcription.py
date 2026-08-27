@@ -44,6 +44,7 @@ class WhisperXTranscriptionWorkload:
                     "language_probability": segment.language_probability,
                     "speaker": segment.speaker,
                     "speaker_confidence": segment.speaker_confidence,
+                    "word_count": segment.word_count,
                 }
                 for segment in result.segments
             ],

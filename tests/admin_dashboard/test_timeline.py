@@ -10,6 +10,8 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     AgentRuntimeView,
     AttachmentRow,
     ContentProcessingView,
+    DownloadRequestView,
+    DubbingWorkflowRow,
     JobRow,
     MediaAssetRow,
     OutboxRow,
@@ -50,6 +52,7 @@ def test_text_only_timeline_marks_cp_not_applicable() -> None:
     assert by_key[StageKey.ATTACHMENT_REGISTERED].status == StageStatus.NOT_APPLICABLE
     assert by_key[StageKey.CP_JOB_CREATED].status == StageStatus.NOT_APPLICABLE
     assert by_key[StageKey.RUNTIME_INGESTED].status == StageStatus.NOT_STARTED
+    assert by_key[StageKey.DUBBING].status == StageStatus.NOT_APPLICABLE
 
 
 def test_download_timeline_uses_agent_result_for_traced_request() -> None:
@@ -315,3 +318,67 @@ def test_transcribed_job_completes_content_processing() -> None:
     by_key = {e.key: e for e in events}
     assert by_key[StageKey.TRANSCRIPTION_DONE].status == StageStatus.COMPLETED
     assert by_key[StageKey.CP_FINISHED].status == StageStatus.COMPLETED
+    assert by_key[StageKey.DUBBING].status == StageStatus.NOT_APPLICABLE
+
+
+def test_dubbing_timeline_shows_sam_running_stage() -> None:
+    now = _now()
+    gpu_job_id = uuid4()
+    message = UserMessageRow(
+        id=uuid4(),
+        telegram_user_id=1,
+        chat_id=1,
+        message_id=9,
+        update_id=None,
+        reply_message_id=None,
+        text="persian dub",
+        conversation_status="dispatched",
+        dispatch_event_id=uuid4(),
+        created_at=now,
+    )
+    content = ContentProcessingView(
+        job=None,
+        source=None,
+        download_requests=(
+            DownloadRequestView(
+                id=uuid4(),
+                job_id=uuid4(),
+                media_ingress_message_id=message.id,
+                media_type="video",
+                requested_subtitle_language=None,
+                requested_dub_language="persian",
+                delivery_status="pending",
+                delivery_error=None,
+                assistant_text="Preparing the video with Persian dub.",
+                created_at=now,
+                updated_at=now,
+                dubbing=DubbingWorkflowRow(
+                    id=uuid4(),
+                    job_id=uuid4(),
+                    source_job_id=uuid4(),
+                    target_language="persian",
+                    status="sam_running",
+                    status_label="Separating original audio (SAM Audio)",
+                    active_gpu_job_id=gpu_job_id,
+                    cosyvoice_model="Fun-CosyVoice3-0.5B",
+                    sam_model="facebook/sam-audio-small",
+                    error_message=None,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ),
+        ),
+    )
+    events = build_timeline(
+        message=message,
+        ingress_outbox=None,
+        content=content,
+        runtime=None,
+        cp_available=True,
+        runtime_available=True,
+    )
+    event = {item.key: item for item in events}[StageKey.DUBBING]
+    assert event.status == StageStatus.PENDING
+    assert event.detail is not None
+    assert "Separating original audio (SAM Audio)" in event.detail
+    assert str(gpu_job_id) in event.detail

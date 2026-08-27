@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from enum import StrEnum
+
 
 @dataclass(frozen=True)
 class ModelTranscriptSegment:
@@ -10,6 +10,7 @@ class ModelTranscriptSegment:
     language_probability: float | None = None
     speaker: str | None = None
     speaker_confidence: float | None = None
+    word_count: int | None = None
 
 
 @dataclass(frozen=True)

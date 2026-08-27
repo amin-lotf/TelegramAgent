@@ -302,6 +302,57 @@ def test_configured_pair_uses_madlad_without_llm_calls(
         assert all(batch.output_tokens is None for batch in batches)
 
 
+def test_madlad_translations_are_sanitized(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    job_id = _seed_transcript(
+        content_sync_sessionmaker,
+        language="en",
+        texts=["It's recycled."],
+    )
+    monkeypatch.setattr(settings, "madlad_language_pairs", "en:fa")
+
+    class DirtyMadladClient(FakeMadladClient):
+        def translate(
+            self,
+            texts: list[str],
+            *,
+            source_lang: str,
+            target_lang: str,
+            request_id: str = "",
+            heartbeat=None,
+        ) -> MadladGeneration:
+            generation = super().translate(
+                texts,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                request_id=request_id,
+                heartbeat=heartbeat,
+            )
+            return MadladGeneration(
+                translations=["It &apos;s recycled."],
+                source_lang=generation.source_lang,
+                target_lang=generation.target_lang,
+                target_token=generation.target_token,
+                model=generation.model,
+                count=1,
+                adapter_sha256=generation.adapter_sha256,
+            )
+
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=DirtyMadladClient(),  # type: ignore[arg-type]
+    )
+    segments = service.ensure_translated(
+        source_job_id=job_id, target_language="fa"
+    )
+    assert [segment.text for segment in segments] == ["It's recycled."]
+
+
 def test_unlisted_pair_keeps_existing_external_translation(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,

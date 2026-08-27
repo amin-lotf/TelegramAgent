@@ -128,6 +128,8 @@ def test_execute_skips_complete_assets_without_downloading(
     assert "skip CosyVoice" in output
     assert "skip ImageBind" in output
     assert "skip SAM Audio" in output
+    assert "skip SAM Audio judge" in output
+    assert "skip LAION CLAP" in output
 
 
 def test_execute_downloads_missing_public_and_imagebind(
@@ -143,6 +145,8 @@ def test_execute_downloads_missing_public_and_imagebind(
     assert _MODULE.whisper_asr_repo_id() in downloader.snapshots
     assert _MODULE.madlad_model_id() in downloader.snapshots
     assert _MODULE.sam_audio_model_id() in downloader.snapshots
+    assert _MODULE.sam_audio_judge_model_id() in downloader.snapshots
+    assert _MODULE.laion_clap_model_id() in downloader.snapshots
     assert _MODULE.diarization_repo_id() in downloader.snapshots
     assert downloader.http == [_MODULE.IMAGEBIND_URL]
     assert _MODULE.cosyvoice_complete(locations.cosyvoice_dir)
@@ -164,6 +168,7 @@ def test_execute_gated_error_prints_urls_and_rerun_hint(
     assert "https://huggingface.co/facebook/sam-audio-small" in err
     assert "make download-models" in err
     assert _MODULE.cosyvoice_complete(locations.cosyvoice_dir)
+    assert _MODULE.laion_clap_model_id() in downloader.snapshots
     assert _MODULE.diarization_repo_id() in downloader.snapshots
 
 
@@ -236,6 +241,7 @@ def test_non_interactive_missing_token_still_downloads_public(
     err = capsys.readouterr().err
     assert "Hugging Face token is required" in err
     assert "facebook/sam-audio-small" in err
+    assert "facebook/sam-audio-judge" in err
 
 
 def test_interactive_token_is_persisted_before_compose(

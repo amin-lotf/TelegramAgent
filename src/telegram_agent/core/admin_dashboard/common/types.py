@@ -48,6 +48,7 @@ class StageKey(StrEnum):
     INTENT_CLASSIFIED = "intent_classified"
     DOWNLOAD_HANDLED = "download_handled"
     CONTENT_PROCESSING_HANDOFF = "content_processing_handoff"
+    DUBBING = "dubbing"
 
 
 class StageStatus(StrEnum):

@@ -1,13 +1,17 @@
 """SELECT-only queries against the content-processing database."""
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from telegram_agent.core.admin_dashboard.db.mappings import content_processing as tables
+from telegram_agent.core.admin_dashboard.services.dubbing_status import dubbing_status_label
 from telegram_agent.core.admin_dashboard.services.view_models import (
+    DownloadRequestView,
+    DubbingWorkflowRow,
     JobRow,
     MediaAssetRow,
     OutboxRow,
@@ -15,6 +19,7 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     TranscriptRow,
     TranscriptSegmentRow,
 )
+
 
 class ContentProcessingReader:
     def __init__(self, session: AsyncSession) -> None:
@@ -156,3 +161,88 @@ class ContentProcessingReader:
             .where(src.c.ingress_message_id.in_(ingress_ids))
         )
         return {row.ingress_message_id: row.status for row in result}
+
+    async def list_download_requests_for_message(
+        self,
+        *,
+        ingress_message_id: UUID,
+        chat_id: int,
+        telegram_message_id: int,
+    ) -> list[DownloadRequestView]:
+        requests = tables.download_requests
+        jobs = tables.jobs
+        workflows = tables.dubbing_workflows
+        result = await self._session.execute(
+            select(requests, jobs, workflows)
+            .select_from(
+                requests.outerjoin(jobs, jobs.c.id == requests.c.job_id).outerjoin(
+                    workflows, workflows.c.job_id == requests.c.job_id
+                )
+            )
+            .where(
+                or_(
+                    requests.c.media_ingress_message_id == ingress_message_id,
+                    (requests.c.chat_id == chat_id)
+                    & (requests.c.reply_to_message_id == telegram_message_id),
+                )
+            )
+            .order_by(requests.c.created_at.desc(), requests.c.id.desc())
+        )
+        items: list[DownloadRequestView] = []
+        seen: set[UUID] = set()
+        for request, job_row, workflow_row in result:
+            if request.id in seen:
+                continue
+            seen.add(request.id)
+            items.append(
+                DownloadRequestView(
+                    id=request.id,
+                    job_id=request.job_id,
+                    media_ingress_message_id=request.media_ingress_message_id,
+                    media_type=request.media_type,
+                    requested_subtitle_language=request.requested_subtitle_language,
+                    requested_dub_language=request.requested_dub_language,
+                    delivery_status=request.delivery_status,
+                    delivery_error=request.delivery_error,
+                    assistant_text=request.assistant_text,
+                    created_at=request.created_at,
+                    updated_at=request.updated_at,
+                    job=_job_row(job_row)
+                    if job_row is not None and job_row.id is not None
+                    else None,
+                    dubbing=_dubbing_row(workflow_row)
+                    if workflow_row is not None and workflow_row.id is not None
+                    else None,
+                )
+            )
+        return items
+
+
+def _job_row(row: Any) -> JobRow:
+    return JobRow(
+        id=row.id,
+        kind=row.kind,
+        status=row.status,
+        idempotency_key=row.idempotency_key,
+        error_message=row.error_message,
+        callback_required=row.callback_required,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _dubbing_row(row: Any) -> DubbingWorkflowRow:
+    return DubbingWorkflowRow(
+        id=row.id,
+        job_id=row.job_id,
+        source_job_id=row.source_job_id,
+        target_language=row.target_language,
+        status=row.status,
+        status_label=dubbing_status_label(row.status),
+        active_gpu_job_id=row.active_gpu_job_id,
+        cosyvoice_model=row.cosyvoice_model,
+        sam_model=row.sam_model,
+        error_message=row.error_message,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )

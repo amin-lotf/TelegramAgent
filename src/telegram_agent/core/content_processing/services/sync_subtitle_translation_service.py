@@ -10,6 +10,7 @@ from telegram_agent.core.common.exceptions import (
     PermanentContentProcessingError,
     RetryableContentProcessingError,
 )
+from telegram_agent.core.common.spoken_text import sanitize_spoken_text
 from telegram_agent.core.content_processing.clients.llm_gateway import LlmGatewayClient
 from telegram_agent.core.content_processing.clients.madlad import (
     MadladClient,
@@ -653,7 +654,10 @@ class SyncSubtitleTranslationService:
             target_lang=target_code,
             request_id=request_id,
         )
-        cleaned = [text.strip() for text in generation.translations]
+        cleaned = [
+            sanitize_spoken_text((text or "").strip()).strip()
+            for text in generation.translations
+        ]
         if len(cleaned) != len(batch_indexes) or any(not text for text in cleaned):
             raise RetryableContentProcessingError(
                 "MADLAD returned empty or incomplete subtitle translations"

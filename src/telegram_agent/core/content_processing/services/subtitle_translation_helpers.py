@@ -6,6 +6,11 @@ from typing import Any, Sequence
 from pydantic import ValidationError
 
 from telegram_agent.core.common.exceptions import RetryableContentProcessingError
+from telegram_agent.core.common.spoken_text import sanitize_spoken_text
+from telegram_agent.core.content_processing.common.language_codes import (
+    InvalidLanguageCodeError,
+    canonical_madlad_language,
+)
 from telegram_agent.core.content_processing.db.repositories.sync_subtitle_translation import (
     BatchPlanItem,
 )
@@ -35,7 +40,12 @@ def languages_match(source: str | None, target: str | None) -> bool:
     target_norm = normalize_language(target)
     if source_norm is None or target_norm is None:
         return False
-    return source_norm == target_norm
+    if source_norm == target_norm:
+        return True
+    try:
+        return canonical_madlad_language(source) == canonical_madlad_language(target)
+    except InvalidLanguageCodeError:
+        return False
 
 
 def estimate_tokens(text: str) -> int:
@@ -198,7 +208,7 @@ def validate_batch_translations(
 
     by_index: dict[int, str] = {}
     for item in parsed.translations:
-        text = item.text.strip()
+        text = sanitize_spoken_text(item.text.strip()).strip()
         if not text:
             raise RetryableContentProcessingError(
                 f"Subtitle translation for segment_index={item.segment_index} is empty"

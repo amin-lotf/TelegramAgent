@@ -4,30 +4,32 @@ import asyncio
 import importlib
 import logging
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
 
 from telegram_agent.core.common.exceptions import WhisperXBackendBusyError, WhisperXBackendUnavailableError
+from telegram_agent.core.whisperx.common.const import (
+    DEFAULT_WHISPERX_MERGE_SAME_SPEAKER_ONLY,
+    DEFAULT_WHISPERX_SEGMENT_MAX_DURATION_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_MAX_WORD_COUNT,
+    DEFAULT_WHISPERX_SEGMENT_MIN_DURATION_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_MIN_WORD_COUNT,
+    DEFAULT_WHISPERX_SEGMENT_PAUSE_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_TARGET_DURATION_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_TARGET_WORD_COUNT,
+)
 from telegram_agent.core.whisperx.common.results import ModelTranscriptResult, ModelTranscriptSegment
 from telegram_agent.core.whisperx.common.settings import settings
+from telegram_agent.core.whisperx.segmentation import (
+    SegmentSizing,
+    TranscriptSegmenter,
+    merge_transcript_segments,
+)
 
 logger = logging.getLogger(__name__)
 DEFAULT_BUSY_RETRY_AFTER_SECONDS = 30
-
-
-
-
-
-@dataclass(frozen=True)
-class _SegmentWord:
-    text: str
-    speaker: str | None
-    start_seconds: float | None
-    end_seconds: float | None
-    speaker_confidence: float | None
 
 
 class WhisperXRuntime:
@@ -41,6 +43,14 @@ class WhisperXRuntime:
         diarization_enabled: bool,
         hf_token: str | None,
         concurrency: int,
+        merge_same_speaker_only: bool = DEFAULT_WHISPERX_MERGE_SAME_SPEAKER_ONLY,
+        segment_target_duration_seconds: float = DEFAULT_WHISPERX_SEGMENT_TARGET_DURATION_SECONDS,
+        segment_min_duration_seconds: float = DEFAULT_WHISPERX_SEGMENT_MIN_DURATION_SECONDS,
+        segment_max_duration_seconds: float = DEFAULT_WHISPERX_SEGMENT_MAX_DURATION_SECONDS,
+        segment_target_word_count: int = DEFAULT_WHISPERX_SEGMENT_TARGET_WORD_COUNT,
+        segment_min_word_count: int = DEFAULT_WHISPERX_SEGMENT_MIN_WORD_COUNT,
+        segment_max_word_count: int = DEFAULT_WHISPERX_SEGMENT_MAX_WORD_COUNT,
+        segment_pause_seconds: float = DEFAULT_WHISPERX_SEGMENT_PAUSE_SECONDS,
     ) -> None:
         if batch_size <= 0:
             raise ValueError("whisperx_batch_size must be greater than zero")
@@ -62,6 +72,17 @@ class WhisperXRuntime:
         self._semaphore = asyncio.Semaphore(concurrency)
         self._capacity_lock = asyncio.Lock()
         self._align_cache_lock = threading.Lock()
+        self._merge_same_speaker_only = merge_same_speaker_only
+        self._segment_sizing = SegmentSizing(
+            target_duration_seconds=segment_target_duration_seconds,
+            min_duration_seconds=segment_min_duration_seconds,
+            max_duration_seconds=segment_max_duration_seconds,
+            target_word_count=segment_target_word_count,
+            min_word_count=segment_min_word_count,
+            max_word_count=segment_max_word_count,
+            pause_seconds=segment_pause_seconds,
+        )
+        self._segmenter = TranscriptSegmenter(self._segment_sizing)
 
         whisperx_module = importlib.import_module("whisperx")
 
@@ -101,6 +122,16 @@ class WhisperXRuntime:
             diarization_enabled=settings.whisperx_diarization_enabled,
             hf_token=settings.whisperx_hf_token,
             concurrency=settings.whisperx_concurrency,
+            merge_same_speaker_only=settings.whisperx_merge_same_speaker_only,
+            segment_target_duration_seconds=(
+                settings.whisperx_segment_target_duration_seconds
+            ),
+            segment_min_duration_seconds=settings.whisperx_segment_min_duration_seconds,
+            segment_max_duration_seconds=settings.whisperx_segment_max_duration_seconds,
+            segment_target_word_count=settings.whisperx_segment_target_word_count,
+            segment_min_word_count=settings.whisperx_segment_min_word_count,
+            segment_max_word_count=settings.whisperx_segment_max_word_count,
+            segment_pause_seconds=settings.whisperx_segment_pause_seconds,
         )
 
     @property
@@ -196,7 +227,28 @@ class WhisperXRuntime:
             processed_result.get("segments") or []
         )
 
-        return self._build_result(processed_result)
+        result = self._build_result(processed_result)
+        merged_segments = merge_transcript_segments(
+            result.segments,
+            same_speaker_only=self._merge_same_speaker_only,
+            max_duration_seconds=self._segment_sizing.max_duration_seconds,
+            max_word_count=self._segment_sizing.max_word_count,
+            pause_seconds=self._segment_sizing.pause_seconds,
+        )
+        if len(merged_segments) != len(result.segments):
+            logger.info(
+                "Merged Whisper segments: %s -> %s (same_speaker_only=%s)",
+                len(result.segments),
+                len(merged_segments),
+                self._merge_same_speaker_only,
+            )
+        return ModelTranscriptResult(
+            text=result.text,
+            segments=merged_segments,
+            language=result.language,
+            language_probability=result.language_probability,
+            duration_seconds=result.duration_seconds,
+        )
 
     def _get_align_resources(
         self,
@@ -249,6 +301,7 @@ class WhisperXRuntime:
                         "speaker_confidence",
                         "speaker_probability",
                     ),
+                    word_count=self._get_int(raw_segment, "word_count"),
                 )
             )
 
@@ -274,267 +327,22 @@ class WhisperXRuntime:
         self,
         raw_segments: list[Any],
     ) -> list[dict[str, Any]]:
-        normalized_segments: list[dict[str, Any]] = []
+        return self._segmenter.post_process_segments(raw_segments)
 
-        for raw_segment in raw_segments:
-            if not isinstance(raw_segment, dict):
-                continue
-
-            split_segments = self._split_segment_by_speaker(raw_segment)
-
-            if split_segments is None:
-                normalized_segments.append(raw_segment)
-                continue
-
-            normalized_segments.extend(split_segments)
-
-        return normalized_segments
-
-    def _split_segment_by_speaker(
+    def _get_int(
         self,
-        raw_segment: dict[str, Any],
-    ) -> list[dict[str, Any]] | None:
-        raw_words = raw_segment.get("words")
-
-        if not isinstance(raw_words, list) or not raw_words:
-            return None
-
-        words = self._extract_segment_words(raw_words)
-
-        if not words:
-            return None
-
-        if not any(word.speaker for word in words):
-            return None
-
-        grouped_words: list[list[_SegmentWord]] = []
-        grouped_speakers: list[str | None] = []
-        current_words: list[_SegmentWord] = []
-        current_speaker: str | None = None
-
-        for word in words:
-            if (
-                current_words
-                and word.speaker is not None
-                and current_speaker is not None
-                and word.speaker != current_speaker
-            ):
-                grouped_words.append(current_words)
-                grouped_speakers.append(current_speaker)
-                current_words = []
-                current_speaker = word.speaker
-
-            if current_speaker is None and word.speaker is not None:
-                current_speaker = word.speaker
-
-            current_words.append(word)
-
-        if current_words:
-            grouped_words.append(current_words)
-            grouped_speakers.append(current_speaker)
-
-        if not grouped_words:
-            return None
-
-        normalized_segments: list[dict[str, Any]] = []
-
-        for index, group_words in enumerate(grouped_words):
-            speaker = grouped_speakers[index]
-
-            if speaker is None:
-                return None
-
-            segment = self._build_speaker_homogeneous_segment(
-                raw_segment=raw_segment,
-                group_words=group_words,
-                speaker=speaker,
-                previous_segment=normalized_segments[-1] if normalized_segments else None,
-                next_group_words=(
-                    grouped_words[index + 1]
-                    if index + 1 < len(grouped_words)
-                    else None
-                ),
-            )
-
-            if segment is None:
-                return None
-
-            normalized_segments.append(segment)
-
-        return normalized_segments
-
-    def _build_speaker_homogeneous_segment(
-        self,
-        *,
-        raw_segment: dict[str, Any],
-        group_words: list[_SegmentWord],
-        speaker: str,
-        previous_segment: dict[str, Any] | None,
-        next_group_words: list[_SegmentWord] | None,
-    ) -> dict[str, Any] | None:
-        text = self._join_word_texts([word.text for word in group_words])
-
-        if not text:
-            return None
-
-        raw_start = self._get_float(raw_segment, "start")
-        raw_end = self._get_float(raw_segment, "end")
-
-        start = self._first_word_start(group_words)
-        end = self._last_word_end(group_words)
-
-        if group_words[0].start_seconds is None:
-            if previous_segment is not None:
-                start = self._get_float(previous_segment, "end")
-            elif raw_start is not None:
-                start = raw_start
-
-        if group_words[-1].end_seconds is None:
-            if next_group_words is not None:
-                end = self._first_word_start(next_group_words)
-
-            if end is None and raw_end is not None:
-                end = raw_end
-
-        if end is None and raw_end is not None:
-            end = raw_end
-
-        if start is None and raw_start is not None:
-            start = raw_start
-
-        if start is None or end is None or end < start:
-            return None
-
-        segment: dict[str, Any] = {
-            "start": start,
-            "end": end,
-            "text": text,
-            "language": raw_segment.get("language"),
-            "language_probability": raw_segment.get("language_probability"),
-            "speaker": speaker,
-        }
-
-        speaker_confidence = self._average_speaker_confidence(group_words)
-
-        if speaker_confidence is not None:
-            segment["speaker_confidence"] = speaker_confidence
-
-        return segment
-
-    def _extract_segment_words(
-        self,
-        raw_words: list[Any],
-    ) -> list[_SegmentWord]:
-        words: list[_SegmentWord] = []
-
-        for raw_word in raw_words:
-            if not isinstance(raw_word, dict):
-                continue
-
-            text = self._extract_word_text(raw_word)
-
-            if text is None:
-                continue
-
-            words.append(
-                _SegmentWord(
-                    text=text,
-                    speaker=self._normalize_text(raw_word.get("speaker")),
-                    start_seconds=self._get_float(raw_word, "start"),
-                    end_seconds=self._get_float(raw_word, "end"),
-                    speaker_confidence=self._get_float(
-                        raw_word,
-                        "speaker_confidence",
-                        "speaker_probability",
-                    ),
-                )
-            )
-
-        return words
-
-    def _extract_word_text(
-        self,
-        raw_word: dict[str, Any],
-    ) -> str | None:
-        for key in ("word", "text"):
-            value = raw_word.get(key)
-
+        data: dict[str, Any],
+        *keys: str,
+    ) -> int | None:
+        for key in keys:
+            value = data.get(key)
             if value is None:
                 continue
-
-            text = str(value)
-
-            if text.strip():
-                return text
-
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
         return None
-
-    def _join_word_texts(
-        self,
-        raw_words: list[str],
-    ) -> str:
-        parts: list[str] = []
-
-        for raw_word in raw_words:
-            if not raw_word.strip():
-                continue
-
-            if not parts:
-                parts.append(raw_word.strip())
-                continue
-
-            stripped_word = raw_word.strip()
-
-            if raw_word[:1].isspace():
-                parts.append(raw_word)
-                continue
-
-            if stripped_word.startswith(("'", ".", ",", "!", "?", ":", ";", "%", ")", "]", "}")):
-                parts.append(stripped_word)
-                continue
-
-            if stripped_word.startswith("n't"):
-                parts.append(stripped_word)
-                continue
-
-            parts.append(f" {stripped_word}")
-
-        return "".join(parts).strip()
-
-    def _first_word_start(
-        self,
-        words: list[_SegmentWord],
-    ) -> float | None:
-        for word in words:
-            if word.start_seconds is not None:
-                return word.start_seconds
-
-        return None
-
-    def _last_word_end(
-        self,
-        words: list[_SegmentWord],
-    ) -> float | None:
-        for word in reversed(words):
-            if word.end_seconds is not None:
-                return word.end_seconds
-
-        return None
-
-    def _average_speaker_confidence(
-        self,
-        words: list[_SegmentWord],
-    ) -> float | None:
-        values = [
-            word.speaker_confidence
-            for word in words
-            if word.speaker_confidence is not None
-        ]
-
-        if not values:
-            return None
-
-        return sum(values) / len(values)
 
     def _get_float(
         self,

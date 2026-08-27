@@ -144,6 +144,32 @@ class MessageTraceService:
                     status=content.job.status,
                 )
             )
+        if content is not None:
+            for request in content.download_requests:
+                if request.delivery_error:
+                    failures.append(
+                        FailureInfo(
+                            source="content_processing.download",
+                            message=request.delivery_error,
+                            status=request.delivery_status,
+                        )
+                    )
+                if request.job is not None and request.job.error_message:
+                    failures.append(
+                        FailureInfo(
+                            source="content_processing.download_job",
+                            message=request.job.error_message,
+                            status=request.job.status,
+                        )
+                    )
+                if request.dubbing is not None and request.dubbing.error_message:
+                    failures.append(
+                        FailureInfo(
+                            source="content_processing.dubbing",
+                            message=request.dubbing.error_message,
+                            status=request.dubbing.status,
+                        )
+                    )
         if ingress_outbox is not None and ingress_outbox.last_error:
             failures.append(
                 FailureInfo(
@@ -239,23 +265,32 @@ class MessageTraceService:
         self,
         message: UserMessageRow,
     ) -> tuple[ContentProcessingView | None, DbAvailability]:
-        if message.attachment is None:
-            return (
-                ContentProcessingView(
-                    job=None,
-                    source=None,
-                    not_applicable=True,
-                ),
-                DbAvailability.SKIPPED,
-            )
         try:
             async with self._databases.session(DbName.CONTENT_PROCESSING) as session:
                 reader = ContentProcessingReader(session)
 
                 async def _load() -> ContentProcessingView:
+                    downloads = tuple(
+                        await reader.list_download_requests_for_message(
+                            ingress_message_id=message.id,
+                            chat_id=message.chat_id,
+                            telegram_message_id=message.message_id,
+                        )
+                    )
+                    if message.attachment is None:
+                        return ContentProcessingView(
+                            job=None,
+                            source=None,
+                            download_requests=downloads,
+                            not_applicable=not downloads,
+                        )
                     source = await reader.get_source_by_ingress_message_id(message.id)
                     if source is None:
-                        return ContentProcessingView(job=None, source=None)
+                        return ContentProcessingView(
+                            job=None,
+                            source=None,
+                            download_requests=downloads,
+                        )
                     job = await reader.get_job(source.job_id)
                     assets = await reader.list_assets(source.job_id)
                     outbox_events = await reader.list_outbox(source.job_id)
@@ -283,6 +318,7 @@ class MessageTraceService:
                         assets=masked_assets,
                         outbox_events=tuple(outbox_events),
                         transcript=transcript,
+                        download_requests=downloads,
                     )
 
                 view = await asyncio.wait_for(

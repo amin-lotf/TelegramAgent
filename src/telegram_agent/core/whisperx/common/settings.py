@@ -5,7 +5,17 @@ from typing import Any,  get_args
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from telegram_agent.core.whisperx.common.const import DEFAULT_WHISPERX_MODEL
+from telegram_agent.core.whisperx.common.const import (
+    DEFAULT_WHISPERX_MERGE_SAME_SPEAKER_ONLY,
+    DEFAULT_WHISPERX_MODEL,
+    DEFAULT_WHISPERX_SEGMENT_MAX_DURATION_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_MAX_WORD_COUNT,
+    DEFAULT_WHISPERX_SEGMENT_MIN_DURATION_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_MIN_WORD_COUNT,
+    DEFAULT_WHISPERX_SEGMENT_PAUSE_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_TARGET_DURATION_SECONDS,
+    DEFAULT_WHISPERX_SEGMENT_TARGET_WORD_COUNT,
+)
 
 
 def _is_optional_string(annotation: Any) -> bool:
@@ -84,6 +94,82 @@ class Settings(BaseSettings):
         gt=0,
     )
 
+    whisperx_merge_same_speaker_only: bool = Field(
+        default=DEFAULT_WHISPERX_MERGE_SAME_SPEAKER_ONLY,
+        validation_alias=AliasChoices(
+            "WHISPERX_MERGE_SAME_SPEAKER_ONLY",
+            "whisperx_merge_same_speaker_only",
+        ),
+        description=(
+            "When merging adjacent Whisper segments, refuse to merge when both "
+            "segments have known different speakers."
+        ),
+    )
+
+    whisperx_segment_target_duration_seconds: float = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_TARGET_DURATION_SECONDS,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_TARGET_DURATION_SECONDS",
+            "whisperx_segment_target_duration_seconds",
+        ),
+        gt=0,
+        description="Preferred duration for a word-aligned transcript segment.",
+    )
+    whisperx_segment_min_duration_seconds: float = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_MIN_DURATION_SECONDS,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_MIN_DURATION_SECONDS",
+            "whisperx_segment_min_duration_seconds",
+        ),
+        gt=0,
+        description="Minimum useful duration used when rebalancing transcript segments.",
+    )
+    whisperx_segment_max_duration_seconds: float = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_MAX_DURATION_SECONDS,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_MAX_DURATION_SECONDS",
+            "whisperx_segment_max_duration_seconds",
+        ),
+        gt=0,
+        description="Hard maximum duration for word-aligned transcript segments.",
+    )
+    whisperx_segment_target_word_count: int = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_TARGET_WORD_COUNT,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_TARGET_WORD_COUNT",
+            "whisperx_segment_target_word_count",
+        ),
+        gt=0,
+        description="Preferred aligned word-unit count per transcript segment.",
+    )
+    whisperx_segment_min_word_count: int = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_MIN_WORD_COUNT,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_MIN_WORD_COUNT",
+            "whisperx_segment_min_word_count",
+        ),
+        gt=0,
+        description="Minimum useful aligned word-unit count used when rebalancing.",
+    )
+    whisperx_segment_max_word_count: int = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_MAX_WORD_COUNT,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_MAX_WORD_COUNT",
+            "whisperx_segment_max_word_count",
+        ),
+        gt=0,
+        description="Hard maximum aligned word-unit count per transcript segment.",
+    )
+    whisperx_segment_pause_seconds: float = Field(
+        default=DEFAULT_WHISPERX_SEGMENT_PAUSE_SECONDS,
+        validation_alias=AliasChoices(
+            "WHISPERX_SEGMENT_PAUSE_SECONDS",
+            "whisperx_segment_pause_seconds",
+        ),
+        gt=0,
+        description="Inter-word gap treated as a meaningful split boundary.",
+    )
+
     LOG_LEVEL: str = Field(
         default="DEBUG",
         description="Logging level for the application.",
@@ -107,6 +193,27 @@ class Settings(BaseSettings):
             if isinstance(value, str) and not value.strip():
                 normalized[field_name] = None
         return normalized
+
+    @model_validator(mode="after")
+    def _validate_whisperx_segment_limits(self) -> "Settings":
+        if not (
+            self.whisperx_segment_min_duration_seconds
+            <= self.whisperx_segment_target_duration_seconds
+            <= self.whisperx_segment_max_duration_seconds
+        ):
+            raise ValueError(
+                "WhisperX segment duration limits must satisfy minimum <= target <= maximum"
+            )
+        if not (
+            self.whisperx_segment_min_word_count
+            <= self.whisperx_segment_target_word_count
+            <= self.whisperx_segment_max_word_count
+        ):
+            raise ValueError(
+                "WhisperX segment word-count limits must satisfy minimum <= target <= maximum"
+            )
+        return self
+
 
 def load_settings_or_die() -> Settings:
     try:
