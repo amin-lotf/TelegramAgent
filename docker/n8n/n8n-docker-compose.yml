@@ -1,8 +1,21 @@
 services:
+  n8n-data-init:
+    image: docker.n8n.io/n8nio/n8n:stable
+    container_name: n8n_data_init
+    user: "0:0"
+    volumes:
+      - ./docker_data/n8n:/home/node/.n8n
+    entrypoint: ["chown", "-R", "node:node", "/home/node/.n8n"]
+    restart: "no"
+    networks:
+      - fatol-net
   n8n:
     image: docker.n8n.io/n8nio/n8n:stable
     container_name: n8n
     restart: unless-stopped
+    depends_on:
+      n8n-data-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:5678:5678"
     env_file:
@@ -22,12 +35,8 @@ services:
       - N8N_DIAGNOSTICS_ENABLED=false
       - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
-      - n8n_data:/home/node/.n8n
+      - ./docker_data/n8n:/home/node/.n8n
     networks:
       - fatol-net
-volumes:
-  n8n_data:
-    external: true
-    name: webanalyzer_n8n_data
 networks:
   fatol-net:

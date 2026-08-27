@@ -268,6 +268,20 @@ def test_interactive_token_is_persisted_before_compose(
     assert values["WHISPERX_HF_TOKEN"] == "hf_prompted"
 
 
+def test_compose_run_does_not_pass_no_build() -> None:
+    command = _MODULE.compose_download_command(token="hf_test")
+    assert "--no-build" not in command
+    assert command[:6] == [
+        "docker",
+        "compose",
+        "--profile",
+        "dubbing-init",
+        "run",
+        "--rm",
+    ]
+    assert "gpu-dubbing-models-init" in command
+
+
 def test_makefile_exposes_build_and_download_models() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert "build:\n" in makefile
@@ -285,5 +299,18 @@ def test_init_service_runs_execute_and_mounts_madlad_cache() -> None:
     assert (
         "../../pretrained_models/madlad-hf-cache:/opt/madlad-hf-cache" in compose
     )
+    assert (
+        "../../pretrained_models/sam-audio-checkpoints:/opt/sam-audio-checkpoints"
+        in compose
+    )
+    assert "SAM_AUDIO_CHECKPOINTS_DIR: /opt/sam-audio-checkpoints" in compose
+    assert (
+        "../../pretrained_models/sam-audio-checkpoints:/app/.checkpoints"
+        in compose
+    )
+    init_block = compose.split("gpu-dubbing-models-init:")[1].split(
+        "gpu-execution-control-worker:"
+    )[0]
+    assert "sam-audio-checkpoints:/app/.checkpoints" not in init_block
     assert "download_cosyvoice_models.py" not in compose
     assert "download_sam_audio_model.py" not in compose

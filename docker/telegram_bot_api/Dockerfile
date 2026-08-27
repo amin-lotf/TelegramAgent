@@ -3,16 +3,23 @@
 
 FROM debian:12-slim AS build
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN set -eux; \
+    printf '%s\n' \
+        'Acquire::Retries "5";' \
+        'Acquire::ForceIPv4 "true";' \
+        > /etc/apt/apt.conf.d/80-retries; \
+    apt-get update -o Acquire::Retries=5 --fix-missing; \
+    apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         cmake \
         gperf \
         git \
         libssl-dev \
-        zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+        zlib1g-dev; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
@@ -34,14 +41,21 @@ RUN cmake \
 
 FROM debian:12-slim
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN set -eux; \
+    printf '%s\n' \
+        'Acquire::Retries "5";' \
+        'Acquire::ForceIPv4 "true";' \
+        > /etc/apt/apt.conf.d/80-retries; \
+    apt-get update -o Acquire::Retries=5 --fix-missing; \
+    apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         libssl3 \
-        zlib1g \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /var/lib/telegram-bot-api /tmp/telegram-bot-api
+        zlib1g; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /var/lib/telegram-bot-api /tmp/telegram-bot-api
 
 COPY --from=build /usr/local/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
 

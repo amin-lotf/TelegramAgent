@@ -60,11 +60,11 @@ async def check_telegram_user(
             was_verification_request=False,
             message=None,
         )
-    if not payload.password:
+    if not payload.password or payload.password.strip() == "/start":
         return TelegramCheckResponse(
             verified=False,
             was_verification_request=True,
-            message="Please provide a password",
+            message="Please enter the password to verify your account",
         )
 
     command = VerifyTelegramUserCommand(

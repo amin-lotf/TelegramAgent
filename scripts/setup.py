@@ -3,13 +3,16 @@
 
 Copies every `.env.*.example` to `.env.*` (overwriting existing files),
 generates shared internal tokens/secrets, and writes user-provided OpenAI,
-Telegram, Hugging Face, and admin-dashboard credentials.
+Telegram, n8n webhook, Hugging Face, and admin-dashboard credentials.
+Telegram user verification stores HMAC hash and secret, never the password.
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
+import hmac
 import os
 import secrets
 import sys
@@ -23,6 +26,10 @@ OPENAI_API_KEY = "OPENAI_API_KEY"
 TELEGRAM_BOT_TOKEN = "TELEGRAM_BOT_TOKEN"
 TELEGRAM_API_ID = "TELEGRAM_API_ID"
 TELEGRAM_API_HASH = "TELEGRAM_API_HASH"
+WEBHOOK_URL = "WEBHOOK_URL"
+TELEGRAM_VERIFY_PASSWORD = "TELEGRAM_VERIFY_PASSWORD"
+BOT_VERIFY_SECRET = "BOT_VERIFY_SECRET"
+BOT_VERIFY_HASH = "BOT_VERIFY_HASH"
 HF_TOKEN = "HF_TOKEN"
 WHISPERX_HF_TOKEN = "WHISPERX_HF_TOKEN"
 ADMIN_PASSWORD = "ADMIN_PASSWORD"
@@ -34,14 +41,13 @@ USER_PROVIDED_KEYS = {
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_API_ID,
     TELEGRAM_API_HASH,
+    WEBHOOK_URL,
     HF_TOKEN,
     WHISPERX_HF_TOKEN,
     ADMIN_PASSWORD,
 }
 GENERATED_EXACT_KEYS = {
     "N8N_CALLBACK_TOKEN",
-    "BOT_VERIFY_SECRET",
-    "BOT_VERIFY_HASH",
     "SESSION_SECRET",
 }
 
@@ -50,6 +56,8 @@ _PROMPT_LABELS = {
     TELEGRAM_BOT_TOKEN: "Telegram bot token",
     TELEGRAM_API_ID: "Telegram API ID",
     TELEGRAM_API_HASH: "Telegram API hash",
+    WEBHOOK_URL: "n8n webhook URL",
+    TELEGRAM_VERIFY_PASSWORD: "Telegram verification password",
     HF_TOKEN: "Hugging Face token (optional, press Enter to skip)",
     ADMIN_PASSWORD: 'Admin password (optional, press Enter for "admin")',
 }
@@ -65,6 +73,8 @@ class UserCredentials:
     telegram_bot_token: str
     telegram_api_id: str
     telegram_api_hash: str
+    webhook_url: str
+    telegram_verify_password: str
     hf_token: str = ""
     admin_password: str = DEFAULT_ADMIN_PASSWORD
 
@@ -74,11 +84,28 @@ class UserCredentials:
             TELEGRAM_BOT_TOKEN: self.telegram_bot_token,
             TELEGRAM_API_ID: self.telegram_api_id,
             TELEGRAM_API_HASH: self.telegram_api_hash,
+            WEBHOOK_URL: self.webhook_url,
             HF_TOKEN: self.hf_token,
             WHISPERX_HF_TOKEN: self.hf_token,
             ADMIN_PASSWORD: self.admin_password,
         }
         return mapping[key]
+
+
+def generate_password_hash(password: str, secret: str) -> str:
+    return hmac.new(
+        secret.encode("utf-8"),
+        password.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def bot_verify_values(password: str) -> dict[str, str]:
+    secret = secrets.token_urlsafe(64)
+    return {
+        BOT_VERIFY_SECRET: secret,
+        BOT_VERIFY_HASH: generate_password_hash(password, secret),
+    }
 
 
 def is_generated_secret(key: str) -> bool:
@@ -165,6 +192,7 @@ def values_for_file(credentials: UserCredentials, generated: dict[str, str]) -> 
     values = dict(generated)
     for key in USER_PROVIDED_KEYS:
         values[key] = credentials.value_for(key)
+    values.update(bot_verify_values(credentials.telegram_verify_password))
     return values
 
 
@@ -185,10 +213,11 @@ def setup_env_files(root: Path, credentials: UserCredentials) -> list[Path]:
     return written
 
 
-def _read_required(name: str, *, interactive: bool) -> str:
+def _read_required(name: str, *, interactive: bool, secret: bool = True) -> str:
     label = _PROMPT_LABELS[name]
     if interactive:
-        value = getpass.getpass(f"{label}: ").strip()
+        prompt = f"{label}: "
+        value = (getpass.getpass(prompt) if secret else input(prompt)).strip()
     else:
         value = os.environ.get(name, "").strip()
     if not value:
@@ -215,6 +244,10 @@ def collect_credentials(*, interactive: bool) -> UserCredentials:
         telegram_bot_token=_read_required(TELEGRAM_BOT_TOKEN, interactive=interactive),
         telegram_api_id=_read_required(TELEGRAM_API_ID, interactive=interactive),
         telegram_api_hash=_read_required(TELEGRAM_API_HASH, interactive=interactive),
+        webhook_url=_read_required(WEBHOOK_URL, interactive=interactive, secret=False),
+        telegram_verify_password=_read_required(
+            TELEGRAM_VERIFY_PASSWORD, interactive=interactive
+        ),
         hf_token=_read_optional(HF_TOKEN, "", interactive=interactive),
         admin_password=_read_optional(
             ADMIN_PASSWORD, DEFAULT_ADMIN_PASSWORD, interactive=interactive
@@ -226,6 +259,8 @@ def print_summary(credentials: UserCredentials) -> None:
     print("✓ OpenAI configured")
     print("✓ Telegram configured")
     print("✓ Telegram API configured")
+    print("✓ n8n webhook configured")
+    print("✓ Telegram user verification configured")
     if credentials.hf_token:
         print("✓ Hugging Face configured")
     else:
@@ -252,7 +287,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Read credentials from environment variables instead of prompting. "
             "Required: OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, "
-            "TELEGRAM_API_HASH. Optional: HF_TOKEN, ADMIN_PASSWORD."
+            "TELEGRAM_API_HASH, WEBHOOK_URL, TELEGRAM_VERIFY_PASSWORD. "
+            "Optional: HF_TOKEN, ADMIN_PASSWORD."
         ),
     )
     args = parser.parse_args(argv)

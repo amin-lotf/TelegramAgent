@@ -93,7 +93,7 @@ services:
       COSYVOICE_MODEL_ID: ${COSYVOICE_MODEL_ID:-FunAudioLLM/Fun-CosyVoice3-0.5B-2512}
       COSYVOICE_MODEL_DIR: /opt/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B
       SAM_AUDIO_MODEL: ${SAM_AUDIO_MODEL:-facebook/sam-audio-small}
-      SAM_AUDIO_CHECKPOINTS_DIR: /app/.checkpoints
+      SAM_AUDIO_CHECKPOINTS_DIR: /opt/sam-audio-checkpoints
       MADLAD_MODEL_ID: ${MADLAD_MODEL_ID:-google/madlad400-3b-mt}
       MADLAD_HF_HOME: /opt/madlad-hf-cache
       WHISPERX_MODEL: ${WHISPERX_MODEL:-large-v3}
@@ -102,7 +102,7 @@ services:
       - ../../.cache/huggingface:/root/.cache/huggingface
       - ../../.cache/cosyvoice:/opt/CosyVoice/pretrained_models
       - ../..:/app:ro
-      - ../../pretrained_models/sam-audio-checkpoints:/app/.checkpoints
+      - ../../pretrained_models/sam-audio-checkpoints:/opt/sam-audio-checkpoints
       - ../../pretrained_models/madlad-hf-cache:/opt/madlad-hf-cache
     networks:
       - fatol-net

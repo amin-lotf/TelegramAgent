@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib.util
 import sys
 from pathlib import Path
@@ -18,6 +20,8 @@ CREDENTIALS = _MODULE.UserCredentials(
     telegram_bot_token="123:bot-token",
     telegram_api_id="111111",
     telegram_api_hash="api-hash",
+    webhook_url="https://n8n.example.com/",
+    telegram_verify_password="verify-secret-password",
     hf_token="",
     admin_password="admin",
 )
@@ -148,6 +152,8 @@ def test_hugging_face_token_copied_to_whisperx_key(tmp_path: Path) -> None:
         telegram_bot_token="123:bot-token",
         telegram_api_id="111111",
         telegram_api_hash="api-hash",
+        webhook_url="https://n8n.example.com/",
+        telegram_verify_password="verify-secret-password",
         hf_token="hf_test_token",
         admin_password="admin",
     )
@@ -188,6 +194,45 @@ def test_database_urls_with_change_me_are_not_rewritten(tmp_path: Path) -> None:
     assert values["ADMIN_PASSWORD"] == "admin"
 
 
+def test_webhook_url_is_written_to_n8n_env(tmp_path: Path) -> None:
+    _write_example(
+        tmp_path,
+        "docker/n8n/.env.n8n.docker.example",
+        "WEBHOOK_URL=\nN8N_EDITOR_BASE_URL=https://ops.com/\nN8N_ENCRYPTION_KEY=replace-me\n",
+    )
+
+    _MODULE.setup_env_files(tmp_path, CREDENTIALS)
+
+    values = _env(tmp_path / "docker/n8n/.env.n8n.docker")
+    assert values["WEBHOOK_URL"] == "https://n8n.example.com/"
+    assert values["N8N_EDITOR_BASE_URL"] == "https://ops.com/"
+    assert values["N8N_ENCRYPTION_KEY"] != "replace-me"
+
+
+def test_bot_verify_hash_is_hmac_of_chosen_password(tmp_path: Path) -> None:
+    password = "verify-secret-password"
+    _write_example(
+        tmp_path,
+        "docker/app/.env.telegram_auth.docker.example",
+        "BOT_VERIFY_HASH=replace-me\nBOT_VERIFY_SECRET=replace-me\nAUTH_SERVICE_TOKEN=replace-me\n",
+    )
+
+    _MODULE.setup_env_files(tmp_path, CREDENTIALS)
+
+    dest = tmp_path / "docker/app/.env.telegram_auth.docker"
+    contents = dest.read_text(encoding="utf-8")
+    values = _env(dest)
+    assert password not in contents
+    assert values["BOT_VERIFY_SECRET"] not in {password, "replace-me", ""}
+    expected = hmac.new(
+        values["BOT_VERIFY_SECRET"].encode("utf-8"),
+        password.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    assert values["BOT_VERIFY_HASH"] == expected
+    assert values["BOT_VERIFY_HASH"] != "replace-me"
+
+
 def test_empty_example_file_writes_empty_destination(tmp_path: Path) -> None:
     _write_example(tmp_path, "docker/storage/.env.storage.docker.example", "")
 
@@ -212,10 +257,56 @@ def test_non_interactive_missing_required_env_fails_before_writing(
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_API_ID",
         "TELEGRAM_API_HASH",
+        "WEBHOOK_URL",
+        "TELEGRAM_VERIFY_PASSWORD",
         "HF_TOKEN",
         "ADMIN_PASSWORD",
     ):
         monkeypatch.delenv(key, raising=False)
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 1
+    assert not dest.exists()
+
+
+def test_non_interactive_missing_webhook_url_fails_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    example = _write_example(
+        tmp_path,
+        "docker/n8n/.env.n8n.docker.example",
+        "WEBHOOK_URL=\n",
+    )
+    dest = example.with_name(".env.n8n.docker")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-from-env")
+    monkeypatch.setenv("TELEGRAM_API_ID", "42")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "hash-from-env")
+    monkeypatch.setenv("TELEGRAM_VERIFY_PASSWORD", "verify-from-env")
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 1
+    assert not dest.exists()
+
+
+def test_non_interactive_missing_verify_password_fails_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    example = _write_example(
+        tmp_path,
+        "docker/app/.env.telegram_auth.docker.example",
+        "BOT_VERIFY_HASH=replace-me\nBOT_VERIFY_SECRET=replace-me\n",
+    )
+    dest = example.with_name(".env.telegram_auth.docker")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-from-env")
+    monkeypatch.setenv("TELEGRAM_API_ID", "42")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "hash-from-env")
+    monkeypatch.setenv("WEBHOOK_URL", "https://hooks.example.com/")
+    monkeypatch.delenv("TELEGRAM_VERIFY_PASSWORD", raising=False)
 
     exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
 
@@ -241,10 +332,22 @@ def test_non_interactive_reads_env_and_defaults_admin(
         "docker/telegram_bot_api/.env.telegram_bot_api.docker.example",
         "TELEGRAM_API_ID=\nTELEGRAM_API_HASH=\n",
     )
+    _write_example(
+        tmp_path,
+        "docker/n8n/.env.n8n.docker.example",
+        "WEBHOOK_URL=\n",
+    )
+    _write_example(
+        tmp_path,
+        "docker/app/.env.telegram_auth.docker.example",
+        "BOT_VERIFY_HASH=replace-me\nBOT_VERIFY_SECRET=replace-me\n",
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-from-env")
     monkeypatch.setenv("TELEGRAM_API_ID", "42")
     monkeypatch.setenv("TELEGRAM_API_HASH", "hash-from-env")
+    monkeypatch.setenv("WEBHOOK_URL", "https://hooks.example.com/")
+    monkeypatch.setenv("TELEGRAM_VERIFY_PASSWORD", "verify-from-env")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
 
@@ -254,9 +357,22 @@ def test_non_interactive_reads_env_and_defaults_admin(
     assert _env(tmp_path / "docker/app/.env.llm_gateway.docker")["OPENAI_API_KEY"] == "sk-from-env"
     assert _env(tmp_path / "docker/app/.env.llm_gateway.docker")["TELEGRAM_BOT_TOKEN"] == "bot-from-env"
     assert _env(tmp_path / "docker/telegram_bot_api/.env.telegram_bot_api.docker")["TELEGRAM_API_ID"] == "42"
+    assert _env(tmp_path / "docker/n8n/.env.n8n.docker")["WEBHOOK_URL"] == "https://hooks.example.com/"
+    auth = _env(tmp_path / "docker/app/.env.telegram_auth.docker")
+    expected_hash = hmac.new(
+        auth["BOT_VERIFY_SECRET"].encode("utf-8"),
+        b"verify-from-env",
+        hashlib.sha256,
+    ).hexdigest()
+    assert auth["BOT_VERIFY_HASH"] == expected_hash
+    assert "verify-from-env" not in (
+        tmp_path / "docker/app/.env.telegram_auth.docker"
+    ).read_text(encoding="utf-8")
     assert _env(tmp_path / "docker/admin_dashboard/.env.admin_dashboard.docker")["ADMIN_PASSWORD"] == "admin"
     output = capsys.readouterr().out
     assert "✓ OpenAI configured" in output
+    assert "✓ n8n webhook configured" in output
+    assert "✓ Telegram user verification configured" in output
     assert "○ Hugging Face disabled" in output
     assert "Run: make build" in output
     assert "make download-models" in output
@@ -272,4 +388,7 @@ def test_is_generated_secret_does_not_match_token_count_settings() -> None:
     assert not _MODULE.is_generated_secret("OPENAI_API_KEY")
     assert not _MODULE.is_generated_secret("TELEGRAM_BOT_TOKEN")
     assert not _MODULE.is_generated_secret("ADMIN_PASSWORD")
+    assert not _MODULE.is_generated_secret("WEBHOOK_URL")
+    assert not _MODULE.is_generated_secret("BOT_VERIFY_SECRET")
+    assert not _MODULE.is_generated_secret("BOT_VERIFY_HASH")
     assert not _MODULE.is_generated_secret("DB_POSTGRESDB_PASSWORD")

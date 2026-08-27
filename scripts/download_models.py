@@ -499,14 +499,8 @@ def execute_downloads(
     return EXIT_OK
 
 
-def run_compose_download(*, root: Path, token: str) -> int:
-    env = os.environ.copy()
-    env["HOST_UID"] = str(os.getuid())
-    env["HOST_GID"] = str(os.getgid())
-    if token:
-        env[HF_TOKEN] = token
-        env[WHISPERX_HF_TOKEN] = token
-    command = [
+def compose_download_command(*, token: str) -> list[str]:
+    return [
         "docker",
         "compose",
         "--profile",
@@ -514,12 +508,21 @@ def run_compose_download(*, root: Path, token: str) -> int:
         "run",
         "--rm",
         "--no-deps",
-        "--no-build",
         "-T",
         "-e",
         f"{HF_TOKEN}={token}",
         "gpu-dubbing-models-init",
     ]
+
+
+def run_compose_download(*, root: Path, token: str) -> int:
+    env = os.environ.copy()
+    env["HOST_UID"] = str(os.getuid())
+    env["HOST_GID"] = str(os.getgid())
+    if token:
+        env[HF_TOKEN] = token
+        env[WHISPERX_HF_TOKEN] = token
+    command = compose_download_command(token=token)
     try:
         completed = subprocess.run(command, cwd=root, env=env, check=False)
     except FileNotFoundError as exc:

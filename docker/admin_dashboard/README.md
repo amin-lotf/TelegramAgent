@@ -19,7 +19,9 @@ docker compose up -d --build admin-dashboard
 
 3. Open http://127.0.0.1:8010/login
 
-## Read-only database roles (recommended)
+Local Docker Compose creates the `telegram` user; the example env uses that so the dashboard works after `make setup`.
+
+## Read-only database roles (recommended for shared/staging/production)
 
 On each service Postgres, create a role that can only `SELECT`:
 
