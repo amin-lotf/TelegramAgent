@@ -180,6 +180,32 @@ class AgentRuntimeReader:
             for row in result
         ]
 
+    async def list_agent_messages_by_ingress_ids(
+        self,
+        ingress_message_ids: list[UUID],
+    ) -> list[AgentMessageRow]:
+        if not ingress_message_ids:
+            return []
+        tbl = tables.agent_messages
+        result = await self._session.execute(
+            select(tbl)
+            .where(tbl.c.ingress_message_id.in_(ingress_message_ids))
+            .order_by(tbl.c.created_at.asc(), tbl.c.id.asc())
+        )
+        return [
+            AgentMessageRow(
+                id=row.id,
+                ingress_message_id=row.ingress_message_id,
+                chat_id=row.chat_id,
+                telegram_user_id=row.telegram_user_id,
+                group_id=row.group_id,
+                text=row.text,
+                role=row.role,
+                created_at=row.created_at,
+            )
+            for row in result
+        ]
+
     async def list_pipeline_status_by_ingress_ids(
         self,
         ingress_ids: list[UUID],

@@ -22,6 +22,7 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     AgentRuntimeView,
     AuthUserRow,
     ContentProcessingView,
+    DownloadRequestView,
     FailureInfo,
     MediaAssetRow,
     MessageTrace,
@@ -29,8 +30,36 @@ from telegram_agent.core.admin_dashboard.services.view_models import (
     RuntimeMessageRow,
     UserMessageRow,
 )
+from telegram_agent.core.admin_dashboard.services.workflows import (
+    build_workflow_collection,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def classify_download_requests(
+    *,
+    message: UserMessageRow,
+    candidates: list[DownloadRequestView],
+    direct_agent_ids: tuple[UUID, ...],
+) -> tuple[tuple[DownloadRequestView, ...], tuple[DownloadRequestView, ...]]:
+    """Separate creator-owned workflows from source-media relationships."""
+    direct: list[DownloadRequestView] = []
+    related: list[DownloadRequestView] = []
+    for request in candidates:
+        exact_creator = request.agent_message_id in direct_agent_ids
+        # Compatibility path for traces where agent-runtime data is unavailable.
+        # The reader has already constrained these rows to the same Telegram chat.
+        fallback_creator = (
+            not exact_creator
+            and request.reply_to_message_id == message.message_id
+            and request.creator_ingress_message_id is None
+        )
+        if exact_creator or fallback_creator:
+            direct.append(request)
+        elif request.media_ingress_message_id == message.id:
+            related.append(request)
+    return tuple(direct), tuple(related)
 
 
 class MessageTraceService:
@@ -91,12 +120,11 @@ class MessageTraceService:
                 db_availability=availability,
             )
 
-        content_task = asyncio.create_task(self._load_content(message))
         runtime_task = asyncio.create_task(self._load_runtime(ingress_message_id, message.chat_id))
         auth_task = asyncio.create_task(self._load_auth(message.telegram_user_id))
 
-        content, content_status = await content_task
         runtime, runtime_status = await runtime_task
+        content, content_status = await self._load_content(message, runtime)
         auth_user, auth_status = await auth_task
 
         availability[DbName.CONTENT_PROCESSING] = content_status
@@ -214,6 +242,12 @@ class MessageTraceService:
             cp_available=content_status == DbAvailability.OK,
             runtime_available=runtime_status == DbAvailability.OK,
         )
+        workflows = build_workflow_collection(
+            message=message,
+            content=content,
+            runtime=runtime,
+            cp_available=content_status == DbAvailability.OK,
+        )
 
         return MessageTrace(
             found=True,
@@ -232,6 +266,7 @@ class MessageTraceService:
                 message.text,
                 mask=self._settings.mask_message_text,
             ),
+            workflows=workflows,
         )
 
     async def _load_ingress(
@@ -264,25 +299,42 @@ class MessageTraceService:
     async def _load_content(
         self,
         message: UserMessageRow,
+        runtime: AgentRuntimeView | None,
     ) -> tuple[ContentProcessingView | None, DbAvailability]:
         try:
             async with self._databases.session(DbName.CONTENT_PROCESSING) as session:
                 reader = ContentProcessingReader(session)
 
                 async def _load() -> ContentProcessingView:
-                    downloads = tuple(
-                        await reader.list_download_requests_for_message(
-                            ingress_message_id=message.id,
-                            chat_id=message.chat_id,
-                            telegram_message_id=message.message_id,
-                        )
+                    agent_messages = runtime.agent_messages if runtime is not None else ()
+                    creator_by_agent_id = {
+                        item.id: item.ingress_message_id for item in agent_messages
+                    }
+                    direct_agent_ids = tuple(
+                        item.id
+                        for item in agent_messages
+                        if item.ingress_message_id == message.id
+                        and item.role == "download_agent"
+                    )
+                    candidates = await reader.list_download_requests_for_message(
+                        ingress_message_id=message.id,
+                        chat_id=message.chat_id,
+                        telegram_message_id=message.message_id,
+                        agent_message_ids=direct_agent_ids,
+                        creator_by_agent_message_id=creator_by_agent_id,
+                    )
+                    downloads, related = classify_download_requests(
+                        message=message,
+                        candidates=candidates,
+                        direct_agent_ids=direct_agent_ids,
                     )
                     if message.attachment is None:
                         return ContentProcessingView(
                             job=None,
                             source=None,
                             download_requests=downloads,
-                            not_applicable=not downloads,
+                            related_download_requests=related,
+                            not_applicable=not downloads and not related,
                         )
                     source = await reader.get_source_by_ingress_message_id(message.id)
                     if source is None:
@@ -290,6 +342,7 @@ class MessageTraceService:
                             job=None,
                             source=None,
                             download_requests=downloads,
+                            related_download_requests=related,
                         )
                     job = await reader.get_job(source.job_id)
                     assets = await reader.list_assets(source.job_id)
@@ -319,6 +372,7 @@ class MessageTraceService:
                         outbox_events=tuple(outbox_events),
                         transcript=transcript,
                         download_requests=downloads,
+                        related_download_requests=related,
                     )
 
                 view = await asyncio.wait_for(

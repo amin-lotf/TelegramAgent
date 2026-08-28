@@ -77,6 +77,12 @@
             · 📎 {{ item.attachment_type }} ({{ item.attachment_status }})
           {% endif %}
         </div>
+        {% if item.workflow_state %}
+          <div class="workflow-list-summary">
+            <span class="badge workflow-{{ item.workflow_state.value }}">{{ item.workflow_state_label }}</span>
+            <span class="meta">{{ item.workflow_current_stage }}{% if item.workflow_count > 1 %} · {{ item.workflow_count }} workflows{% endif %}</span>
+          </div>
+        {% endif %}
       </a>
     {% endfor %}
   </div>

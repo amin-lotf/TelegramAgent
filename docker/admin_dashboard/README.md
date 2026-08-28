@@ -38,5 +38,9 @@ Point the `*_RO_DATABASE_URL` variables at that role.
 ## Notes
 
 - The dashboard never writes to service databases.
+- Message details include a **Workflows** tab that correlates generated content work
+  through agent-runtime and refreshes active workflow stages automatically.
+- `WORKFLOW_POLL_INTERVAL_SECONDS` controls detail-view refresh frequency; the
+  sidebar workflow badges refresh on normal navigation or page reload.
 - Agent-runtime pipeline: rule-based message grouping → download agent → content-processing handoff (intent classification removed).
 - Every settings field must appear in `.env.admin_dashboard.docker.example`.

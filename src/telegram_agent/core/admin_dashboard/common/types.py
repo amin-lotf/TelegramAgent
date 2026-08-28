@@ -55,6 +55,16 @@ class StageStatus(StrEnum):
     COMPLETED = "completed"
     PENDING = "pending"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     NOT_STARTED = "not_started"
     NOT_APPLICABLE = "not_applicable"
+    UNAVAILABLE = "unavailable"
+
+
+class WorkflowState(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
     UNAVAILABLE = "unavailable"

@@ -1,13 +1,13 @@
 """Mask sensitive fields before rendering."""
 from __future__ import annotations
 
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import PurePath, PurePosixPath, PureWindowsPath
 
 
 def mask_path(path: str | None, *, enabled: bool) -> str | None:
     if path is None or not enabled:
         return path
-    pure = PurePosixPath(path)
+    pure: PurePath = PurePosixPath(path)
     if len(pure.parts) <= 1:
         pure = PureWindowsPath(path)
     name = pure.name or path

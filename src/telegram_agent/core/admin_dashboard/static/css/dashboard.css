@@ -519,14 +519,16 @@ input::placeholder {
 }
 
 .state-failed,
-.stage-failed {
+.stage-failed,
+.workflow-failed {
   color: #ffd0d3;
   background: rgba(240, 113, 120, 0.18);
   border-color: rgba(240, 113, 120, 0.45);
 }
 
 .state-completed,
-.stage-completed {
+.stage-completed,
+.workflow-completed {
   color: #c8f5df;
   background: rgba(62, 207, 142, 0.15);
   border-color: rgba(62, 207, 142, 0.4);
@@ -543,6 +545,25 @@ input::placeholder {
   color: #d7e4ff;
   background: rgba(122, 162, 247, 0.15);
   border-color: rgba(122, 162, 247, 0.4);
+}
+
+.workflow-pending,
+.workflow-running {
+  color: #d7e4ff;
+  background: rgba(122, 162, 247, 0.15);
+  border-color: rgba(122, 162, 247, 0.4);
+}
+
+.workflow-cancelled,
+.stage-cancelled {
+  color: #ffe2a0;
+  background: rgba(240, 180, 41, 0.15);
+  border-color: rgba(240, 180, 41, 0.4);
+}
+
+.workflow-unavailable {
+  color: var(--muted);
+  border-style: dashed;
 }
 
 .stage-not_started,
@@ -727,6 +748,78 @@ input::placeholder {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+.workflow-list-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  min-width: 0;
+}
+
+.workflow-list-summary .meta {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-header,
+.related-workflow,
+.related-workflow-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.workflow-header {
+  margin-bottom: 0.85rem;
+}
+
+.workflow-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  text-align: right;
+}
+
+.workflow-stages {
+  margin-top: 0.35rem;
+}
+
+.related-workflows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.related-workflow {
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.related-workflow:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.related-workflow-actions {
+  align-items: center;
+}
+
+[data-workflow-poller].is-stale::before {
+  content: "Live refresh unavailable; showing the last successful workflow state.";
+  display: block;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgba(240, 180, 41, 0.4);
+  border-radius: var(--radius-sm);
+  color: #ffe2a0;
+  background: rgba(240, 180, 41, 0.12);
+  font-size: var(--text-sm);
 }
 
 /* ── Tabs ────────────────────────────────────────────────── */
@@ -963,5 +1056,20 @@ details summary:hover {
 
   table.kv th {
     width: 8rem;
+  }
+
+  .workflow-header,
+  .related-workflow {
+    flex-direction: column;
+  }
+
+  .workflow-summary {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .related-workflow-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 }

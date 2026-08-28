@@ -18,12 +18,17 @@ from telegram_agent.core.admin_dashboard.services.overall_state import (
 )
 from telegram_agent.core.admin_dashboard.services.redact import text_preview
 from telegram_agent.core.admin_dashboard.services.view_models import (
+    AgentMessageRow,
     AgentRuntimeView,
     ContentProcessingView,
+    DownloadRequestView,
     JobRow,
     MessageListItem,
     MessageListResult,
     UserMessageRow,
+)
+from telegram_agent.core.admin_dashboard.services.workflows import (
+    build_workflow_collection,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,13 +121,36 @@ class MessageListService:
             )
 
         ids = [row.id for row in rows]
-        job_statuses, job_availability = await self._job_statuses(ids)
+        job_task = asyncio.create_task(self._job_statuses(ids))
+        agent_task = asyncio.create_task(self._agent_messages(ids))
+        coord_task = asyncio.create_task(self._coord_statuses(ids))
+        job_statuses, job_availability = await job_task
         secondary[DbName.CONTENT_PROCESSING] = job_availability
-        coord_statuses, coord_availability = await self._coord_statuses(ids)
+        agent_messages, agent_availability = await agent_task
+        coord_statuses, coord_availability = await coord_task
         secondary[DbName.AGENT_RUNTIME] = coord_availability
+        if agent_availability != DbAvailability.OK:
+            secondary[DbName.AGENT_RUNTIME] = agent_availability
+
+        creator_by_agent_id = {
+            item.id: item.ingress_message_id
+            for item in agent_messages
+            if item.role == "download_agent"
+        }
+        requests_by_ingress, workflow_availability = await self._workflow_requests(
+            creator_by_agent_id
+        )
+        if workflow_availability in {DbAvailability.ERROR, DbAvailability.TIMEOUT}:
+            secondary[DbName.CONTENT_PROCESSING] = workflow_availability
 
         items = tuple(
-            self._to_item(row, job_statuses.get(row.id), coord_statuses.get(row.id))
+            self._to_item(
+                row,
+                job_statuses.get(row.id),
+                coord_statuses.get(row.id),
+                requests_by_ingress.get(row.id, ()),
+                cp_available=secondary[DbName.CONTENT_PROCESSING] == DbAvailability.OK,
+            )
             for row in rows
         )
         return MessageListResult(
@@ -139,6 +167,9 @@ class MessageListService:
         row: UserMessageRow,
         job_status: str | None,
         coord_status: str | None,
+        download_requests: tuple[DownloadRequestView, ...],
+        *,
+        cp_available: bool,
     ) -> MessageListItem:
         content = None
         if job_status is not None:
@@ -193,6 +224,18 @@ class MessageListService:
                 claim=None,
             )
         state = derive_overall_state(message=row, content=content, runtime=runtime)
+        workflow_content = ContentProcessingView(
+            job=content.job if content is not None else None,
+            source=None,
+            download_requests=download_requests,
+        )
+        workflows = build_workflow_collection(
+            message=row,
+            content=workflow_content,
+            runtime=runtime,
+            cp_available=cp_available,
+        )
+        workflow_summary = workflows.summary
         return MessageListItem(
             id=row.id,
             created_at=row.created_at,
@@ -209,6 +252,16 @@ class MessageListService:
             attachment_status=row.attachment.status if row.attachment else None,
             overall_state=state,
             overall_state_label=overall_state_label(state),
+            workflow_count=workflows.count,
+            workflow_state=(
+                workflow_summary.state if workflow_summary is not None else None
+            ),
+            workflow_state_label=(
+                workflow_summary.state_label if workflow_summary is not None else None
+            ),
+            workflow_current_stage=(
+                workflow_summary.current_stage if workflow_summary is not None else None
+            ),
         )
 
     async def _job_statuses(
@@ -254,4 +307,55 @@ class MessageListService:
             return {}, DbAvailability.TIMEOUT
         except Exception:
             logger.exception("Agent-runtime enrichment failed")
+            return {}, DbAvailability.ERROR
+
+    async def _agent_messages(
+        self,
+        ids: list[UUID],
+    ) -> tuple[list[AgentMessageRow], DbAvailability]:
+        if not ids:
+            return [], DbAvailability.SKIPPED
+        try:
+            async with self._databases.session(DbName.AGENT_RUNTIME) as session:
+                reader = AgentRuntimeReader(session)
+                data = await asyncio.wait_for(
+                    reader.list_agent_messages_by_ingress_ids(ids),
+                    timeout=self._settings.db_query_timeout_seconds,
+                )
+            return data, DbAvailability.OK
+        except TimeoutError:
+            return [], DbAvailability.TIMEOUT
+        except Exception:
+            logger.exception("Agent-message workflow enrichment failed")
+            return [], DbAvailability.ERROR
+
+    async def _workflow_requests(
+        self,
+        creator_by_agent_id: dict[UUID, UUID],
+    ) -> tuple[dict[UUID, tuple[DownloadRequestView, ...]], DbAvailability]:
+        if not creator_by_agent_id:
+            return {}, DbAvailability.SKIPPED
+        try:
+            async with self._databases.session(DbName.CONTENT_PROCESSING) as session:
+                reader = ContentProcessingReader(session)
+                rows = await asyncio.wait_for(
+                    reader.list_download_requests_by_agent_message_ids(
+                        list(creator_by_agent_id),
+                        creator_by_agent_message_id=creator_by_agent_id,
+                    ),
+                    timeout=self._settings.db_query_timeout_seconds,
+                )
+            grouped: dict[UUID, list[DownloadRequestView]] = {}
+            for row in rows:
+                creator = row.creator_ingress_message_id
+                if creator is not None:
+                    grouped.setdefault(creator, []).append(row)
+            return (
+                {key: tuple(value) for key, value in grouped.items()},
+                DbAvailability.OK,
+            )
+        except TimeoutError:
+            return {}, DbAvailability.TIMEOUT
+        except Exception:
+            logger.exception("Content-processing workflow enrichment failed")
             return {}, DbAvailability.ERROR

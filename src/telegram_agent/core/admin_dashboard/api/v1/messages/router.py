@@ -15,8 +15,10 @@ from telegram_agent.core.admin_dashboard.api.v1.auth import AdminUser
 from telegram_agent.core.admin_dashboard.api.v1.dependencies import (
     get_message_list_service,
     get_message_trace_service,
+    get_settings,
 )
 from telegram_agent.core.admin_dashboard.api.v1.messages.schemas import MessageListQuery
+from telegram_agent.core.admin_dashboard.common.settings import Settings
 from telegram_agent.core.admin_dashboard.services.message_list import MessageListService
 from telegram_agent.core.admin_dashboard.services.message_trace import MessageTraceService
 
@@ -78,6 +80,7 @@ async def message_detail(
     query: Annotated[MessageListQuery, Depends()],
     list_service: Annotated[MessageListService, Depends(get_message_list_service)],
     trace_service: Annotated[MessageTraceService, Depends(get_message_trace_service)],
+    app_settings: Annotated[Settings, Depends(get_settings)],
 ) -> HTMLResponse:
     result = await list_service.list_messages(
         page=query.page,
@@ -115,6 +118,34 @@ async def message_detail(
             "selected_id": ingress_message_id,
             "trace": trace,
             "raw_payload": raw_payload,
+            "db_status": db_status,
+            "workflow_poll_interval_seconds": (
+                app_settings.workflow_poll_interval_seconds
+            ),
+        },
+    )
+
+
+@router.get(
+    "/messages/{ingress_message_id}/workflows",
+    response_class=HTMLResponse,
+)
+async def message_workflows_fragment(
+    request: Request,
+    ingress_message_id: UUID,
+    admin_user: AdminUser,
+    trace_service: Annotated[MessageTraceService, Depends(get_message_trace_service)],
+) -> HTMLResponse:
+    trace = await trace_service.get_trace(ingress_message_id)
+    db_status = {
+        name.value: status.value for name, status in trace.db_availability.items()
+    }
+    return _templates(request).TemplateResponse(
+        request,
+        "messages/_workflows.html",
+        {
+            "admin_user": admin_user,
+            "trace": trace,
             "db_status": db_status,
         },
     )

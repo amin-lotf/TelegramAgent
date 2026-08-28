@@ -12,6 +12,7 @@ from telegram_agent.core.admin_dashboard.common.types import (
     OverallState,
     StageKey,
     StageStatus,
+    WorkflowState,
 )
 
 
@@ -233,6 +234,34 @@ class DubbingWorkflowRow:
 
 
 @dataclass(frozen=True, slots=True)
+class TranslationBatchRow:
+    id: UUID
+    batch_index: int
+    start_segment_index: int
+    end_segment_index: int
+    status: str
+    attempt_count: int
+    last_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleTranslationRow:
+    id: UUID
+    job_id: UUID
+    source_language: str | None
+    target_language: str
+    status: str
+    model_name: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+    batches: tuple[TranslationBatchRow, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class DownloadRequestView:
     id: UUID
     job_id: UUID
@@ -245,8 +274,21 @@ class DownloadRequestView:
     assistant_text: str | None
     created_at: datetime
     updated_at: datetime
+    group_id: UUID | None = None
+    agent_message_id: UUID | None = None
+    requested_language: str | None = None
+    requested_format: str | None = None
+    reply_to_message_id: int | None = None
+    final_path_exists: bool = False
+    delivery_attempt_count: int = 0
+    delivered_at: datetime | None = None
+    creator_ingress_message_id: UUID | None = None
     job: JobRow | None = None
+    source_job: JobRow | None = None
+    source_transcript_language: str | None = None
+    translation: SubtitleTranslationRow | None = None
     dubbing: DubbingWorkflowRow | None = None
+    outbox_events: tuple[OutboxRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +299,67 @@ class ContentProcessingView:
     outbox_events: tuple[OutboxRow, ...] = ()
     transcript: TranscriptRow | None = None
     download_requests: tuple[DownloadRequestView, ...] = ()
+    related_download_requests: tuple[DownloadRequestView, ...] = ()
     not_applicable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowStageView:
+    key: str
+    label: str
+    status: StageStatus
+    timestamp: datetime | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowView:
+    id: UUID
+    kind: str
+    title: str
+    state: WorkflowState
+    state_label: str
+    current_stage: str
+    created_at: datetime | None
+    updated_at: datetime | None
+    stages: tuple[WorkflowStageView, ...]
+    error_message: str | None = None
+    source_ingress_message_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedWorkflowView:
+    id: UUID
+    title: str
+    state: WorkflowState
+    state_label: str
+    current_stage: str
+    creator_ingress_message_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowCollection:
+    items: tuple[WorkflowView, ...] = ()
+    related: tuple[RelatedWorkflowView, ...] = ()
+    polling_needed: bool = False
+
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+    @property
+    def summary(self) -> WorkflowView | None:
+        if not self.items:
+            return None
+        priority = {
+            WorkflowState.FAILED: 0,
+            WorkflowState.CANCELLED: 1,
+            WorkflowState.RUNNING: 2,
+            WorkflowState.PENDING: 3,
+            WorkflowState.UNAVAILABLE: 4,
+            WorkflowState.COMPLETED: 5,
+        }
+        return min(self.items, key=lambda item: priority[item.state])
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +389,10 @@ class MessageListItem:
     attachment_status: str | None
     overall_state: OverallState
     overall_state_label: str
+    workflow_count: int = 0
+    workflow_state: WorkflowState | None = None
+    workflow_state_label: str | None = None
+    workflow_current_stage: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,3 +420,4 @@ class MessageTrace:
     failures: tuple[FailureInfo, ...]
     db_availability: dict[DbName, DbAvailability]
     text_preview: str = ""
+    workflows: WorkflowCollection = field(default_factory=WorkflowCollection)

@@ -266,7 +266,7 @@ def test_transcribed_is_not_processing_media() -> None:
     assert state != OverallState.PROCESSING_MEDIA
 
 
-def test_active_dubbing_is_processing_media() -> None:
+def test_active_dubbing_does_not_replace_message_state() -> None:
     now = _now()
     msg = _message(conversation_status="dispatched")
     content = ContentProcessingView(
@@ -312,4 +312,4 @@ def test_active_dubbing_is_processing_media() -> None:
         ),
     )
     state = derive_overall_state(message=msg, content=content, runtime=None)
-    assert state == OverallState.PROCESSING_MEDIA
+    assert state == OverallState.PARTIAL

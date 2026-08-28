@@ -1,0 +1,83 @@
+<div class="workflow-fragment" data-poll-needed="{{ 'true' if trace.workflows.polling_needed else 'false' }}">
+  {% if db_status.content_processing in ['error', 'timeout'] %}
+    <div class="banner banner-warn">Content-processing data is {{ db_status.content_processing }}. Workflow evidence may be incomplete.</div>
+  {% endif %}
+
+  {% if trace.workflows.items %}
+    {% for workflow in trace.workflows.items %}
+      <article class="section-card workflow-card">
+        <div class="workflow-header">
+          <div>
+            <p class="detail-kicker">{{ workflow.kind.replace('_', ' ') }}</p>
+            <h2>{{ workflow.title }}</h2>
+            <p class="meta">
+              <code>{{ workflow.id }}</code>
+              {% if workflow.source_ingress_message_id and workflow.source_ingress_message_id != trace.ingress_message_id %}
+                · source <a href="/messages/{{ workflow.source_ingress_message_id }}"><code>{{ workflow.source_ingress_message_id }}</code></a>
+              {% endif %}
+            </p>
+          </div>
+          <div class="workflow-summary">
+            <span class="badge workflow-{{ workflow.state.value }} large">{{ workflow.state_label }}</span>
+            <span class="muted small">{{ workflow.current_stage }}</span>
+          </div>
+        </div>
+
+        {% if workflow.error_message %}
+          <div class="banner banner-error">{{ workflow.error_message }}</div>
+        {% endif %}
+
+        <ol class="timeline-list workflow-stages">
+          {% for stage in workflow.stages %}
+            <li class="timeline-item status-{{ stage.status.value }}">
+              <span class="dot"></span>
+              <div class="timeline-body">
+                <div class="timeline-top">
+                  <strong class="timeline-label">{{ stage.label }}</strong>
+                  <span class="badge stage-{{ stage.status.value }}">{{ stage.status.value.replace('_', ' ') }}</span>
+                </div>
+                {% if stage.timestamp or stage.detail %}
+                  <div class="timeline-meta">
+                    {% if stage.timestamp %}<span class="timeline-meta-row dt">{{ stage.timestamp|dt }}</span>{% endif %}
+                    {% if stage.detail %}<span class="timeline-meta-row">{{ stage.detail }}</span>{% endif %}
+                  </div>
+                {% endif %}
+              </div>
+            </li>
+          {% endfor %}
+        </ol>
+      </article>
+    {% endfor %}
+  {% else %}
+    <div class="section-card">
+      <p class="muted" style="margin:0">No workflow was created by this message.</p>
+    </div>
+  {% endif %}
+
+  {% if trace.workflows.related %}
+    <section class="section-card">
+      <div class="section-title">
+        <h2>Dependent workflows</h2>
+        <span class="muted">This message supplies their source media</span>
+      </div>
+      <div class="related-workflows">
+        {% for workflow in trace.workflows.related %}
+          <div class="related-workflow">
+            <div>
+              <strong>{{ workflow.title }}</strong>
+              <div class="meta">{{ workflow.current_stage }} · <code>{{ workflow.id }}</code></div>
+            </div>
+            <div class="related-workflow-actions">
+              <span class="badge workflow-{{ workflow.state.value }}">{{ workflow.state_label }}</span>
+              {% if workflow.creator_ingress_message_id %}
+                <a class="btn btn-ghost" href="/messages/{{ workflow.creator_ingress_message_id }}">Open creator</a>
+              {% else %}
+                <span class="muted small">Creator unavailable</span>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</div>

@@ -73,12 +73,26 @@
 
       <div class="tabs" data-tabs>
         <div class="tab-list" role="tablist">
-          <button type="button" class="tab active" data-tab="ingress">Telegram ingress</button>
+          <button type="button" class="tab active" data-tab="workflows">
+            Workflows
+            {% if trace.workflows.count %}<span class="badge">{{ trace.workflows.count }}</span>{% endif %}
+          </button>
+          <button type="button" class="tab" data-tab="ingress">Telegram ingress</button>
           <button type="button" class="tab" data-tab="cp">Content processing</button>
           <button type="button" class="tab" data-tab="runtime">Agent runtime</button>
         </div>
 
-        <div class="tab-panel active" data-panel="ingress">
+        <div class="tab-panel active" data-panel="workflows">
+          <div
+            data-workflow-poller
+            data-poll-url="/messages/{{ trace.ingress_message_id }}/workflows"
+            data-poll-interval-ms="{{ workflow_poll_interval_seconds * 1000 }}"
+          >
+            {% include "messages/_workflows.html" %}
+          </div>
+        </div>
+
+        <div class="tab-panel" data-panel="ingress">
           <div class="section-card">
             <h3 style="margin-top:0">User message</h3>
             <table class="kv">

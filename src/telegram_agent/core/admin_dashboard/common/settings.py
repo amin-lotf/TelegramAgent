@@ -24,6 +24,7 @@ from telegram_agent.core.admin_dashboard.common.const import (
     DEFAULT_MASK_MESSAGE_TEXT,
     DEFAULT_SESSION_COOKIE_NAME,
     DEFAULT_SESSION_HTTPS_ONLY,
+    DEFAULT_WORKFLOW_POLL_INTERVAL_SECONDS,
     DEFAULT_TELEGRAM_AUTH_RO_DATABASE_URL,
     DEFAULT_TELEGRAM_INGRESS_RO_DATABASE_URL,
 )
@@ -138,6 +139,15 @@ class Settings(BaseSettings):
         default=DEFAULT_LIST_MAX_PAGE_SIZE,
         validation_alias=AliasChoices("LIST_MAX_PAGE_SIZE", "list_max_page_size"),
         gt=0,
+    )
+    workflow_poll_interval_seconds: int = Field(
+        default=DEFAULT_WORKFLOW_POLL_INTERVAL_SECONDS,
+        validation_alias=AliasChoices(
+            "WORKFLOW_POLL_INTERVAL_SECONDS",
+            "workflow_poll_interval_seconds",
+        ),
+        ge=2,
+        le=300,
     )
     mask_media_paths: bool = Field(
         default=DEFAULT_MASK_MEDIA_PATHS,

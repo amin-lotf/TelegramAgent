@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from telegram_agent.core.admin_dashboard.db.mappings import telegram_ingress as tables
 from telegram_agent.core.admin_dashboard.services.view_models import (
@@ -80,10 +81,10 @@ class IngressReader:
         created_from: datetime | None,
         created_to: datetime | None,
         text_query: str | None,
-    ) -> list[object]:
+    ) -> list[ColumnElement[bool]]:
         um = tables.user_messages
         att = tables.attachments
-        conditions: list[object] = []
+        conditions: list[ColumnElement[bool]] = []
         if ingress_message_id is not None:
             conditions.append(um.c.id == ingress_message_id)
         if chat_id is not None:
