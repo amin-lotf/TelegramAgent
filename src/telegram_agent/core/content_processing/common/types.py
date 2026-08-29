@@ -12,6 +12,7 @@ class JobStatus(StrEnum):
     DOWNLOADED = "downloaded"
     TRANSCRIBING = "transcribing"
     TRANSCRIBED = "transcribed"
+    CANCELLING = "cancelling"
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
@@ -53,6 +54,9 @@ class OutboxEventType(StrEnum):
     DUBBING_BACKGROUND_SEPARATED = "content_processing.dubbing.background_separated"
     DUBBING_CANCELLATION_REQUESTED = (
         "content_processing.dubbing.cancellation_requested"
+    )
+    DOWNLOAD_CANCELLATION_REQUESTED = (
+        "content_processing.download.cancellation_requested"
     )
     DOWNLOAD_FAILED_FOR_DELIVERY = "content_processing.download.failed_for_delivery"
 
@@ -98,4 +102,5 @@ class DownloadDeliveryStatus(StrEnum):
     PENDING = "pending"
     SENDING = "sending"
     DELIVERED = "delivered"
+    CANCELLED = "cancelled"
     FAILED = "failed"

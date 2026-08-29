@@ -8,8 +8,12 @@ from sqlalchemy.orm import Session
 
 from telegram_agent.core.content_processing.db.models.content_processing import (
     DownloadRequest,
+    Job,
 )
-from telegram_agent.core.content_processing.common.types import DownloadDeliveryStatus
+from telegram_agent.core.content_processing.common.types import (
+    DownloadDeliveryStatus,
+    JobStatus,
+)
 from telegram_agent.core.common.utils import clean_error_message, utcnow
 
 
@@ -21,6 +25,74 @@ class SyncSqlAlchemyDownloadRequestRepository:
         return self._session.scalar(
             select(DownloadRequest).where(DownloadRequest.job_id == job_id)
         )
+
+    def list_active_secondary_for_cancellation(
+        self,
+        *,
+        telegram_user_id: int,
+        chat_id: int,
+        cutoff_message_id: int,
+    ) -> list[DownloadRequest]:
+        statement = (
+            select(DownloadRequest)
+            .join(Job, Job.id == DownloadRequest.job_id)
+            .where(
+                DownloadRequest.telegram_user_id == telegram_user_id,
+                DownloadRequest.chat_id == chat_id,
+                DownloadRequest.cancelled_by_id.is_(None),
+                or_(
+                    DownloadRequest.requested_dub_language.is_not(None),
+                    DownloadRequest.requested_subtitle_language.is_not(None),
+                ),
+                or_(
+                    DownloadRequest.reply_to_message_id.is_(None),
+                    DownloadRequest.reply_to_message_id < cutoff_message_id,
+                ),
+                Job.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)),
+            )
+            .order_by(DownloadRequest.created_at, DownloadRequest.id)
+            .with_for_update(of=(DownloadRequest, Job), skip_locked=True)
+        )
+        return list(self._session.scalars(statement).all())
+
+    def request_bulk_cancellation(
+        self,
+        *,
+        request_id: UUID,
+        cancellation_id: UUID,
+    ) -> bool:
+        statement = (
+            update(DownloadRequest)
+            .where(
+                DownloadRequest.id == request_id,
+                DownloadRequest.cancelled_by_id.is_(None),
+            )
+            .values(
+                cancelled_by_id=cancellation_id,
+                cancellation_requested_at=func.now(),
+                delivery_status=DownloadDeliveryStatus.CANCELLED,
+                delivery_error=None,
+                updated_at=func.now(),
+            )
+            .returning(DownloadRequest.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def mark_bulk_cancelled(self, *, job_id: UUID) -> bool:
+        statement = (
+            update(DownloadRequest)
+            .where(
+                DownloadRequest.job_id == job_id,
+                DownloadRequest.cancelled_by_id.is_not(None),
+            )
+            .values(
+                cancelled_at=func.now(),
+                delivery_status=DownloadDeliveryStatus.CANCELLED,
+                updated_at=func.now(),
+            )
+            .returning(DownloadRequest.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
 
     def set_final_path(self, *, job_id: UUID, final_path: str) -> bool:
         statement = (

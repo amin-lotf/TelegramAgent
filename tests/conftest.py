@@ -83,6 +83,7 @@ CONTENT_PROCESSING_TABLES = (
     "transcript_segments",
     "transcripts",
     "download_requests",
+    "secondary_task_cancellations",
     "media_assets",
     "telegram_sources",
     "job_completion_expectations",

@@ -9,6 +9,9 @@ from telegram_agent.core.telegram_ingress.services.async_attachment_processing_r
 )
 from telegram_agent.core.telegram_ingress.services.async_user_message import AsyncUserMessageService
 from telegram_agent.core.telegram_ingress.services.conversation_coordinator import ConversationCoordinator
+from telegram_agent.core.telegram_ingress.services.async_cancel_all_command import (
+    AsyncCancelAllCommandService,
+)
 
 
 def get_conversation_coordinator() -> ConversationCoordinator:
@@ -36,6 +39,12 @@ def get_attachment_processing_result_service() -> AsyncAttachmentProcessingResul
     return AsyncAttachmentProcessingResultService(
         uow_factory=async_telegram_ingress_uow_factory,
         conversation_coordinator=get_conversation_coordinator(),
+    )
+
+
+def get_cancel_all_command_service() -> AsyncCancelAllCommandService:
+    return AsyncCancelAllCommandService(
+        uow_factory=async_telegram_ingress_uow_factory,
     )
 
 

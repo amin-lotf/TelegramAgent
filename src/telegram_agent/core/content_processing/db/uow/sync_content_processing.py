@@ -19,6 +19,9 @@ from telegram_agent.core.content_processing.db.repositories.sync_outbox import S
 from telegram_agent.core.content_processing.db.repositories.sync_subtitle_translation import (
     SyncSqlAlchemySubtitleTranslationRepository,
 )
+from telegram_agent.core.content_processing.db.repositories.sync_secondary_task_cancellation import (
+    SyncSqlAlchemySecondaryTaskCancellationRepository,
+)
 from telegram_agent.core.content_processing.db.repositories.sync_telegram_source import SyncSqlAlchemyTelegramSourceRepository
 from telegram_agent.core.content_processing.db.repositories.sync_transcript import SyncSqlAlchemyTranscriptRepository
 
@@ -34,6 +37,9 @@ class SyncSqlAlchemyContentProcessingUnitOfWork:
         self.download_requests = SyncSqlAlchemyDownloadRequestRepository(session)
         self.dubbing = SyncSqlAlchemyDubbingRepository(session)
         self.subtitle_translations = SyncSqlAlchemySubtitleTranslationRepository(session)
+        self.secondary_task_cancellations = (
+            SyncSqlAlchemySecondaryTaskCancellationRepository(session)
+        )
         self.outbox_events = SyncSqlAlchemyOutboxRepository(session)
 
     def commit(self) -> None:

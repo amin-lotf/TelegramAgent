@@ -115,3 +115,11 @@ class RuntimeMessageBatchPayload(BaseModel):
 
     chat_id: int
     messages: tuple[RuntimeMessagePayload, ...] = Field(min_length=1)
+
+
+class CancelAllSecondaryTasksPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    telegram_user_id: int
+    chat_id: int
+    command_message_id: int

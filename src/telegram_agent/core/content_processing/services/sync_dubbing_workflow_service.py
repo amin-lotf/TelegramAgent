@@ -19,6 +19,7 @@ from telegram_agent.core.common.exceptions import (
     PermanentContentProcessingError,
     RetryableContentProcessingError,
     StorageError,
+    SecondaryTaskCancelledError,
 )
 from telegram_agent.core.common.gpu_workloads import (
     COSYVOICE_DUBBING_BATCH_WORKLOAD,
@@ -178,10 +179,10 @@ class SyncDubbingWorkflowService:
                 self._finish_cancellation(job_id)
                 return StageExecutionResult()
             except GpuExecutionServiceError as exc:
-                if retry_count >= self._settings.media_task_max_retries:
-                    self._fail(job_id, f"Unable to cancel GPU workload: {exc}")
-                    return StageExecutionResult(error_message=str(exc))
-                return StageExecutionResult(retryable=True, error_message=str(exc))
+                # Never finalize or fail a cancellation while the durable GPU
+                # service is unreachable. A deferred task has no retry ceiling,
+                # so the active GPU identifier is retained until stop is confirmed.
+                return StageExecutionResult(deferred=True, error_message=str(exc))
         ready_to_running = {
             DubbingStatus.SOURCE_READY: DubbingStatus.PREPARING_INPUTS,
             DubbingStatus.TTS_READY: DubbingStatus.TTS_RUNNING,
@@ -217,7 +218,7 @@ class SyncDubbingWorkflowService:
                     return self._busy_result()
                 self._assemble(job_id)
             return StageExecutionResult()
-        except GpuExecutionCanceledError:
+        except (GpuExecutionCanceledError, SecondaryTaskCancelledError):
             self._finish_cancellation(job_id)
             return StageExecutionResult()
         except (PermanentContentProcessingError, GpuExecutionResponseError) as exc:
@@ -298,6 +299,7 @@ class SyncDubbingWorkflowService:
         translated = self._translation.ensure_translated(
             source_job_id=workflow.source_job_id,
             target_language=workflow.target_language,
+            cancellation_requested=lambda: self._cancellation_requested(job_id),
         )
         planned = self._planner.plan(
             source_segments=source.segments,
@@ -392,6 +394,7 @@ class SyncDubbingWorkflowService:
             job=gpu_job,
             expected_output_path=result_path,
             heartbeat=lambda: self._heartbeat(job_id, DubbingStatus.TTS_RUNNING),
+            cancellation_requested=lambda: self._cancellation_requested(job_id),
         )
         payload = self._read_json(result_path)
         manifest_path = self._validated_result_path(payload, "manifest_path")
@@ -449,6 +452,7 @@ class SyncDubbingWorkflowService:
             job=gpu_job,
             expected_output_path=result_path,
             heartbeat=lambda: self._heartbeat(job_id, DubbingStatus.SAM_RUNNING),
+            cancellation_requested=lambda: self._cancellation_requested(job_id),
         )
         payload = self._read_json(result_path)
         returned_residual = self._validated_result_path(payload, "residual_path")
@@ -478,6 +482,7 @@ class SyncDubbingWorkflowService:
             residual_path=residual,
             plan_path=plan_path,
             tts_manifest_path=tts_manifest,
+            cancellation_requested=lambda: self._cancellation_requested(job_id),
         )
         with self._uow_factory() as uow:
             request = uow.download_requests.get_by_job_id(job_id)
@@ -489,6 +494,7 @@ class SyncDubbingWorkflowService:
         subtitle_segments = self._translation.ensure_translated(
             source_job_id=workflow.source_job_id,
             target_language=subtitle_language,
+            cancellation_requested=lambda: self._cancellation_requested(job_id),
         )
         subtitle_path = Path(
             self._subtitles.prepare(
@@ -507,6 +513,7 @@ class SyncDubbingWorkflowService:
                 subtitle_title=subtitle_language,
                 audio_language=workflow.target_language,
                 audio_bitrate=self._settings.dubbing_audio_bitrate,
+                cancellation_requested=lambda: self._cancellation_requested(job_id),
             )
         )
         with self._uow_factory() as uow:
@@ -690,6 +697,17 @@ class SyncDubbingWorkflowService:
                 raise GpuExecutionCanceledError("Dubbing workflow is no longer active")
             uow.jobs.touch(job_id=job_id)
 
+    def _cancellation_requested(self, job_id: UUID) -> bool:
+        with self._uow_factory() as uow:
+            workflow = uow.dubbing.get_by_job_id(job_id)
+            if workflow is None:
+                return True
+            return (
+                workflow.cancellation_requested_at is not None
+                or workflow.status in (DubbingStatus.CANCELLING, DubbingStatus.CANCELLED)
+                or uow.jobs.is_cancellation_requested(job_id=job_id)
+            )
+
     def _reset_for_retry(
         self,
         job_id: UUID,
@@ -728,11 +746,15 @@ class SyncDubbingWorkflowService:
                     job_id=job_id, error_message="Dubbing request was cancelled"
                 )
                 uow.job_expectations.mark_satisfied(job_id=job_id)
-                self._enqueue(
-                    uow,
-                    job_id=job_id,
-                    event_type=OutboxEventType.DOWNLOAD_FAILED_FOR_DELIVERY,
-                )
+                request = uow.download_requests.get_by_job_id(job_id)
+                if request is not None and request.cancelled_by_id is not None:
+                    uow.download_requests.mark_bulk_cancelled(job_id=job_id)
+                else:
+                    self._enqueue(
+                        uow,
+                        job_id=job_id,
+                        event_type=OutboxEventType.DOWNLOAD_FAILED_FOR_DELIVERY,
+                    )
 
     @staticmethod
     def _enqueue(

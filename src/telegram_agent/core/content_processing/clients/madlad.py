@@ -63,6 +63,7 @@ class MadladClient:
         target_lang: str,
         request_id: str,
         heartbeat: Callable[[], None] | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> MadladGeneration:
         if not texts:
             raise PermanentContentProcessingError(
@@ -110,9 +111,10 @@ class MadladClient:
                     self._settings.gpu_execution_job_max_attempts,
                 ),
                 heartbeat=heartbeat,
+                cancellation_requested=cancellation_requested,
             )
-        except GpuExecutionCanceledError as exc:
-            raise PermanentContentProcessingError(str(exc)) from exc
+        except GpuExecutionCanceledError:
+            raise
         except GpuExecutionResponseError as exc:
             raise PermanentContentProcessingError(str(exc)) from exc
         except GpuExecutionServiceError as exc:

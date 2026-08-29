@@ -8,6 +8,9 @@ from telegram_agent.core.content_processing.services.async_telegram_job_service 
 from telegram_agent.core.content_processing.services.sync_dubbing_workflow_service import (
     SyncDubbingWorkflowService,
 )
+from telegram_agent.core.content_processing.services.sync_secondary_task_cancellation_service import (
+    SyncSecondaryTaskCancellationService,
+)
 
 
 def get_telegram_auth_client():
@@ -31,3 +34,7 @@ def get_download_request_service() -> AsyncDownloadRequestService:
 
 def get_dubbing_workflow_service() -> SyncDubbingWorkflowService:
     return SyncDubbingWorkflowService.from_settings()
+
+
+def get_secondary_task_cancellation_service() -> SyncSecondaryTaskCancellationService:
+    return SyncSecondaryTaskCancellationService.from_settings()

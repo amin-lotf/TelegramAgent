@@ -78,6 +78,10 @@ class PermanentContentProcessingError(ContentProcessingError):
     """A failure that must end the current processing job."""
 
 
+class SecondaryTaskCancelledError(ContentProcessingError):
+    """Raised inside a worker after its parent secondary task is cancelled."""
+
+
 class SourceResolutionError(PermanentContentProcessingError):
     pass
 

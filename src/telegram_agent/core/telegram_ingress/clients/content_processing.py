@@ -13,8 +13,14 @@ from telegram_agent.core.common.exceptions import (
     ContentProcessingBadResponseError,
     ContentProcessingUnavailableError,
 )
-from telegram_agent.core.telegram_ingress.clients.schemas import ProcessAttachmentResponse
-from telegram_agent.core.telegram_ingress.common.commands import ProcessAttachmentCommand
+from telegram_agent.core.telegram_ingress.clients.schemas import (
+    CancelAllSecondaryTasksResponse,
+    ProcessAttachmentResponse,
+)
+from telegram_agent.core.telegram_ingress.common.commands import (
+    CancelAllSecondaryTasksPayload,
+    ProcessAttachmentCommand,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,46 @@ class ContentProcessingClient:
         except (ValueError, ValidationError, TypeError) as exc:
             raise ContentProcessingBadResponseError(
                 "Invalid response from content processing service"
+            ) from exc
+
+    def cancel_all_secondary_tasks(
+        self,
+        *,
+        payload: CancelAllSecondaryTasksPayload,
+        idempotency_key: str,
+    ) -> CancelAllSecondaryTasksResponse:
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(
+                    f"{self._base_url}/downloads/cancel-all",
+                    json={
+                        "telegram_user_id": payload.telegram_user_id,
+                        "chat_id": payload.chat_id,
+                        "cutoff_message_id": payload.command_message_id,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "Idempotency-Key": idempotency_key,
+                    },
+                )
+            response.raise_for_status()
+            return CancelAllSecondaryTasksResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {408, 429} or exc.response.status_code >= 500:
+                raise ContentProcessingUnavailableError(
+                    "Content processing service is unavailable"
+                ) from exc
+            raise ContentProcessingBadResponseError(
+                "Content processing rejected the cancellation request "
+                f"with status {exc.response.status_code}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ContentProcessingUnavailableError(
+                "Content processing service is unavailable"
+            ) from exc
+        except (ValueError, ValidationError, TypeError) as exc:
+            raise ContentProcessingBadResponseError(
+                "Invalid cancellation response from content processing service"
             ) from exc
 
     @retry(

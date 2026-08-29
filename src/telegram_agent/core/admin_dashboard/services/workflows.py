@@ -27,7 +27,10 @@ from telegram_agent.core.content_processing.common.language_codes import (
 _ACTIVE_JOBS = frozenset({"queued", "running", "downloaded", "transcribing"})
 _SUCCESS_JOBS = frozenset({"transcribed", "completed"})
 _FAILED_JOBS = frozenset({"failed", "timed_out"})
-_KNOWN_JOBS = _ACTIVE_JOBS | _SUCCESS_JOBS | _FAILED_JOBS | {"cancelled"}
+_KNOWN_JOBS = _ACTIVE_JOBS | _SUCCESS_JOBS | _FAILED_JOBS | {
+    "cancelling",
+    "cancelled",
+}
 
 _DUBBING_ORDER = {
     "source_ready": 0,
@@ -286,7 +289,8 @@ def _workflow_state(
     job_status = request.job.status if request.job is not None else None
     dubbing_status = request.dubbing.status if request.dubbing is not None else None
     if (
-        job_status == "cancelled"
+        job_status in {"cancelling", "cancelled"}
+        or request.delivery_status == "cancelled"
         or dubbing_status in {"cancelling", "cancelled"}
         or any(item.status == StageStatus.CANCELLED for item in stages)
     ):

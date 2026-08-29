@@ -9,6 +9,7 @@ from telegram_agent.core.common.api.security.token_verification import VerifyApi
 from telegram_agent.core.common.clients.telegram_auth import TelegramAuthClient
 from telegram_agent.core.telegram_ingress.api.v1.messages.dependencies import (
     get_attachment_processing_result_service,
+    get_cancel_all_command_service,
     get_telegram_auth_client,
     get_user_message_service,
 )
@@ -26,6 +27,9 @@ from telegram_agent.core.telegram_ingress.services.async_attachment_processing_r
     AsyncAttachmentProcessingResultService,
 )
 from telegram_agent.core.telegram_ingress.services.async_user_message import AsyncUserMessageService
+from telegram_agent.core.telegram_ingress.services.async_cancel_all_command import (
+    AsyncCancelAllCommandService,
+)
 
 logger = getLogger(__name__)
 
@@ -47,8 +51,24 @@ async def receive_telegram_message(
         TelegramAuthClient,
         Depends(get_telegram_auth_client),
     ],
+    cancel_all_command_service: Annotated[
+        AsyncCancelAllCommandService,
+        Depends(get_cancel_all_command_service),
+    ],
 ) -> dict[str, str]:
     await telegram_auth_client.check_user(payload.telegram_user_id)
+    if _is_cancel_all_command(payload):
+        await cancel_all_command_service.accept(
+            CreateUserMessageCommand(
+                update_id=payload.update_id,
+                telegram_user_id=payload.telegram_user_id,
+                chat_id=payload.chat_id,
+                message_id=payload.message_id,
+                reply_message_id=payload.reply_to_message_id,
+                text=payload.text,
+            )
+        )
+        return {"status": "accepted"}
     attachment = None
     if payload.attachment is not None:
         attachment = CreateAttachmentCommand(
@@ -67,6 +87,20 @@ async def receive_telegram_message(
     )
     await user_message_service.create_user_message(command)
     return {"status": "accepted"}
+
+
+def _is_cancel_all_command(payload: TelegramUserRequest) -> bool:
+    if payload.attachment is not None or payload.text is None:
+        return False
+    text = payload.text.strip()
+    if not text or any(character.isspace() for character in text):
+        return False
+    command, separator, bot_name = text.partition("@")
+    if command.casefold() != "/cancel_all":
+        return False
+    if not separator:
+        return True
+    return bool(bot_name) and bot_name.replace("_", "").isalnum()
 
 
 @router.post(

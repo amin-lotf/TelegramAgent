@@ -163,6 +163,81 @@ def test_sweeper_extends_active_transcribing_job(
     assert expectation.due_at > utcnow()
 
 
+def test_sweeper_does_not_finalize_cancellation_with_active_gpu_job(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+) -> None:
+    source_job_id = uuid4()
+    download_job_id = uuid4()
+    gpu_job_id = uuid4()
+    with content_sync_sessionmaker() as session:
+        session.add_all(
+            [
+                Job(
+                    id=source_job_id,
+                    kind=JobKind.TELEGRAM_ATTACHMENT,
+                    status=JobStatus.COMPLETED,
+                    idempotency_key=f"cancel-source-{source_job_id}",
+                    callback_required=False,
+                ),
+                Job(
+                    id=download_job_id,
+                    kind=JobKind.DOWNLOAD_PREPARATION,
+                    status=JobStatus.CANCELLING,
+                    idempotency_key=f"cancel-download-{download_job_id}",
+                    callback_required=False,
+                ),
+            ]
+        )
+        session.flush()
+        session.add(
+            DubbingWorkflow(
+                job_id=download_job_id,
+                source_job_id=source_job_id,
+                target_language="es",
+                status=DubbingStatus.CANCELLING,
+                active_gpu_job_id=gpu_job_id,
+                cosyvoice_model="cosy",
+                sam_model="sam",
+            )
+        )
+        session.add(
+            JobCompletionExpectation(
+                job_id=download_job_id,
+                kind=JobCompletionExpectationKind.JOB_COMPLETION,
+                status=JobCompletionExpectationStatus.OPEN,
+                due_at=utcnow() - timedelta(seconds=5),
+            )
+        )
+        session.commit()
+
+    result = _sweeper(
+        content_sync_uow_factory,
+        retention=timedelta(hours=1),
+        active_grace=timedelta(hours=1),
+    ).sweep_once()
+
+    with content_sync_sessionmaker() as session:
+        job = session.get(Job, download_job_id)
+        workflow = session.scalar(
+            select(DubbingWorkflow).where(DubbingWorkflow.job_id == download_job_id)
+        )
+        expectation = session.scalar(
+            select(JobCompletionExpectation).where(
+                JobCompletionExpectation.job_id == download_job_id
+            )
+        )
+
+    assert result.extended == 1
+    assert result.timed_out == 0
+    assert job is not None and job.status == JobStatus.CANCELLING
+    assert workflow is not None and workflow.status == DubbingStatus.CANCELLING
+    assert workflow.active_gpu_job_id == gpu_job_id
+    assert expectation is not None
+    assert expectation.status == JobCompletionExpectationStatus.OPEN
+    assert expectation.due_at > utcnow()
+
+
 def test_sweeper_ignores_not_yet_due_expectations(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,

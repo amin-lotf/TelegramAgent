@@ -20,6 +20,9 @@ from telegram_agent.core.content_processing.celery.tasks.download_delivery impor
 from telegram_agent.core.content_processing.celery.tasks.download_preparation import (
     prepare_download_task,
 )
+from telegram_agent.core.content_processing.celery.tasks.download_cancellation import (
+    cancel_download_task,
+)
 from telegram_agent.core.content_processing.celery.tasks.media_download import download_telegram_media_task
 from telegram_agent.core.content_processing.celery.tasks.transcription import transcribe_media_task
 from telegram_agent.core.content_processing.celery.tasks.telegram_ingress_callback import notify_telegram_ingress_task
@@ -62,6 +65,7 @@ class OutboxDispatcher:
             OutboxEventType.DUBBING_BACKGROUND_SEPARATED.value: advance_dubbing_task,
             OutboxEventType.DUBBING_CANCELLATION_REQUESTED.value: advance_dubbing_task,
             OutboxEventType.DOWNLOAD_FAILED_FOR_DELIVERY.value: deliver_download_task,
+            OutboxEventType.DOWNLOAD_CANCELLATION_REQUESTED.value: cancel_download_task,
         }
 
     @classmethod

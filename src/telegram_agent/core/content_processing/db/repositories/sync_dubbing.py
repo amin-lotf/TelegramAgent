@@ -145,6 +145,7 @@ class SyncSqlAlchemyDubbingRepository:
             update(DubbingWorkflow)
             .where(
                 DubbingWorkflow.job_id == job_id,
+                DubbingWorkflow.cancellation_requested_at.is_(None),
                 DubbingWorkflow.status.not_in(
                     (DubbingStatus.READY_FOR_DELIVERY, DubbingStatus.CANCELLED, DubbingStatus.FAILED)
                 ),

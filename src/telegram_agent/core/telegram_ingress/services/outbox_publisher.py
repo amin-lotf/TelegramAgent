@@ -12,10 +12,19 @@ from pydantic import ValidationError
 from telegram_agent.core.common.exceptions import (
     AgentRuntimeBadResponseError,
     AgentRuntimeUnavailableError,
+    ContentProcessingBadResponseError,
+    ContentProcessingUnavailableError,
+    TelegramDownloadError,
+    TelegramDownloadPermanentError,
 )
 from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.telegram_ingress.clients.agent_runtime import AgentRuntimeClient
-from telegram_agent.core.telegram_ingress.common.commands import RuntimeMessageBatchPayload
+from telegram_agent.core.telegram_ingress.clients.content_processing import ContentProcessingClient
+from telegram_agent.core.telegram_ingress.clients.telegram_bot import TelegramBotClient
+from telegram_agent.core.telegram_ingress.common.commands import (
+    CancelAllSecondaryTasksPayload,
+    RuntimeMessageBatchPayload,
+)
 from telegram_agent.core.telegram_ingress.common.results import OutboxDispatchResult
 from telegram_agent.core.telegram_ingress.common.settings import settings
 from telegram_agent.core.telegram_ingress.common.types import (
@@ -46,6 +55,8 @@ class OutboxPublisher:
         lease_timeout: timedelta,
         retry_base_delay: timedelta,
         retry_max_delay: timedelta,
+        content_processing_client: ContentProcessingClient | None = None,
+        telegram_bot_client: TelegramBotClient | None = None,
         lease_owner: str | None = None,
     ) -> None:
         self._uow_factory = uow_factory
@@ -54,6 +65,8 @@ class OutboxPublisher:
         self._lease_timeout = lease_timeout
         self._retry_base_delay = retry_base_delay
         self._retry_max_delay = retry_max_delay
+        self._content_processing_client = content_processing_client
+        self._telegram_bot_client = telegram_bot_client
         self._lease_owner = lease_owner or self._default_lease_owner()
 
     @classmethod
@@ -61,7 +74,12 @@ class OutboxPublisher:
         runtime_token = settings.agent_runtime_service_token
         if runtime_token is None:
             raise RuntimeError("AGENT_RUNTIME_SERVICE_TOKEN must be configured")
-
+        content_processing_token = settings.content_processing_service_token
+        if content_processing_token is None:
+            raise RuntimeError("CONTENT_PROCESSING_SERVICE_TOKEN must be configured")
+        bot_token = settings.telegram_bot_token
+        if bot_token is None:
+            raise RuntimeError("TELEGRAM_BOT_TOKEN must be configured")
         return cls(
             uow_factory=sync_telegram_ingress_uow_factory,
             agent_runtime_client=AgentRuntimeClient(
@@ -73,6 +91,14 @@ class OutboxPublisher:
             lease_timeout=timedelta(seconds=settings.outbox_dispatch_lease_seconds),
             retry_base_delay=timedelta(seconds=settings.outbox_retry_base_seconds),
             retry_max_delay=timedelta(seconds=settings.outbox_retry_max_seconds),
+            content_processing_client=ContentProcessingClient(
+                base_url=settings.content_processing_base_url,
+                token=content_processing_token,
+            ),
+            telegram_bot_client=TelegramBotClient(
+                bot_token=bot_token,
+                api_base_url=settings.telegram_api_base_url,
+            ),
         )
 
     def dispatch_once(self) -> OutboxDispatchResult:
@@ -97,35 +123,23 @@ class OutboxPublisher:
         permanent_failures = 0
 
         for event in events:
-            if event.event_type != OutboxEventType.CONVERSATION_MESSAGES_ENQUEUED:
-                permanent_failures += 1
-                self._mark_permanent_failure(
-                    event=event,
-                    error_message=f"Unsupported outbox event type: {event.event_type}",
-                )
-                continue
-
             try:
-                payload = RuntimeMessageBatchPayload.model_validate(event.payload)
-            except ValidationError as exc:
-                permanent_failures += 1
-                self._mark_permanent_failure(
-                    event=event,
-                    error_message=f"Invalid runtime message batch payload: {exc}",
-                )
-                continue
-
-            try:
-                self._agent_runtime_client.submit_message_batch(
-                    batch_id=event.id,
-                    idempotency_key=event.idempotency_key,
-                    payload=payload,
-                )
-            except AgentRuntimeUnavailableError as exc:
+                self._dispatch_event(event)
+            except (
+                AgentRuntimeUnavailableError,
+                ContentProcessingUnavailableError,
+                TelegramDownloadError,
+            ) as exc:
                 retryable_failures += 1
                 self._record_retryable_failure(event=event, error=exc)
                 continue
-            except AgentRuntimeBadResponseError as exc:
+            except (
+                AgentRuntimeBadResponseError,
+                ContentProcessingBadResponseError,
+                TelegramDownloadPermanentError,
+                ValidationError,
+                RuntimeError,
+            ) as exc:
                 permanent_failures += 1
                 self._mark_permanent_failure(
                     event=event,
@@ -152,11 +166,11 @@ class OutboxPublisher:
             else:
                 published += 1
                 logger.info(
-                    "Published conversation message batch",
+                    "Published Telegram-ingress outbox event",
                     extra={
                         "outbox_event_id": str(event.id),
                         "chat_id": event.chat_id,
-                        "message_count": len(payload.messages),
+                        "event_type": event.event_type,
                     },
                 )
 
@@ -166,6 +180,41 @@ class OutboxPublisher:
             retryable_failures=retryable_failures,
             permanent_failures=permanent_failures,
         )
+
+    def _dispatch_event(self, event: ConversationOutboxEvent) -> None:
+        if event.event_type == OutboxEventType.CONVERSATION_MESSAGES_ENQUEUED:
+            payload = RuntimeMessageBatchPayload.model_validate(event.payload)
+            self._agent_runtime_client.submit_message_batch(
+                batch_id=event.id,
+                idempotency_key=event.idempotency_key,
+                payload=payload,
+            )
+            return
+        if event.event_type == OutboxEventType.CANCEL_ALL_SECONDARY_TASKS_REQUESTED:
+            if self._content_processing_client is None:
+                raise RuntimeError(
+                    "Content-processing client is not configured for cancel-all"
+                )
+            if self._telegram_bot_client is None:
+                raise RuntimeError("Telegram bot client is not configured for cancel-all")
+            payload = CancelAllSecondaryTasksPayload.model_validate(event.payload)
+            result = self._content_processing_client.cancel_all_secondary_tasks(
+                payload=payload,
+                idempotency_key=event.idempotency_key,
+            )
+            count = result.matched_active_count
+            noun = "request" if count == 1 else "requests"
+            text = (
+                f"Cancellation registered for {count} active dub/subtitle {noun}. "
+                "Any earlier request still in the queue is covered too."
+            )
+            self._telegram_bot_client.send_message(
+                chat_id=payload.chat_id,
+                text=text,
+                reply_to_message_id=payload.command_message_id,
+            )
+            return
+        raise RuntimeError(f"Unsupported outbox event type: {event.event_type}")
 
     def _record_retryable_failure(
         self,

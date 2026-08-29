@@ -6,7 +6,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from telegram_agent.core.common.exceptions import PermanentContentProcessingError
+from telegram_agent.core.common.exceptions import (
+    PermanentContentProcessingError,
+    SecondaryTaskCancelledError,
+)
 from telegram_agent.core.content_processing.clients.llm_gateway import (
     LlmGatewayGeneration,
     LlmGatewayTokenUsage,
@@ -101,8 +104,9 @@ class FakeMadladClient:
         target_lang: str,
         request_id: str = "",
         heartbeat=None,
+        cancellation_requested=None,
     ) -> MadladGeneration:
-        del request_id, heartbeat
+        del request_id, heartbeat, cancellation_requested
         self.calls.append((list(texts), source_lang, target_lang))
         if self.fail is not None:
             raise self.fail
@@ -255,6 +259,51 @@ def test_multi_batch_translation_persists_all_segments(
         assert len(translated) == 6
 
 
+def test_cancellation_after_provider_response_releases_claimed_batch(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+) -> None:
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    cancellation_observed = False
+
+    class CancellingLlmClient(FakeLlmClient):
+        def translate_subtitle_batch(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+        ) -> LlmGatewayGeneration:
+            nonlocal cancellation_observed
+            result = super().translate_subtitle_batch(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            cancellation_observed = True
+            return result
+
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=CancellingLlmClient(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(SecondaryTaskCancelledError):
+        service.ensure_translated(
+            source_job_id=job_id,
+            target_language="fa",
+            cancellation_requested=lambda: cancellation_observed,
+        )
+
+    with content_sync_sessionmaker() as session:
+        batches = list(session.scalars(select(TranslationBatch)))
+        assert len(batches) == 1
+        assert batches[0].status == TranslationBatchStatus.PENDING
+        assert batches[0].attempt_count == 0
+        assert batches[0].locked_at is None
+        assert batches[0].locked_by is None
+        assert list(session.scalars(select(TranslatedSegment))) == []
+
+
 def test_configured_pair_uses_madlad_without_llm_calls(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,
@@ -323,6 +372,7 @@ def test_madlad_translations_are_sanitized(
             target_lang: str,
             request_id: str = "",
             heartbeat=None,
+            cancellation_requested=None,
         ) -> MadladGeneration:
             generation = super().translate(
                 texts,
@@ -330,6 +380,7 @@ def test_madlad_translations_are_sanitized(
                 target_lang=target_lang,
                 request_id=request_id,
                 heartbeat=heartbeat,
+                cancellation_requested=cancellation_requested,
             )
             return MadladGeneration(
                 translations=["It &apos;s recycled."],

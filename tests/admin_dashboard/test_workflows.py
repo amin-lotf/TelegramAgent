@@ -405,3 +405,14 @@ def test_cancelled_dubbing_workflow_is_terminal() -> None:
 
     assert workflow.state == WorkflowState.CANCELLED
     assert any(stage.status == StageStatus.CANCELLED for stage in workflow.stages)
+
+
+def test_cancelling_subtitle_job_is_not_reported_as_unknown() -> None:
+    request = replace(
+        _request(job=_job(status="cancelling")),
+        delivery_status="cancelled",
+    )
+
+    workflow = build_download_workflow(request)
+
+    assert workflow.state == WorkflowState.CANCELLED

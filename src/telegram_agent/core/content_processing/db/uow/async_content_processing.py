@@ -11,6 +11,9 @@ from telegram_agent.core.content_processing.db.repositories.async_media_asset im
 from telegram_agent.core.content_processing.db.repositories.async_outbox import AsyncSqlAlchemyOutboxRepository
 from telegram_agent.core.content_processing.db.repositories.async_telegram_source import \
     AsyncSqlAlchemyTelegramSourceRepository
+from telegram_agent.core.content_processing.db.repositories.async_secondary_task_cancellation import (
+    AsyncSqlAlchemySecondaryTaskCancellationRepository,
+)
 
 
 class AsyncSqlAlchemyContentProcessingUnitOfWork:
@@ -22,6 +25,9 @@ class AsyncSqlAlchemyContentProcessingUnitOfWork:
         self.media_assets = AsyncSqlAlchemyMediaAssetRepository(session)
         self.download_requests = AsyncSqlAlchemyDownloadRequestRepository(session)
         self.outbox_events = AsyncSqlAlchemyOutboxRepository(session)
+        self.secondary_task_cancellations = (
+            AsyncSqlAlchemySecondaryTaskCancellationRepository(session)
+        )
 
     async def commit(self) -> None:
         await self._session.commit()

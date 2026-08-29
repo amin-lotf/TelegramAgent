@@ -12,6 +12,7 @@ from telegram_agent.core.common.clients.telegram_auth import TelegramAuthClient
 from telegram_agent.core.content_processing.api.v1.telegram.dependencies import (
     get_download_request_service,
     get_dubbing_workflow_service,
+    get_secondary_task_cancellation_service,
     get_telegram_auth_client,
     get_telegram_job_service,
 )
@@ -22,6 +23,8 @@ from telegram_agent.core.content_processing.api.v1.telegram.schemas import (
     AcceptVideoDownloadRequest,
     CancelDownloadRequest,
     CancelDownloadResponse,
+    CancelAllSecondaryTasksRequest,
+    CancelAllSecondaryTasksResponse,
     CreateContentProcessingJobRequest,
 )
 from telegram_agent.core.content_processing.common.commands import (
@@ -38,6 +41,9 @@ from telegram_agent.core.content_processing.services.async_telegram_job_service 
 )
 from telegram_agent.core.content_processing.services.sync_dubbing_workflow_service import (
     SyncDubbingWorkflowService,
+)
+from telegram_agent.core.content_processing.services.sync_secondary_task_cancellation_service import (
+    SyncSecondaryTaskCancellationService,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,6 +175,41 @@ async def accept_document_download_request(
         accepted=True,
         media_type=DownloadMediaType.DOCUMENT.value,
         job_id=result.job_id,
+    )
+
+
+@router.post(
+    "/downloads/cancel-all",
+    response_model=CancelAllSecondaryTasksResponse,
+)
+async def cancel_all_secondary_tasks(
+    payload: CancelAllSecondaryTasksRequest,
+    telegram_auth_client: Annotated[TelegramAuthClient, Depends(get_telegram_auth_client)],
+    cancellation_service: Annotated[
+        SyncSecondaryTaskCancellationService,
+        Depends(get_secondary_task_cancellation_service),
+    ],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> CancelAllSecondaryTasksResponse:
+    key = _require_idempotency_key(idempotency_key)
+    await telegram_auth_client.check_user(payload.telegram_user_id)
+    try:
+        result = await run_in_threadpool(
+            cancellation_service.register,
+            telegram_user_id=payload.telegram_user_id,
+            chat_id=payload.chat_id,
+            cutoff_message_id=payload.cutoff_message_id,
+            idempotency_key=key,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    return CancelAllSecondaryTasksResponse(
+        cancellation_id=result.cancellation_id,
+        cutoff_message_id=result.cutoff_message_id,
+        matched_active_count=result.matched_active_count,
     )
 
 

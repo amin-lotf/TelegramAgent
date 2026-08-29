@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from telegram_agent.core.common.exceptions import GpuExecutionServiceError
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.common.utils import utcnow
 from telegram_agent.core.content_processing.clients.gpu_execution_client import (
@@ -47,7 +48,11 @@ from telegram_agent.core.content_processing.services.sync_dubbing_workflow_servi
 
 class _Translation:
     def ensure_translated(
-        self, *, source_job_id: UUID, target_language: str | None
+        self,
+        *,
+        source_job_id: UUID,
+        target_language: str | None,
+        cancellation_requested=None,
     ) -> list[SubtitleSegment]:
         assert source_job_id
         text = "Hola mundo" if target_language == "es" else "Hello world"
@@ -93,7 +98,9 @@ class _Gpu:
         job: GpuJobResponse,
         expected_output_path: Path,
         heartbeat,
+        cancellation_requested=None,
     ) -> Path:
+        assert cancellation_requested is not None
         heartbeat()
         expected_output_path.parent.mkdir(parents=True, exist_ok=True)
         if "cosyvoice" in self.workloads[job.id]:
@@ -132,6 +139,12 @@ class _Gpu:
 
     def cancel(self, job_id: UUID) -> None:
         self.cancelled.append(job_id)
+
+
+class _UnavailableCancelGpu(_Gpu):
+    def cancel(self, job_id: UUID) -> None:
+        self.cancelled.append(job_id)
+        raise GpuExecutionServiceError("GPU service unavailable")
 
 
 class _Assembly:
@@ -420,6 +433,61 @@ def test_timeout_cancellation_stops_active_gpu_job_before_delivery(
         )
     assert job is not None and job.status == JobStatus.TIMED_OUT
     assert workflow is not None and workflow.status == DubbingStatus.CANCELLED
+
+
+def test_gpu_cancel_outage_keeps_durable_cancelling_state(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    tmp_path: Path,
+) -> None:
+    source_job_id, ingress_message_id = _seed_source(
+        content_sync_sessionmaker, tmp_path
+    )
+    download_job_id = _seed_download(
+        content_sync_sessionmaker, ingress_message_id
+    )
+    gpu_job_id = uuid4()
+    with content_sync_sessionmaker() as session:
+        session.execute(
+            update(Job)
+            .where(Job.id == download_job_id)
+            .values(status=JobStatus.CANCELLING)
+        )
+        session.add(
+            DubbingWorkflow(
+                job_id=download_job_id,
+                source_job_id=source_job_id,
+                target_language="es",
+                status=DubbingStatus.CANCELLING,
+                active_gpu_job_id=gpu_job_id,
+                cosyvoice_model=settings.cosyvoice_model,
+                sam_model=settings.sam_audio_model,
+                cancellation_requested_at=utcnow(),
+            )
+        )
+        session.commit()
+    gpu = _UnavailableCancelGpu()
+    service = SyncDubbingWorkflowService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings.model_copy(update={"media_storage_root": str(tmp_path)}),
+        translation_service=_Translation(),  # type: ignore[arg-type]
+        gpu_client=gpu,  # type: ignore[arg-type]
+    )
+
+    result = service.execute(job_id=download_job_id, retry_count=99)
+
+    assert result.deferred is True
+    assert gpu.cancelled == [gpu_job_id]
+    with content_sync_sessionmaker() as session:
+        job = session.get(Job, download_job_id)
+        workflow = session.scalar(
+            select(DubbingWorkflow).where(
+                DubbingWorkflow.job_id == download_job_id
+            )
+        )
+    assert job is not None and job.status == JobStatus.CANCELLING
+    assert workflow is not None and workflow.status == DubbingStatus.CANCELLING
+    assert workflow.active_gpu_job_id == gpu_job_id
 
 
 def _seed_source(

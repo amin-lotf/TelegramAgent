@@ -9,7 +9,7 @@ DEFAULT_ALLOWED_ORIGINS = (
     "https://ops.fatolai.com,"
 )
 DEFAULT_TELEGRAM_AUTH_BASE_URL="http://localhost:8000/api/v1/telegram-auth"
-DEFAULT_CONTENT_PROCESSING_BASE_URL="http://localhost:8000/api/v1/telegram/attachments"
+DEFAULT_CONTENT_PROCESSING_BASE_URL = "http://localhost:8000/api/v1/telegram"
 DEFAULT_AGENT_RUNTIME_BASE_URL = "http://localhost:8000/api/v1/agent-runtime"
 DEFAULT_AGENT_RUNTIME_REQUEST_TIMEOUT_SECONDS = 10.0
 DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org"

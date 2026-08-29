@@ -7,8 +7,10 @@ from typing import Callable
 from uuid import UUID, uuid4
 
 from telegram_agent.core.common.exceptions import (
+    GpuExecutionCanceledError,
     PermanentContentProcessingError,
     RetryableContentProcessingError,
+    SecondaryTaskCancelledError,
 )
 from telegram_agent.core.common.spoken_text import sanitize_spoken_text
 from telegram_agent.core.content_processing.clients.llm_gateway import LlmGatewayClient
@@ -111,7 +113,9 @@ class SyncSubtitleTranslationService:
         source_job_id: UUID,
         target_language: str | None,
         overwrite: bool = False,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> list[SubtitleSegment]:
+        self._raise_if_cancelled(cancellation_requested)
         if overwrite:
             raise PermanentContentProcessingError(
                 "Subtitle translation overwrite is not supported yet"
@@ -162,6 +166,7 @@ class SyncSubtitleTranslationService:
                     source_language=source_language,
                     target_language=target_norm,
                     source_segments=source_segments,
+                    cancellation_requested=cancellation_requested,
                 )
 
         self._ensure_batches_planned(
@@ -175,7 +180,9 @@ class SyncSubtitleTranslationService:
             target_language=target_norm,
             source_segments=source_segments,
             use_madlad=use_madlad,
+            cancellation_requested=cancellation_requested,
         )
+        self._raise_if_cancelled(cancellation_requested)
         return self._load_completed_segments(translation.id)
 
     def _should_skip_translation(
@@ -309,6 +316,7 @@ class SyncSubtitleTranslationService:
         source_language: str | None,
         target_language: str,
         source_segments: list[SourceSegmentView],
+        cancellation_requested: Callable[[], bool] | None,
     ) -> None:
         with self._uow_factory() as uow:
             uow.subtitle_translations.set_status(
@@ -329,6 +337,7 @@ class SyncSubtitleTranslationService:
 
         try:
             for window_index, window in enumerate(windows):
+                self._raise_if_cancelled(cancellation_requested)
                 prompts = build_glossary_extraction_prompts(
                     source_language=source_language,
                     target_language=target_language,
@@ -340,8 +349,16 @@ class SyncSubtitleTranslationService:
                     system_prompt=prompts.system_prompt,
                     user_prompt=prompts.user_prompt,
                 )
+                self._raise_if_cancelled(cancellation_requested)
                 partials.append(generation.output)
                 last_model = generation.model
+        except SecondaryTaskCancelledError:
+            with self._uow_factory() as uow:
+                uow.subtitle_translations.set_status(
+                    translation_id=translation_id,
+                    status=SubtitleTranslationStatus.PENDING,
+                )
+            raise
         except RetryableContentProcessingError:
             raise
         except PermanentContentProcessingError as exc:
@@ -417,6 +434,7 @@ class SyncSubtitleTranslationService:
         target_language: str,
         source_segments: list[SourceSegmentView],
         use_madlad: bool,
+        cancellation_requested: Callable[[], bool] | None,
     ) -> None:
         by_index = {segment.segment_index: segment for segment in source_segments}
         ordered_indexes = [segment.segment_index for segment in source_segments]
@@ -430,6 +448,7 @@ class SyncSubtitleTranslationService:
         last_model: str | None = None
 
         while True:
+            self._raise_if_cancelled(cancellation_requested)
             with self._uow_factory() as uow:
                 if uow.subtitle_translations.all_batches_succeeded(
                     translation_id=translation_id
@@ -458,6 +477,7 @@ class SyncSubtitleTranslationService:
                         "Subtitle translation batch is locked; waiting to retry"
                     )
                 batch_id = batch.id
+                batch_attempt = batch.attempt_count
                 start_index = batch.start_segment_index
                 end_index = batch.end_segment_index
                 translation = uow.subtitle_translations.get_by_id(translation_id)
@@ -507,6 +527,7 @@ class SyncSubtitleTranslationService:
             ]
 
             try:
+                self._raise_if_cancelled(cancellation_requested)
                 if use_madlad:
                     assert madlad_client is not None
                     generation = self._translate_with_madlad(
@@ -515,7 +536,10 @@ class SyncSubtitleTranslationService:
                         target_language=target_language,
                         batch_indexes=batch_indexes,
                         by_index=by_index,
-                        request_id=f"{translation_id}/{batch_id}",
+                        request_id=(
+                            f"{translation_id}/{batch_id}/attempt-{batch_attempt}"
+                        ),
+                        cancellation_requested=cancellation_requested,
                     )
                     validated = list(zip(batch_indexes, generation.translations))
                     provider_request_id = None
@@ -549,6 +573,7 @@ class SyncSubtitleTranslationService:
                         system_prompt=prompts.system_prompt,
                         user_prompt=prompts.user_prompt,
                     )
+                    self._raise_if_cancelled(cancellation_requested)
                     validated = validate_batch_translations(
                         expected_indexes=set(batch_indexes),
                         output=generation.output,
@@ -556,6 +581,15 @@ class SyncSubtitleTranslationService:
                     provider_request_id = generation.provider_request_id
                     input_tokens = generation.usage.input_tokens
                     output_tokens = generation.usage.output_tokens
+            except (SecondaryTaskCancelledError, GpuExecutionCanceledError):
+                with self._uow_factory() as uow:
+                    uow.subtitle_translations.release_cancelled_batch(
+                        batch_id=batch_id,
+                        lease_owner=lease_owner,
+                    )
+                raise SecondaryTaskCancelledError(
+                    "Subtitle translation was cancelled"
+                )
             except RetryableContentProcessingError as exc:
                 with self._uow_factory() as uow:
                     uow.subtitle_translations.mark_batch_failed(
@@ -588,6 +622,7 @@ class SyncSubtitleTranslationService:
             ]
             last_model = generation.model
 
+            self._raise_if_cancelled(cancellation_requested)
             with self._uow_factory() as uow:
                 uow.subtitle_translations.replace_batch_segments(
                     translation_id=translation_id,
@@ -641,6 +676,7 @@ class SyncSubtitleTranslationService:
         batch_indexes: list[int],
         by_index: dict[int, SourceSegmentView],
         request_id: str,
+        cancellation_requested: Callable[[], bool] | None,
     ) -> MadladGeneration:
         if source_language is None:
             raise PermanentContentProcessingError(
@@ -653,6 +689,7 @@ class SyncSubtitleTranslationService:
             source_lang=source_code,
             target_lang=target_code,
             request_id=request_id,
+            cancellation_requested=cancellation_requested,
         )
         cleaned = [
             sanitize_spoken_text((text or "").strip()).strip()
@@ -680,6 +717,13 @@ class SyncSubtitleTranslationService:
             count=len(cleaned),
             adapter_sha256=generation.adapter_sha256,
         )
+
+    @staticmethod
+    def _raise_if_cancelled(
+        cancellation_requested: Callable[[], bool] | None,
+    ) -> None:
+        if cancellation_requested is not None and cancellation_requested():
+            raise SecondaryTaskCancelledError("Secondary task was cancelled")
 
     def _load_completed_segments(self, translation_id: UUID) -> list[SubtitleSegment]:
         with self._uow_factory() as uow:

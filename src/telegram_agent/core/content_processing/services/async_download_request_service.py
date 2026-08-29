@@ -16,6 +16,7 @@ from telegram_agent.core.content_processing.common.results import (
 )
 from telegram_agent.core.content_processing.common.settings import Settings, settings
 from telegram_agent.core.content_processing.common.types import (
+    DownloadDeliveryStatus,
     JobCompletionExpectationKind,
     JobCompletionExpectationStatus,
     JobKind,
@@ -62,11 +63,42 @@ class AsyncDownloadRequestService:
                         media_type=command.media_type,
                     )
 
+                is_secondary = bool(
+                    command.requested_subtitle_language
+                    or command.requested_dub_language
+                )
+                if is_secondary and command.reply_to_message_id is None:
+                    raise JobCreationError(
+                        "Dub/subtitle requests require reply_to_message_id"
+                    )
+                covering_cancellation = None
+                if is_secondary and command.reply_to_message_id is not None:
+                    await uow.secondary_task_cancellations.lock_scope(
+                        telegram_user_id=command.telegram_user_id,
+                        chat_id=command.chat_id,
+                    )
+                    covering_cancellation = (
+                        await uow.secondary_task_cancellations.find_covering(
+                            telegram_user_id=command.telegram_user_id,
+                            chat_id=command.chat_id,
+                            request_message_id=command.reply_to_message_id,
+                        )
+                    )
+
                 job = Job(
                     kind=JobKind.DOWNLOAD_PREPARATION,
-                    status=JobStatus.QUEUED,
+                    status=(
+                        JobStatus.CANCELLED
+                        if covering_cancellation is not None
+                        else JobStatus.QUEUED
+                    ),
                     idempotency_key=command.idempotency_key,
                     callback_required=False,
+                    error_message=(
+                        "Cancelled by an earlier /cancel_all command"
+                        if covering_cancellation is not None
+                        else None
+                    ),
                 )
                 await uow.jobs.add(job)
 
@@ -85,8 +117,32 @@ class AsyncDownloadRequestService:
                     assistant_text=command.assistant_text,
                     reply_to_message_id=command.reply_to_message_id,
                     final_path=None,
+                    cancelled_by_id=(
+                        covering_cancellation.id
+                        if covering_cancellation is not None
+                        else None
+                    ),
+                    cancellation_requested_at=(
+                        utcnow() if covering_cancellation is not None else None
+                    ),
+                    cancelled_at=(
+                        utcnow() if covering_cancellation is not None else None
+                    ),
+                    delivery_status=(
+                        DownloadDeliveryStatus.CANCELLED
+                        if covering_cancellation is not None
+                        else DownloadDeliveryStatus.PENDING
+                    ),
                 )
                 await uow.download_requests.add(download_request)
+
+                if covering_cancellation is not None:
+                    return CreateDownloadRequestResult(
+                        job_id=job.id,
+                        status=job.status,
+                        created=True,
+                        media_type=command.media_type,
+                    )
 
                 event_type = OutboxEventType.DOWNLOAD_PREPARATION_READY
                 await uow.outbox_events.add(

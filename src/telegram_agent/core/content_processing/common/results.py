@@ -25,6 +25,15 @@ class CreateDownloadRequestResult(BaseModel):
     media_type: str
 
 
+class RegisterSecondaryTaskCancellationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    cancellation_id: UUID
+    cutoff_message_id: int
+    matched_active_count: int
+    created: bool
+
+
 @dataclass(frozen=True)
 class OutboxDispatchResult:
     claimed: int = 0

@@ -104,6 +104,7 @@ class SyncSqlAlchemyJobRepository:
                     (
                         JobStatus.TRANSCRIBED,
                         JobStatus.COMPLETED,
+                        JobStatus.CANCELLING,
                         JobStatus.FAILED,
                         JobStatus.TIMED_OUT,
                         JobStatus.CANCELLED,
@@ -191,6 +192,45 @@ class SyncSqlAlchemyJobRepository:
             .returning(Job.id)
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def request_download_cancellation(self, *, job_id: UUID) -> JobStatus | None:
+        current_status = self._session.scalar(
+            select(Job.status).where(Job.id == job_id).with_for_update()
+        )
+        if current_status == JobStatus.QUEUED:
+            next_status = JobStatus.CANCELLED
+        elif current_status == JobStatus.RUNNING:
+            next_status = JobStatus.CANCELLING
+        else:
+            return None
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == current_status)
+            .values(
+                status=next_status,
+                error_message="Secondary task cancellation requested",
+                updated_at=func.now(),
+            )
+            .returning(Job.status)
+        )
+        return self._session.execute(statement).scalar_one_or_none()
+
+    def finalize_download_cancellation(self, *, job_id: UUID) -> bool:
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.CANCELLING)
+            .values(
+                status=JobStatus.CANCELLED,
+                error_message="Secondary task request was cancelled",
+                updated_at=func.now(),
+            )
+            .returning(Job.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def is_cancellation_requested(self, *, job_id: UUID) -> bool:
+        status = self._session.scalar(select(Job.status).where(Job.id == job_id))
+        return status in (JobStatus.CANCELLING, JobStatus.CANCELLED)
 
     def _mark_retryable(self, *, job_id: UUID, from_status: JobStatus, to_status: JobStatus, error_message: str) -> None:
         self._session.execute(

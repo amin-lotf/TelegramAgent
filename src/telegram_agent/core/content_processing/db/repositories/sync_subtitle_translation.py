@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.engine import CursorResult
 
 from telegram_agent.core.common.utils import clean_error_message, utcnow
 from telegram_agent.core.content_processing.common.types import (
@@ -314,6 +316,31 @@ class SyncSqlAlchemySubtitleTranslationRepository:
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
 
+    def release_cancelled_batch(
+        self,
+        *,
+        batch_id: UUID,
+        lease_owner: str,
+    ) -> bool:
+        statement = (
+            update(TranslationBatch)
+            .where(
+                TranslationBatch.id == batch_id,
+                TranslationBatch.status == TranslationBatchStatus.PROCESSING,
+                TranslationBatch.locked_by == lease_owner,
+            )
+            .values(
+                status=TranslationBatchStatus.PENDING,
+                locked_at=None,
+                locked_by=None,
+                attempt_count=func.greatest(TranslationBatch.attempt_count - 1, 0),
+                last_error=None,
+                updated_at=func.now(),
+            )
+            .returning(TranslationBatch.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
     def all_batches_succeeded(self, *, translation_id: UUID) -> bool:
         batches = self.list_batches(translation_id=translation_id)
         if not batches:
@@ -415,4 +442,4 @@ class SyncSqlAlchemySubtitleTranslationRepository:
             )
         )
         result = self._session.execute(statement)
-        return int(result.rowcount or 0)
+        return int(cast(CursorResult, result).rowcount or 0)

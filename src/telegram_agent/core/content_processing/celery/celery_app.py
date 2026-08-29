@@ -20,6 +20,7 @@ def create_celery_app() -> Celery:
             "telegram_agent.core.content_processing.celery.tasks.download_preparation",
             "telegram_agent.core.content_processing.celery.tasks.download_delivery",
             "telegram_agent.core.content_processing.celery.tasks.dubbing",
+            "telegram_agent.core.content_processing.celery.tasks.download_cancellation",
         ],
     )
 
@@ -109,6 +110,10 @@ def create_celery_app() -> Celery:
             "dubbing.advance": {
                 "queue": "dubbing",
                 "routing_key": "dubbing.advance",
+            },
+            "download.cancel": {
+                "queue": "download_preparation",
+                "routing_key": "download.prepare",
             },
         },
 

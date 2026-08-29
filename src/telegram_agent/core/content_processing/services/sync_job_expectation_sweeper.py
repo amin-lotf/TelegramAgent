@@ -161,6 +161,21 @@ class SyncJobExpectationSweeper:
                     return "skipped"
                 return "satisfied"
 
+            if job.status == JobStatus.CANCELLING:
+                # Do not finalize here: a dubbing workflow may still own an active
+                # GPU job, and only its cancellation worker can confirm that the
+                # external workload has stopped. The durable cancellation outbox
+                # event will retry independently while this expectation remains open.
+                reopened = uow.job_expectations.reopen_with_due_at(
+                    expectation_id=expectation.id,
+                    lease_owner=self._lease_owner,
+                    due_at=utcnow() + self._active_grace,
+                )
+                if reopened is not None:
+                    uow.jobs.touch(job_id=expectation.job_id)
+                    return "extended"
+                return "skipped"
+
             # Still actively processing: push the deadline instead of killing work.
             if job.status in _ACTIVE_JOB_STATUSES:
                 last_touch = job.updated_at or job.created_at

@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from telegram_agent.core.common.exceptions import (
     PermanentContentProcessingError,
     RetryableContentProcessingError,
+    SecondaryTaskCancelledError,
 )
 from telegram_agent.core.common.types import TelegramAttachmentType
 from telegram_agent.core.content_processing.common.results import StageExecutionResult
@@ -135,6 +136,9 @@ class SyncDownloadPreparationService:
             if final_path is not None:
                 self._record_success(job_id=job_id, final_path=final_path)
             return StageExecutionResult()
+        except SecondaryTaskCancelledError:
+            self._finish_cancellation(job_id)
+            return StageExecutionResult()
         except PermanentContentProcessingError as exc:
             self._mark_failed(job_id, str(exc))
             return StageExecutionResult(error_message=str(exc))
@@ -184,7 +188,9 @@ class SyncDownloadPreparationService:
             )
 
     def _prepare(self, request: DownloadRequest) -> str | None:
+        self._raise_if_cancelled(request.job_id)
         source_job_id = self._resolve_source_job_id(request)
+        self._raise_if_cancelled(request.job_id)
         media_type = request.media_type
 
         if media_type == DownloadMediaType.VIDEO.value:
@@ -365,7 +371,9 @@ class SyncDownloadPreparationService:
         segments = self._translation_service.ensure_translated(
             source_job_id=source_job_id,
             target_language=subtitle_language,
+            cancellation_requested=lambda: self._is_cancelled(request.job_id),
         )
+        self._raise_if_cancelled(request.job_id)
         subtitle_path = self._subtitle_service.prepare(
             job_id=request.job_id,
             segments=segments,
@@ -376,6 +384,7 @@ class SyncDownloadPreparationService:
             video_path=video_path,
             audio_path=audio_path,
             subtitle_path=subtitle_path,
+            cancellation_requested=lambda: self._is_cancelled(request.job_id),
         )
 
     def _prepare_audio(
@@ -423,6 +432,7 @@ class SyncDownloadPreparationService:
             return source.local_path
 
     def _record_success(self, *, job_id: UUID, final_path: str) -> None:
+        self._raise_if_cancelled(job_id)
         with self._uow_factory() as uow:
             if not uow.download_requests.set_final_path(
                 job_id=job_id,
@@ -483,3 +493,20 @@ class SyncDownloadPreparationService:
         with self._uow_factory() as uow:
             if uow.jobs.mark_failed(job_id=job_id, error_message=error_message):
                 uow.job_expectations.mark_satisfied(job_id=job_id)
+
+    def _is_cancelled(self, job_id: UUID) -> bool:
+        with self._uow_factory() as uow:
+            return uow.jobs.is_cancellation_requested(job_id=job_id)
+
+    def _raise_if_cancelled(self, job_id: UUID) -> None:
+        if self._is_cancelled(job_id):
+            raise SecondaryTaskCancelledError("Secondary task was cancelled")
+
+    def _finish_cancellation(self, job_id: UUID) -> None:
+        with self._uow_factory() as uow:
+            request = uow.download_requests.get_by_job_id(job_id)
+            if request is None or request.cancelled_by_id is None:
+                return
+            uow.jobs.finalize_download_cancellation(job_id=job_id)
+            uow.download_requests.mark_bulk_cancelled(job_id=job_id)
+            uow.job_expectations.mark_satisfied(job_id=job_id)

@@ -57,7 +57,16 @@ def test_video_preparation_sets_final_path_and_delivery_outbox(
     muxed_path.write_bytes(b"muxed-video")
 
     class FakeMux:
-        def mux(self, *, job_id, video_path, audio_path, subtitle_path):
+        def mux(
+            self,
+            *,
+            job_id,
+            video_path,
+            audio_path,
+            subtitle_path,
+            cancellation_requested=None,
+        ):
+            assert cancellation_requested is not None
             assert job_id == prep_job_id
             assert Path(video_path).is_file()
             assert Path(audio_path).is_file()

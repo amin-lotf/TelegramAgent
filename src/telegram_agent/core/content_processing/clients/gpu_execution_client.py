@@ -50,6 +50,7 @@ class GpuExecutionClient:
         timeout_seconds: int,
         max_attempts: int,
         heartbeat: Callable[[], None] | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> Path:
         job = self.submit(
             workload_type=workload_type,
@@ -64,6 +65,7 @@ class GpuExecutionClient:
             job=job,
             expected_output_path=output_path,
             heartbeat=heartbeat,
+            cancellation_requested=cancellation_requested,
         )
 
     def wait(
@@ -72,9 +74,13 @@ class GpuExecutionClient:
         job: GpuJobResponse,
         expected_output_path: Path,
         heartbeat: Callable[[], None] | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> Path:
         deadline = time.monotonic() + self._wait_timeout_seconds
         while True:
+            if cancellation_requested is not None and cancellation_requested():
+                self.cancel(job.id)
+                raise GpuExecutionCanceledError("GPU workload was canceled")
             if job.status == "succeeded":
                 result_path = Path(job.output_path)
                 if result_path != expected_output_path.resolve(strict=False):

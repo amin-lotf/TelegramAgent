@@ -418,6 +418,41 @@ class OutboxEvent(Base):
     )
 
 
+class SecondaryTaskCancellation(Base):
+    __tablename__ = "secondary_task_cancellations"
+
+    id: Mapped[UUID] = mapped_column(
+        SA_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, index=True
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    cutoff_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True, index=True
+    )
+    matched_active_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sa.text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "matched_active_count >= 0",
+            name="ck_secondary_task_cancellations_matched_count_non_negative",
+        ),
+        Index(
+            "ix_secondary_task_cancellations_scope_cutoff",
+            "telegram_user_id",
+            "chat_id",
+            "cutoff_message_id",
+        ),
+    )
+
+
 class DownloadRequest(Base):
     __tablename__ = "download_requests"
 
@@ -506,6 +541,19 @@ class DownloadRequest(Base):
     final_path: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
+    )
+
+    cancelled_by_id: Mapped[UUID | None] = mapped_column(
+        SA_UUID(as_uuid=True),
+        ForeignKey("secondary_task_cancellations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     delivery_status: Mapped[DownloadDeliveryStatus] = mapped_column(

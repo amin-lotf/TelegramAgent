@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -20,6 +21,9 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
 )
 from telegram_agent.core.content_processing.services.subtitle_preparation_service import (
     SubtitleSegment,
+)
+from telegram_agent.core.content_processing.downloaders.cancellable_process import (
+    CancellableProcessRunner,
 )
 
 
@@ -108,6 +112,10 @@ class DubbingAudioAssemblyService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._root = Path(settings.media_storage_root).expanduser().resolve()
+        self._process_runner = CancellableProcessRunner(
+            cancel_grace_seconds=settings.ffmpeg_cancel_grace_seconds
+        )
+        self._cancellation_requested: Callable[[], bool] | None = None
 
     def assemble(
         self,
@@ -117,7 +125,9 @@ class DubbingAudioAssemblyService:
         residual_path: Path,
         plan_path: Path,
         tts_manifest_path: Path,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> Path:
+        self._cancellation_requested = cancellation_requested
         for path, label in (
             (video_path, "video"),
             (residual_path, "residual audio"),
@@ -344,12 +354,10 @@ class DubbingAudioAssemblyService:
         if shutil.which(command[0]) is None:
             raise PermanentContentProcessingError(f"Binary is unavailable: {command[0]}")
         try:
-            completed = subprocess.run(
+            completed = self._process_runner.run(
                 command,
-                capture_output=True,
-                text=True,
-                timeout=self._settings.ffmpeg_timeout_seconds,
-                check=False,
+                timeout_seconds=self._settings.ffmpeg_timeout_seconds,
+                cancellation_requested=self._cancellation_requested,
             )
         except subprocess.TimeoutExpired as exc:
             raise RetryableContentProcessingError(f"{operation} timed out") from exc
