@@ -22,7 +22,10 @@ from telegram_agent.core.content_processing.common.language_codes import (
     canonical_madlad_language,
 )
 from telegram_agent.core.content_processing.common.settings import Settings, settings
-from telegram_agent.core.content_processing.common.types import SubtitleTranslationStatus
+from telegram_agent.core.content_processing.common.types import (
+    SubtitleTranslationBackend,
+    SubtitleTranslationStatus,
+)
 from telegram_agent.core.content_processing.db.models.content_processing import (
     SubtitleTranslation,
 )
@@ -112,6 +115,29 @@ class SyncSubtitleTranslationService:
 
     def _uses_openai(self) -> bool:
         return self._settings.subtitle_translation_backend == "openai"
+
+    def _requested_backend(self) -> SubtitleTranslationBackend:
+        return SubtitleTranslationBackend(self._settings.subtitle_translation_backend)
+
+    def _requested_model(self) -> str:
+        if self._uses_openai():
+            return self._settings.subtitle_translation_model
+        return self._settings.madlad_model
+
+    @staticmethod
+    def _snapshot_translation(row: SubtitleTranslation) -> SubtitleTranslation:
+        return SubtitleTranslation(
+            id=row.id,
+            job_id=row.job_id,
+            source_language=row.source_language,
+            target_language=row.target_language,
+            backend=row.backend,
+            status=row.status,
+            glossary=row.glossary,
+            model_name=row.model_name,
+            error_message=row.error_message,
+            completed_at=row.completed_at,
+        )
 
     def ensure_translated(
         self,
@@ -232,39 +258,25 @@ class SyncSubtitleTranslationService:
         source_language: str | None,
         target_language: str,
     ) -> SubtitleTranslation:
+        backend = self._requested_backend()
+        model_name = self._requested_model()
         with self._uow_factory() as uow:
-            existing = uow.subtitle_translations.get_by_job_and_language(
+            existing = uow.subtitle_translations.get_by_job_language_backend_and_model(
                 job_id=source_job_id,
                 target_language=target_language,
+                backend=backend,
+                model_name=model_name,
             )
             if existing is not None:
-                return SubtitleTranslation(
-                    id=existing.id,
-                    job_id=existing.job_id,
-                    source_language=existing.source_language,
-                    target_language=existing.target_language,
-                    status=existing.status,
-                    glossary=existing.glossary,
-                    model_name=existing.model_name,
-                    error_message=existing.error_message,
-                    completed_at=existing.completed_at,
-                )
+                return self._snapshot_translation(existing)
             created = uow.subtitle_translations.create(
                 job_id=source_job_id,
                 source_language=source_language,
                 target_language=target_language,
+                backend=backend,
+                model_name=model_name,
             )
-            return SubtitleTranslation(
-                id=created.id,
-                job_id=created.job_id,
-                source_language=created.source_language,
-                target_language=created.target_language,
-                status=created.status,
-                glossary=created.glossary,
-                model_name=created.model_name,
-                error_message=created.error_message,
-                completed_at=created.completed_at,
-            )
+            return self._snapshot_translation(created)
 
     def _prepare_failed_for_resume(self, translation_id: UUID) -> None:
         with self._uow_factory() as uow:
@@ -334,7 +346,6 @@ class SyncSubtitleTranslationService:
         )
         client = self._require_llm_client()
         partials: list[dict[str, object]] = []
-        last_model: str | None = None
 
         try:
             for window_index, window in enumerate(windows):
@@ -352,7 +363,6 @@ class SyncSubtitleTranslationService:
                 )
                 self._raise_if_cancelled(cancellation_requested)
                 partials.append(generation.output)
-                last_model = generation.model
         except (SecondaryTaskCancelledError, GpuExecutionCanceledError):
             raise SecondaryTaskCancelledError("Subtitle translation was cancelled")
         except RetryableContentProcessingError:
@@ -379,11 +389,6 @@ class SyncSubtitleTranslationService:
                 translation_id=translation_id,
                 glossary=glossary,
             )
-            if last_model:
-                uow.subtitle_translations.set_model_name(
-                    translation_id=translation_id,
-                    model_name=last_model,
-                )
 
         logger.info(
             "Built subtitle glossary",
@@ -441,7 +446,6 @@ class SyncSubtitleTranslationService:
             seconds=self._settings.subtitle_translation_batch_lease_seconds
         )
         max_attempts = self._settings.subtitle_translation_max_batch_attempts
-        last_model: str | None = None
 
         while True:
             self._raise_if_cancelled(cancellation_requested)
@@ -559,7 +563,6 @@ class SyncSubtitleTranslationService:
                     provider_request_id = generation.provider_request_id
                     input_tokens = generation.usage.input_tokens
                     output_tokens = generation.usage.output_tokens
-                    last_model = generation.model
                 else:
                     assert madlad_client is not None
                     generation = self._translate_with_madlad(
@@ -578,7 +581,6 @@ class SyncSubtitleTranslationService:
                     provider_request_id = None
                     input_tokens = None
                     output_tokens = None
-                    last_model = generation.model
             except (SecondaryTaskCancelledError, GpuExecutionCanceledError):
                 with self._uow_factory() as uow:
                     uow.subtitle_translations.release_cancelled_batch(
@@ -661,7 +663,6 @@ class SyncSubtitleTranslationService:
                 )
             uow.subtitle_translations.mark_completed(
                 translation_id=translation_id,
-                model_name=last_model,
             )
 
     def _translate_with_madlad(

@@ -32,6 +32,7 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_MADLAD_BEAM_SIZE,
     DEFAULT_MADLAD_CLIENT_BATCH_SIZE,
     DEFAULT_MADLAD_LANGUAGE_PAIRS,
+    DEFAULT_MADLAD_MODEL,
     DEFAULT_MADLAD_MAX_NEW_TOKENS,
     DEFAULT_MADLAD_REQUEST_MAX_ATTEMPTS,
     DEFAULT_MADLAD_REQUEST_TIMEOUT_SECONDS,
@@ -48,6 +49,7 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_SUBTITLE_TRANSLATION_MAX_BATCH_ATTEMPTS,
     DEFAULT_SUBTITLE_TRANSLATION_MAX_SEGMENTS_PER_BATCH,
     DEFAULT_SUBTITLE_TRANSLATION_MAX_SOURCE_TOKENS,
+    DEFAULT_SUBTITLE_TRANSLATION_MODEL,
     DEFAULT_SUBTITLE_TRANSLATION_PREVIOUS_CONTEXT,
     DEFAULT_TELEGRAM_INGRESS_BASE_URL,
     DEFAULT_TELEGRAM_INGRESS_REQUEST_TIMEOUT_SECONDS,
@@ -403,6 +405,18 @@ class Settings(BaseSettings):
             "subtitle_translation_backend",
         ),
     )
+    subtitle_translation_model: str = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_MODEL,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_MODEL",
+            "subtitle_translation_model",
+        ),
+        min_length=1,
+        description=(
+            "Requested OpenAI model used as the subtitle-translation cache key. "
+            "Should match llm_gateway REPLY_MODEL."
+        ),
+    )
     subtitle_translation_max_source_tokens: int = Field(
         default=DEFAULT_SUBTITLE_TRANSLATION_MAX_SOURCE_TOKENS,
         validation_alias=AliasChoices(
@@ -499,6 +513,12 @@ class Settings(BaseSettings):
             "MADLAD_LANGUAGE_PAIRS", "madlad_language_pairs"
         ),
         description="Comma-separated source:target pairs routed to local MADLAD.",
+    )
+    madlad_model: str = Field(
+        default=DEFAULT_MADLAD_MODEL,
+        validation_alias=AliasChoices("MADLAD_MODEL", "madlad_model"),
+        min_length=1,
+        description="Requested MADLAD model id used for local translation and cache identity.",
     )
     madlad_base_url: str = Field(
         default=DEFAULT_MADLAD_BASE_URL,

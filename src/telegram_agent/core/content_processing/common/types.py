@@ -76,6 +76,11 @@ class SubtitleTranslationStatus(StrEnum):
     FAILED = "failed"
 
 
+class SubtitleTranslationBackend(StrEnum):
+    LOCAL = "local"
+    OPENAI = "openai"
+
+
 class TranslationBatchStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"

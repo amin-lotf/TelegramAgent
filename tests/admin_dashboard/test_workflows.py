@@ -198,6 +198,7 @@ def test_subtitle_workflow_reports_translation_batch_progress() -> None:
         job_id=request.source_job.id,
         source_language="en",
         target_language="fa",
+        backend="local",
         status="translating",
         model_name="madlad",
         error_message=None,
@@ -239,6 +240,8 @@ def test_subtitle_workflow_reports_translation_batch_progress() -> None:
     assert workflow.current_stage == "Translate transcript"
     assert translation_stage.status == StageStatus.PENDING
     assert translation_stage.detail is not None
+    assert "local" in translation_stage.detail
+    assert "madlad" in translation_stage.detail
     assert "1/2 batches" in translation_stage.detail
 
 
@@ -330,6 +333,7 @@ def test_translation_failure_is_workflow_failure() -> None:
             job_id=request.source_job.id,
             source_language="en",
             target_language="fa",
+            backend="openai",
             status="failed",
             model_name=None,
             error_message="provider rejected batch",

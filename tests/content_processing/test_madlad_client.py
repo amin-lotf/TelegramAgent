@@ -61,6 +61,7 @@ def test_writes_input_and_validates_gpu_result(tmp_path: Path, monkeypatch: pyte
     call = gpu.calls[0]
     assert call["workload_type"] == MADLAD_TRANSLATION_WORKLOAD
     assert call["idempotency_key"] == f"{MADLAD_TRANSLATION_WORKLOAD}:job-1"
+    assert call["parameters"]["model"] == settings.madlad_model
     input_path = Path(call["input_path"])
     assert json.loads(input_path.read_text(encoding="utf-8")) == {
         "texts": ["Hello", "world"],

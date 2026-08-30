@@ -100,7 +100,7 @@ class MadladClient:
                 input_path=input_path,
                 output_path=output_path,
                 parameters={
-                    "model": "google/madlad400-3b-mt",
+                    "model": self._settings.madlad_model,
                     "beam_size": self._settings.madlad_beam_size,
                     "max_new_tokens": self._settings.madlad_max_new_tokens,
                     "max_batch_size": self._settings.madlad_client_batch_size,

@@ -585,6 +585,201 @@ def test_setup_writes_download_agent_backend(tmp_path: Path) -> None:
     assert translation["SUBTITLE_TRANSLATION_BACKEND"] == "local"
 
 
+def _write_configured_env(root: Path, relative: str, contents: str) -> Path:
+    dest = _write_example(root, relative, contents)
+    example = dest.with_name(dest.name + ".example")
+    example.write_text(contents, encoding="utf-8")
+    return dest
+
+
+def _backend_env_tree(tmp_path: Path, *, openai_key: str, backend: str) -> tuple[Path, Path]:
+    gateway = _write_configured_env(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker",
+        (
+            f"OPENAI_API_KEY={openai_key}\n"
+            f"DOWNLOAD_AGENT_BACKEND={backend}\n"
+            "LLM_GATEWAY_SERVICE_TOKEN=already-generated\n"
+        ),
+    )
+    translation = _write_configured_env(
+        tmp_path,
+        "docker/app/.env.content_processing.docker",
+        (
+            f"SUBTITLE_TRANSLATION_BACKEND={backend}\n"
+            "CONTENT_PROCESSING_SERVICE_TOKEN=already-generated\n"
+        ),
+    )
+    return gateway, translation
+
+
+def test_apply_backend_local_keeps_openai_key_and_generated_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="sk-existing", backend="openai"
+    )
+
+    def fake_getpass(prompt: str) -> str:
+        raise AssertionError("OpenAI key must not be requested for local backend")
+
+    monkeypatch.setattr(_MODULE.getpass, "getpass", fake_getpass)
+
+    _MODULE.apply_backend(tmp_path, "local", interactive=True)
+
+    values = _env(gateway)
+    assert values["DOWNLOAD_AGENT_BACKEND"] == "local"
+    assert values["OPENAI_API_KEY"] == "sk-existing"
+    assert values["LLM_GATEWAY_SERVICE_TOKEN"] == "already-generated"
+    translation_values = _env(translation)
+    assert translation_values["SUBTITLE_TRANSLATION_BACKEND"] == "local"
+    assert translation_values["CONTENT_PROCESSING_SERVICE_TOKEN"] == "already-generated"
+
+
+def test_apply_backend_openai_reuses_existing_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="sk-existing", backend="local"
+    )
+
+    def fake_getpass(prompt: str) -> str:
+        raise AssertionError("OpenAI key must not be requested when one already exists")
+
+    monkeypatch.setattr(_MODULE.getpass, "getpass", fake_getpass)
+
+    _MODULE.apply_backend(tmp_path, "openai", interactive=True)
+
+    assert _env(gateway)["DOWNLOAD_AGENT_BACKEND"] == "openai"
+    assert _env(gateway)["OPENAI_API_KEY"] == "sk-existing"
+    assert _env(translation)["SUBTITLE_TRANSLATION_BACKEND"] == "openai"
+
+
+def test_apply_backend_openai_prompts_when_key_is_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="replace-me", backend="local"
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(_MODULE.getpass, "getpass", lambda prompt: "sk-live")
+
+    _MODULE.apply_backend(tmp_path, "openai", interactive=True)
+
+    assert _env(gateway)["OPENAI_API_KEY"] == "sk-live"
+    assert _env(gateway)["DOWNLOAD_AGENT_BACKEND"] == "openai"
+    assert _env(translation)["SUBTITLE_TRANSLATION_BACKEND"] == "openai"
+
+
+def test_apply_backend_openai_prompts_when_key_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gateway, _translation = _backend_env_tree(
+        tmp_path, openai_key="", backend="local"
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(_MODULE.getpass, "getpass", lambda prompt: "sk-from-prompt")
+
+    _MODULE.apply_backend(tmp_path, "openai", interactive=True)
+
+    assert _env(gateway)["OPENAI_API_KEY"] == "sk-from-prompt"
+
+
+def test_apply_backend_openai_interactive_without_tty_does_not_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="", backend="local"
+    )
+    original_gateway = gateway.read_text(encoding="utf-8")
+    original_translation = translation.read_text(encoding="utf-8")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(_MODULE.SetupError, match="terminal"):
+        _MODULE.apply_backend(tmp_path, "openai", interactive=True)
+
+    assert gateway.read_text(encoding="utf-8") == original_gateway
+    assert translation.read_text(encoding="utf-8") == original_translation
+
+
+def test_apply_backend_openai_non_interactive_requires_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="replace-me", backend="local"
+    )
+    original_gateway = gateway.read_text(encoding="utf-8")
+    original_translation = translation.read_text(encoding="utf-8")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    exit_code = _MODULE.main(
+        ["--root", str(tmp_path), "--apply-backend", "openai", "--non-interactive"]
+    )
+
+    assert exit_code == 1
+    assert gateway.read_text(encoding="utf-8") == original_gateway
+    assert translation.read_text(encoding="utf-8") == original_translation
+
+
+def test_apply_backend_openai_non_interactive_reads_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="", backend="local"
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+
+    exit_code = _MODULE.main(
+        ["--root", str(tmp_path), "--apply-backend", "openai", "--non-interactive"]
+    )
+
+    assert exit_code == 0
+    assert _env(gateway)["OPENAI_API_KEY"] == "sk-from-env"
+    assert _env(gateway)["DOWNLOAD_AGENT_BACKEND"] == "openai"
+    assert _env(translation)["SUBTITLE_TRANSLATION_BACKEND"] == "openai"
+    assert "Using OpenAI" in capsys.readouterr().out
+
+
+def test_apply_backend_local_via_main(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gateway, translation = _backend_env_tree(
+        tmp_path, openai_key="sk-existing", backend="openai"
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--apply-backend", "local"])
+
+    assert exit_code == 0
+    assert _env(gateway)["DOWNLOAD_AGENT_BACKEND"] == "local"
+    assert _env(gateway)["OPENAI_API_KEY"] == "sk-existing"
+    assert _env(translation)["SUBTITLE_TRANSLATION_BACKEND"] == "local"
+    assert "Using local GPU" in capsys.readouterr().out
+
+
+def test_apply_backend_missing_env_files_fails(tmp_path: Path) -> None:
+    _write_example(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker.example",
+        "DOWNLOAD_AGENT_BACKEND=openai\nOPENAI_API_KEY=replace-me\n",
+    )
+
+    with pytest.raises(_MODULE.SetupError, match="make setup"):
+        _MODULE.apply_backend(tmp_path, "local", interactive=False)
+
+
+def test_apply_backend_rejects_invalid_backend(tmp_path: Path) -> None:
+    _backend_env_tree(tmp_path, openai_key="sk-existing", backend="local")
+
+    with pytest.raises(_MODULE.SetupError, match="local"):
+        _MODULE.apply_backend(tmp_path, "cloud", interactive=False)
+
+
+def test_apply_backend_invalid_choice_is_rejected_by_argparse() -> None:
+    with pytest.raises(SystemExit) as exc:
+        _MODULE.main(["--apply-backend", "cloud"])
+    assert exc.value.code == 2
+
+
 def test_is_generated_secret_does_not_match_token_count_settings() -> None:
     assert _MODULE.is_generated_secret("AUTH_SERVICE_TOKEN")
     assert _MODULE.is_generated_secret("N8N_ENCRYPTION_KEY")

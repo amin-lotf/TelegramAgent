@@ -377,20 +377,10 @@ class ContentProcessingReader:
                 select(translations).where(translations.c.job_id.in_(source_job_ids))
             )
             for row in translation_result:
-                translations_by_key[(row.job_id, row.target_language.casefold())] = (
-                    SubtitleTranslationRow(
-                        id=row.id,
-                        job_id=row.job_id,
-                        source_language=row.source_language,
-                        target_language=row.target_language,
-                        status=row.status,
-                        model_name=row.model_name,
-                        error_message=row.error_message,
-                        created_at=row.created_at,
-                        updated_at=row.updated_at,
-                        completed_at=row.completed_at,
-                    )
-                )
+                key = (row.job_id, row.target_language.casefold())
+                current = translations_by_key.get(key)
+                if current is None or row.updated_at > current.updated_at:
+                    translations_by_key[key] = _translation_row(row, batches=())
 
         enriched: list[DownloadRequestView] = []
         for request in requests:
@@ -451,19 +441,25 @@ class ContentProcessingReader:
     ) -> SubtitleTranslationRow | None:
         translations = tables.subtitle_translations
         result = await self._session.execute(
-            select(translations).where(
+            select(translations)
+            .where(
                 translations.c.job_id == job_id,
                 translations.c.target_language == target_language.strip().casefold(),
             )
+            .order_by(translations.c.updated_at.desc())
+            .limit(1)
         )
         row = result.one_or_none()
         if row is None:
             # Historical rows may preserve the requested spelling/case.
             result = await self._session.execute(
-                select(translations).where(
+                select(translations)
+                .where(
                     translations.c.job_id == job_id,
                     translations.c.target_language.ilike(target_language.strip()),
                 )
+                .order_by(translations.c.updated_at.desc())
+                .limit(1)
             )
             row = result.one_or_none()
         if row is None:
@@ -474,17 +470,8 @@ class ContentProcessingReader:
             .where(batches.c.subtitle_translation_id == row.id)
             .order_by(batches.c.batch_index.asc())
         )
-        return SubtitleTranslationRow(
-            id=row.id,
-            job_id=row.job_id,
-            source_language=row.source_language,
-            target_language=row.target_language,
-            status=row.status,
-            model_name=row.model_name,
-            error_message=row.error_message,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            completed_at=row.completed_at,
+        return _translation_row(
+            row,
             batches=tuple(
                 TranslationBatchRow(
                     id=batch.id,
@@ -500,6 +487,25 @@ class ContentProcessingReader:
                 for batch in batch_result
             ),
         )
+
+
+def _translation_row(
+    row: Any, *, batches: tuple[TranslationBatchRow, ...]
+) -> SubtitleTranslationRow:
+    return SubtitleTranslationRow(
+        id=row.id,
+        job_id=row.job_id,
+        source_language=row.source_language,
+        target_language=row.target_language,
+        backend=row.backend,
+        status=row.status,
+        model_name=row.model_name,
+        error_message=row.error_message,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        completed_at=row.completed_at,
+        batches=batches,
+    )
 
 
 def _job_row(row: Any) -> JobRow:

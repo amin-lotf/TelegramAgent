@@ -19,6 +19,7 @@ from telegram_agent.core.content_processing.common.types import (
     JobKind,
     MediaAssetRole,
     OutboxEventStatus,
+    SubtitleTranslationBackend,
     SubtitleTranslationStatus,
     TranslationBatchStatus,
 )
@@ -856,6 +857,16 @@ class SubtitleTranslation(Base):
         nullable=False,
     )
 
+    backend: Mapped[SubtitleTranslationBackend] = mapped_column(
+        sa.Enum(
+            SubtitleTranslationBackend,
+            values_callable=get_enum_values,
+            native_enum=False,
+            length=32,
+        ),
+        nullable=False,
+    )
+
     status: Mapped[SubtitleTranslationStatus] = mapped_column(
         sa.Enum(
             SubtitleTranslationStatus,
@@ -873,9 +884,9 @@ class SubtitleTranslation(Base):
         nullable=True,
     )
 
-    model_name: Mapped[str | None] = mapped_column(
+    model_name: Mapped[str] = mapped_column(
         String(128),
-        nullable=True,
+        nullable=False,
     )
 
     error_message: Mapped[str | None] = mapped_column(
@@ -917,7 +928,9 @@ class SubtitleTranslation(Base):
         UniqueConstraint(
             "job_id",
             "target_language",
-            name="uq_subtitle_translations_job_language",
+            "backend",
+            "model_name",
+            name="uq_subtitle_translations_job_language_backend_model",
         ),
     )
 

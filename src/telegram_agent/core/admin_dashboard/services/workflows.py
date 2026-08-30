@@ -244,7 +244,9 @@ def _translation_stage(request: DownloadRequestView) -> WorkflowStageView:
     succeeded = sum(batch.status == "succeeded" for batch in batches)
     progress = f"{succeeded}/{len(batches)} batches" if batches else None
     failed_batch = next((batch for batch in batches if batch.status == "failed"), None)
-    detail_parts = [part for part in (progress, translation.model_name) if part]
+    detail_parts = [
+        part for part in (progress, translation.backend, translation.model_name) if part
+    ]
     if translation.status == "completed":
         return _stage(
             "translation",

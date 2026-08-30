@@ -252,6 +252,7 @@ class SubtitleTranslationRow:
     job_id: UUID
     source_language: str | None
     target_language: str
+    backend: str
     status: str
     model_name: str | None
     error_message: str | None

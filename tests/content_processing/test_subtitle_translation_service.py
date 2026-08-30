@@ -19,6 +19,7 @@ from telegram_agent.core.content_processing.common.settings import settings
 from telegram_agent.core.content_processing.common.types import (
     JobKind,
     JobStatus,
+    SubtitleTranslationBackend,
     SubtitleTranslationStatus,
     TranslationBatchStatus,
 )
@@ -224,6 +225,8 @@ def test_translates_and_reuses_completed(
         )
         assert translation is not None
         assert translation.status == SubtitleTranslationStatus.COMPLETED
+        assert translation.backend == SubtitleTranslationBackend.LOCAL
+        assert translation.model_name == "google/madlad400-3b-mt"
         assert translation.glossary is not None
         segments = list(
             session.scalars(
@@ -553,6 +556,8 @@ def test_openai_backend_builds_glossary_then_translates(
         )
         assert translation is not None
         assert translation.status == SubtitleTranslationStatus.COMPLETED
+        assert translation.backend == SubtitleTranslationBackend.OPENAI
+        assert translation.model_name == settings.subtitle_translation_model
         assert translation.glossary is not None
         assert translation.glossary["entries"][0]["source_term"] == "Alice"
         batches = list(session.scalars(select(TranslationBatch)))
@@ -645,3 +650,186 @@ def test_openai_cancellation_after_provider_response_releases_claimed_batch(
         assert batches[0].locked_at is None
         assert batches[0].locked_by is None
         assert list(session.scalars(select(TranslatedSegment))) == []
+
+
+def test_create_persists_backend_and_requested_model(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "openai")
+    monkeypatch.setattr(settings, "subtitle_translation_model", "gpt-4.1")
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=FakeMadladClient(),  # type: ignore[arg-type]
+    )
+
+    created = service._get_or_create_translation(
+        source_job_id=job_id,
+        source_language="en",
+        target_language="fa",
+    )
+
+    assert created.backend == SubtitleTranslationBackend.OPENAI
+    assert created.model_name == "gpt-4.1"
+    assert created.status == SubtitleTranslationStatus.PENDING
+    with content_sync_sessionmaker() as session:
+        row = session.scalar(
+            select(SubtitleTranslation).where(SubtitleTranslation.job_id == job_id)
+        )
+        assert row is not None
+        assert row.backend == SubtitleTranslationBackend.OPENAI
+        assert row.model_name == "gpt-4.1"
+
+
+def test_switching_backend_creates_separate_translations(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "local")
+    first_madlad = FakeMadladClient()
+    local_service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=first_madlad,  # type: ignore[arg-type]
+    )
+    local_segments = local_service.ensure_translated(
+        source_job_id=job_id, target_language="fa"
+    )
+    assert [segment.text for segment in local_segments] == [
+        "LOCAL:Hello Alice",
+        "LOCAL:How are you?",
+    ]
+
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "openai")
+    openai_llm = FakeLlmClient()
+    openai_madlad = FakeMadladClient()
+    openai_service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=openai_llm,  # type: ignore[arg-type]
+        madlad_client=openai_madlad,  # type: ignore[arg-type]
+    )
+    openai_segments = openai_service.ensure_translated(
+        source_job_id=job_id, target_language="fa"
+    )
+    assert [segment.text for segment in openai_segments] == [
+        "FA:Hello Alice",
+        "FA:How are you?",
+    ]
+    assert openai_llm.glossary_calls == 1
+    assert openai_madlad.calls == []
+
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "local")
+    reused_madlad = FakeMadladClient()
+    reused_llm = FakeLlmClient()
+    local_again = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=reused_llm,  # type: ignore[arg-type]
+        madlad_client=reused_madlad,  # type: ignore[arg-type]
+    )
+    reused = local_again.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert [segment.text for segment in reused] == [
+        "LOCAL:Hello Alice",
+        "LOCAL:How are you?",
+    ]
+    assert reused_madlad.calls == []
+    assert reused_llm.glossary_calls == 0
+
+    with content_sync_sessionmaker() as session:
+        rows = list(
+            session.scalars(
+                select(SubtitleTranslation).where(SubtitleTranslation.job_id == job_id)
+            )
+        )
+        assert {row.backend for row in rows} == {
+            SubtitleTranslationBackend.LOCAL,
+            SubtitleTranslationBackend.OPENAI,
+        }
+
+
+def test_openai_model_change_does_not_reuse_previous_translation(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "openai")
+    monkeypatch.setattr(settings, "subtitle_translation_model", "gpt-5.4")
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    first_llm = FakeLlmClient()
+    first = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=first_llm,  # type: ignore[arg-type]
+        madlad_client=FakeMadladClient(),  # type: ignore[arg-type]
+    )
+    first.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert first_llm.translate_calls >= 1
+
+    monkeypatch.setattr(settings, "subtitle_translation_model", "gpt-4.1")
+    second_llm = FakeLlmClient()
+    second = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=second_llm,  # type: ignore[arg-type]
+        madlad_client=FakeMadladClient(),  # type: ignore[arg-type]
+    )
+    second.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert second_llm.glossary_calls == 1
+    assert second_llm.translate_calls >= 1
+
+    with content_sync_sessionmaker() as session:
+        rows = list(
+            session.scalars(
+                select(SubtitleTranslation).where(SubtitleTranslation.job_id == job_id)
+            )
+        )
+        assert {row.model_name for row in rows} == {"gpt-5.4", "gpt-4.1"}
+
+
+def test_local_model_change_does_not_reuse_previous_translation(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "local")
+    monkeypatch.setattr(settings, "madlad_model", "google/madlad400-3b-mt")
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    first_madlad = FakeMadladClient()
+    first = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=first_madlad,  # type: ignore[arg-type]
+    )
+    first.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert len(first_madlad.calls) == 1
+
+    monkeypatch.setattr(settings, "madlad_model", "google/madlad400-7b-mt")
+    second_madlad = FakeMadladClient()
+    second = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=second_madlad,  # type: ignore[arg-type]
+    )
+    second.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert len(second_madlad.calls) == 1
+
+    with content_sync_sessionmaker() as session:
+        rows = list(
+            session.scalars(
+                select(SubtitleTranslation).where(SubtitleTranslation.job_id == job_id)
+            )
+        )
+        assert {row.model_name for row in rows} == {
+            "google/madlad400-3b-mt",
+            "google/madlad400-7b-mt",
+        }

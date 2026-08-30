@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 
 from telegram_agent.core.common.utils import clean_error_message, utcnow
 from telegram_agent.core.content_processing.common.types import (
+    SubtitleTranslationBackend,
     SubtitleTranslationStatus,
     TranslationBatchStatus,
 )
@@ -40,16 +41,20 @@ class SyncSqlAlchemySubtitleTranslationRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get_by_job_and_language(
+    def get_by_job_language_backend_and_model(
         self,
         *,
         job_id: UUID,
         target_language: str,
+        backend: SubtitleTranslationBackend,
+        model_name: str,
     ) -> SubtitleTranslation | None:
         return self._session.scalar(
             select(SubtitleTranslation).where(
                 SubtitleTranslation.job_id == job_id,
                 SubtitleTranslation.target_language == target_language,
+                SubtitleTranslation.backend == backend,
+                SubtitleTranslation.model_name == model_name,
             )
         )
 
@@ -68,27 +73,22 @@ class SyncSqlAlchemySubtitleTranslationRepository:
             .options(selectinload(SubtitleTranslation.batches))
         )
 
-    def set_model_name(self, *, translation_id: UUID, model_name: str) -> bool:
-        statement = (
-            update(SubtitleTranslation)
-            .where(SubtitleTranslation.id == translation_id)
-            .values(model_name=model_name, updated_at=func.now())
-            .returning(SubtitleTranslation.id)
-        )
-        return self._session.execute(statement).scalar_one_or_none() is not None
-
     def create(
         self,
         *,
         job_id: UUID,
         source_language: str | None,
         target_language: str,
+        backend: SubtitleTranslationBackend,
+        model_name: str,
     ) -> SubtitleTranslation:
         row = SubtitleTranslation(
             id=uuid4(),
             job_id=job_id,
             source_language=source_language,
             target_language=target_language,
+            backend=backend,
+            model_name=model_name,
             status=SubtitleTranslationStatus.PENDING,
         )
         self._session.add(row)
@@ -141,14 +141,12 @@ class SyncSqlAlchemySubtitleTranslationRepository:
         self,
         *,
         translation_id: UUID,
-        model_name: str | None,
     ) -> bool:
         statement = (
             update(SubtitleTranslation)
             .where(SubtitleTranslation.id == translation_id)
             .values(
                 status=SubtitleTranslationStatus.COMPLETED,
-                model_name=model_name,
                 error_message=None,
                 completed_at=func.now(),
                 updated_at=func.now(),

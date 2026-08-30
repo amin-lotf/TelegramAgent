@@ -4,6 +4,11 @@ HOST_GID := $(shell id -g)
 COMPOSE = HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 DUBBING_WORKLOAD_LOG_ROOT ?= media/.gpu-control
 MADLAD_ENV_FILE ?= docker/madlad/.env.madlad.docker
+BACKEND ?= $(firstword $(filter local openai,$(MAKECMDGOALS)))
+ifeq ($(strip $(BACKEND)),)
+BACKEND := local
+endif
+BACKEND_SERVICES := llm_gateway content-processing content-processing-worker content-processing-beat
 
 .PHONY: setup build download-models up up-build setup-dubbing up-dubbing build-dubbing init-dubbing-models \
         prepare-madlad-storage sync-madlad-weights build-madlad up-madlad up-with-madlad rebuild-madlad \
@@ -16,7 +21,8 @@ MADLAD_ENV_FILE ?= docker/madlad/.env.madlad.docker
         shell-celery \
         migrate-telegram-auth migrate-telegram-ingress migrate-content_processing migrate-agent-runtime migrate-gpu-execution \
         heads-telegram-ingress \
-        revision-telegram-auth revision-telegram-ingress revision-content-processing revision-agent-runtime revision-gpu-execution
+        revision-telegram-auth revision-telegram-ingress revision-content-processing revision-agent-runtime revision-gpu-execution \
+        local openai
 
 setup:
 	python3 scripts/setup.py
@@ -28,7 +34,14 @@ download-models:
 	python3 scripts/download_models.py
 
 up:
+	python3 scripts/setup.py --apply-backend $(BACKEND)
+	$(COMPOSE) up -d --force-recreate $(BACKEND_SERVICES)
 	$(COMPOSE) up -d
+
+# `make up openai` passes openai as a goal; these targets exist so Make
+# does not fail with "No rule to make target".
+local openai:
+	@:
 
 up-build:
 	$(COMPOSE) up -d --build $(SERVICE)

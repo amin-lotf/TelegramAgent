@@ -40,6 +40,11 @@ DEFAULT_ADMIN_PASSWORD = "admin"
 DOWNLOAD_AGENT_BACKEND_LOCAL = "local"
 DOWNLOAD_AGENT_BACKEND_OPENAI = "openai"
 DEFAULT_DOWNLOAD_AGENT_BACKEND = DOWNLOAD_AGENT_BACKEND_OPENAI
+ALLOWED_BACKENDS = (
+    DOWNLOAD_AGENT_BACKEND_LOCAL,
+    DOWNLOAD_AGENT_BACKEND_OPENAI,
+)
+PLACEHOLDER_ENV_VALUES = frozenset({"", "replace-me"})
 
 USER_PROVIDED_KEYS = {
     OPENAI_API_KEY,
@@ -156,6 +161,24 @@ def _parse_env_key(line: str) -> str | None:
     return key or None
 
 
+def _parse_env_value(line: str) -> tuple[str, str] | None:
+    key = _parse_env_key(line)
+    if key is None:
+        return None
+    return key, line.split("=", 1)[1]
+
+
+def parse_env_values(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        parsed = _parse_env_value(raw_line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        values[key] = value
+    return values
+
+
 def substitute_env_contents(text: str, values: dict[str, str]) -> str:
     if not text:
         return text
@@ -223,6 +246,102 @@ def setup_env_files(root: Path, credentials: UserCredentials) -> list[Path]:
     return written
 
 
+def _is_usable_secret(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() not in PLACEHOLDER_ENV_VALUES
+
+
+def _existing_env_files(root: Path) -> list[Path]:
+    found: list[Path] = []
+    for example in discover_examples(root):
+        dest = destination_for(example)
+        if dest.is_file():
+            found.append(dest)
+    return found
+
+
+def _env_value_from_files(paths: list[Path], key: str) -> str | None:
+    placeholder: str | None = None
+    for path in paths:
+        values = parse_env_values(path.read_text(encoding="utf-8"))
+        if key not in values:
+            continue
+        value = values[key]
+        if _is_usable_secret(value):
+            return value.strip()
+        if placeholder is None:
+            placeholder = value
+    return placeholder
+
+
+def _files_contain_any_key(paths: list[Path], keys: set[str]) -> bool:
+    for path in paths:
+        values = parse_env_values(path.read_text(encoding="utf-8"))
+        if keys.intersection(values):
+            return True
+    return False
+
+
+def _require_openai_api_key(*, interactive: bool) -> str:
+    if interactive and not sys.stdin.isatty():
+        raise SetupError(
+            "OPENAI_API_KEY is missing. Re-run in a terminal, or pass "
+            "--non-interactive with OPENAI_API_KEY set."
+        )
+    return _read_required(OPENAI_API_KEY, interactive=interactive)
+
+
+def apply_backend(root: Path, backend: str, *, interactive: bool) -> None:
+    if backend not in ALLOWED_BACKENDS:
+        raise SetupError(
+            f"Backend must be '{DOWNLOAD_AGENT_BACKEND_LOCAL}' or "
+            f"'{DOWNLOAD_AGENT_BACKEND_OPENAI}'."
+        )
+
+    destinations = _existing_env_files(root)
+    if not destinations:
+        raise SetupError("No service .env files found. Run: make setup")
+
+    backend_keys = {DOWNLOAD_AGENT_BACKEND, SUBTITLE_TRANSLATION_BACKEND}
+    if not _files_contain_any_key(destinations, backend_keys):
+        raise SetupError(
+            "Existing .env files do not include download or translation "
+            "backend settings. Run: make setup"
+        )
+
+    substitutions = {
+        DOWNLOAD_AGENT_BACKEND: backend,
+        SUBTITLE_TRANSLATION_BACKEND: backend,
+    }
+    if backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
+        if not _files_contain_any_key(destinations, {OPENAI_API_KEY}):
+            raise SetupError(
+                "OPENAI_API_KEY is not present in any service .env file. "
+                "Run: make setup"
+            )
+        existing = _env_value_from_files(destinations, OPENAI_API_KEY)
+        if existing is not None and _is_usable_secret(existing):
+            substitutions[OPENAI_API_KEY] = existing.strip()
+        else:
+            substitutions[OPENAI_API_KEY] = _require_openai_api_key(
+                interactive=interactive
+            )
+
+    for dest in destinations:
+        original = dest.read_text(encoding="utf-8")
+        updated = substitute_env_contents(original, substitutions)
+        if updated != original:
+            _write_atomic(dest, updated)
+
+
+def print_backend_summary(backend: str) -> None:
+    if backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
+        print("Using OpenAI for download requests and subtitle translation")
+    else:
+        print("Using local GPU for download requests and MADLAD translation")
+
+
 def _read_required(name: str, *, interactive: bool, secret: bool = True) -> str:
     label = _PROMPT_LABELS[name]
     if interactive:
@@ -253,10 +372,7 @@ def _read_download_agent_backend(*, interactive: bool) -> str:
         raw = os.environ.get(
             DOWNLOAD_AGENT_BACKEND, DEFAULT_DOWNLOAD_AGENT_BACKEND
         ).strip().lower()
-        if raw not in {
-            DOWNLOAD_AGENT_BACKEND_LOCAL,
-            DOWNLOAD_AGENT_BACKEND_OPENAI,
-        }:
+        if raw not in ALLOWED_BACKENDS:
             raise SetupError(
                 f"{DOWNLOAD_AGENT_BACKEND} must be "
                 f"'{DOWNLOAD_AGENT_BACKEND_LOCAL}' or "
@@ -340,20 +456,36 @@ def main(argv: list[str] | None = None) -> int:
             "OPENAI_API_KEY is required when DOWNLOAD_AGENT_BACKEND=openai "
             "(the default). That choice also selects OpenAI glossary and "
             "subtitle translation instead of MADLAD. Optional: "
-            "DOWNLOAD_AGENT_BACKEND (openai|local), ADMIN_PASSWORD."
+            "DOWNLOAD_AGENT_BACKEND (openai|local), ADMIN_PASSWORD. "
+            "With --apply-backend openai, only OPENAI_API_KEY is required "
+            "when the existing env files do not already contain a key."
+        ),
+    )
+    parser.add_argument(
+        "--apply-backend",
+        choices=ALLOWED_BACKENDS,
+        help=(
+            "Patch existing env files to local or openai without re-running "
+            "full setup. OpenAI prompts for OPENAI_API_KEY when it is missing."
         ),
     )
     args = parser.parse_args(argv)
     interactive = not args.non_interactive
-    if interactive and not sys.stdin.isatty():
-        print(
-            "Setup requires an interactive terminal, or pass --non-interactive "
-            "with environment variables.",
-            file=sys.stderr,
-        )
-        return 1
 
     try:
+        if args.apply_backend:
+            apply_backend(
+                args.root, args.apply_backend, interactive=interactive
+            )
+            print_backend_summary(args.apply_backend)
+            return 0
+        if interactive and not sys.stdin.isatty():
+            print(
+                "Setup requires an interactive terminal, or pass "
+                "--non-interactive with environment variables.",
+                file=sys.stderr,
+            )
+            return 1
         if interactive:
             print("Fatol Assistant setup")
             print()
