@@ -42,9 +42,9 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready")
     async def readiness() -> JSONResponse:
-        configured = bool(
-            settings.llm_gateway_service_token and settings.openai_api_key
-        )
+        configured = bool(settings.llm_gateway_service_token)
+        if configured and settings.download_agent_backend == "openai":
+            configured = bool(settings.openai_api_key)
         return JSONResponse(
             status_code=(
                 status.HTTP_200_OK

@@ -19,11 +19,17 @@ class LlmGatewayClient:
         base_url: str,
         token: str,
         timeout_seconds: float,
+        download_agent_timeout_seconds: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._timeout = httpx.Timeout(timeout_seconds)
+        self._download_agent_timeout = httpx.Timeout(
+            download_agent_timeout_seconds
+            if download_agent_timeout_seconds is not None
+            else timeout_seconds
+        )
         self._transport = transport
 
     def coordinate_message_group(
@@ -66,7 +72,11 @@ class LlmGatewayClient:
         system_prompt: str,
         user_prompt: str,
         media_type: str,
+        idempotency_key: str | None = None,
     ) -> LlmGatewayGeneration:
+        extra_json: dict[str, object] = {"media_type": media_type}
+        if idempotency_key:
+            extra_json["idempotency_key"] = idempotency_key
         return self._post_generation(
             path="/download-agent",
             system_prompt=system_prompt,
@@ -77,7 +87,8 @@ class LlmGatewayClient:
             invalid_response_message=(
                 "LLM gateway returned an invalid download-agent response"
             ),
-            extra_json={"media_type": media_type},
+            extra_json=extra_json,
+            timeout=self._download_agent_timeout,
         )
 
     def _post_generation(
@@ -91,6 +102,7 @@ class LlmGatewayClient:
         rejected_message: str,
         invalid_response_message: str,
         extra_json: dict[str, object] | None = None,
+        timeout: httpx.Timeout | None = None,
     ) -> LlmGatewayGeneration:
         payload: dict[str, object] = {
             "system_prompt": system_prompt,
@@ -100,7 +112,7 @@ class LlmGatewayClient:
             payload.update(extra_json)
         try:
             with httpx.Client(
-                timeout=self._timeout,
+                timeout=timeout or self._timeout,
                 transport=self._transport,
             ) as client:
                 response = client.post(

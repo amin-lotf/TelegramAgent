@@ -92,3 +92,44 @@ def test_invalid_success_response_is_coordination_retryable() -> None:
 
     with pytest.raises(RetryableAgentRuntimeCoordinationError):
         _coordinate(client)
+
+
+def test_extract_download_request_sends_media_type_and_idempotency_key() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "http://llm-gateway.test/v1/download-agent"
+        payload = json.loads(request.content)
+        assert payload == {
+            "system_prompt": "system",
+            "user_prompt": "user",
+            "media_type": "video",
+            "idempotency_key": "download-agent:abc",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "download-agent:abc",
+                "output": {
+                    "is_download_request": True,
+                    "assistant_text": "Preparing the video.",
+                    "requested_subtitle_language": "en",
+                    "requested_dub_language": None,
+                },
+                "provider": "qwen",
+                "model": "Qwen/Qwen3-4B-Instruct-2507",
+                "provider_request_id": "download-agent:abc",
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "total_tokens": 12,
+                },
+            },
+        )
+
+    result = _client(handler).extract_download_request(
+        system_prompt="system",
+        user_prompt="user",
+        media_type="video",
+        idempotency_key="download-agent:abc",
+    )
+    assert result.provider == "qwen"
+    assert result.request_id == "download-agent:abc"

@@ -279,6 +279,7 @@ def test_non_interactive_missing_webhook_url_fails_before_writing(
         "WEBHOOK_URL=\n",
     )
     dest = example.with_name(".env.n8n.docker")
+    monkeypatch.setenv("HF_TOKEN", "hf-from-env")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-from-env")
     monkeypatch.setenv("TELEGRAM_API_ID", "42")
@@ -301,6 +302,7 @@ def test_non_interactive_missing_verify_password_fails_before_writing(
         "BOT_VERIFY_HASH=replace-me\nBOT_VERIFY_SECRET=replace-me\n",
     )
     dest = example.with_name(".env.telegram_auth.docker")
+    monkeypatch.setenv("HF_TOKEN", "hf-from-env")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-from-env")
     monkeypatch.setenv("TELEGRAM_API_ID", "42")
@@ -348,7 +350,8 @@ def test_non_interactive_reads_env_and_defaults_admin(
     monkeypatch.setenv("TELEGRAM_API_HASH", "hash-from-env")
     monkeypatch.setenv("WEBHOOK_URL", "https://hooks.example.com/")
     monkeypatch.setenv("TELEGRAM_VERIFY_PASSWORD", "verify-from-env")
-    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("HF_TOKEN", "hf-from-env")
+    monkeypatch.delenv("DOWNLOAD_AGENT_BACKEND", raising=False)
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
 
     exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
@@ -370,13 +373,209 @@ def test_non_interactive_reads_env_and_defaults_admin(
     ).read_text(encoding="utf-8")
     assert _env(tmp_path / "docker/admin_dashboard/.env.admin_dashboard.docker")["ADMIN_PASSWORD"] == "admin"
     output = capsys.readouterr().out
-    assert "✓ OpenAI configured" in output
+    assert "✓ Hugging Face configured" in output
+    assert "✓ OpenAI configured for download requests" in output
     assert "✓ n8n webhook configured" in output
     assert "✓ Telegram user verification configured" in output
-    assert "○ Hugging Face disabled" in output
+    assert "○ Hugging Face disabled" not in output
     assert "Run: make build" in output
     assert "make download-models" in output
     assert "make up" in output
+
+
+def _set_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf-from-env")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-from-env")
+    monkeypatch.setenv("TELEGRAM_API_ID", "42")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "hash-from-env")
+    monkeypatch.setenv("WEBHOOK_URL", "https://hooks.example.com/")
+    monkeypatch.setenv("TELEGRAM_VERIFY_PASSWORD", "verify-from-env")
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+
+
+def test_non_interactive_missing_hf_token_fails_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    example = _write_example(
+        tmp_path,
+        "docker/app/.env.gpu_execution.docker.example",
+        "HF_TOKEN=\nWHISPERX_HF_TOKEN=\n",
+    )
+    dest = example.with_name(".env.gpu_execution.docker")
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 1
+    assert not dest.exists()
+
+
+def test_non_interactive_local_backend_skips_openai_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_example(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker.example",
+        "OPENAI_API_KEY=replace-me\nDOWNLOAD_AGENT_BACKEND=openai\n",
+    )
+    _write_example(
+        tmp_path,
+        "docker/app/.env.telegram_auth.docker.example",
+        "BOT_VERIFY_HASH=replace-me\nBOT_VERIFY_SECRET=replace-me\n",
+    )
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("DOWNLOAD_AGENT_BACKEND", "local")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 0
+    values = _env(tmp_path / "docker/app/.env.llm_gateway.docker")
+    assert values["DOWNLOAD_AGENT_BACKEND"] == "local"
+    assert values["OPENAI_API_KEY"] == ""
+    output = capsys.readouterr().out
+    assert "✓ Local model configured for download requests" in output
+    assert "✓ Hugging Face configured" in output
+
+
+def test_non_interactive_openai_backend_requires_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    example = _write_example(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker.example",
+        "OPENAI_API_KEY=replace-me\nDOWNLOAD_AGENT_BACKEND=openai\n",
+    )
+    dest = example.with_name(".env.llm_gateway.docker")
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("DOWNLOAD_AGENT_BACKEND", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 1
+    assert not dest.exists()
+
+
+def test_non_interactive_invalid_backend_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    example = _write_example(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker.example",
+        "DOWNLOAD_AGENT_BACKEND=openai\n",
+    )
+    dest = example.with_name(".env.llm_gateway.docker")
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("DOWNLOAD_AGENT_BACKEND", "cloud")
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 1
+    assert not dest.exists()
+
+
+def test_interactive_local_choice_does_not_ask_for_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_getpass(prompt: str) -> str:
+        if "Hugging Face" in prompt:
+            return "hf_token"
+        if "OpenAI" in prompt:
+            raise AssertionError("OpenAI key must not be requested for local setup")
+        if "bot token" in prompt:
+            return "123:bot-token"
+        if "API ID" in prompt:
+            return "111111"
+        if "API hash" in prompt:
+            return "api-hash"
+        if "verification password" in prompt:
+            return "verify-secret-password"
+        if "Admin password" in prompt:
+            return ""
+        raise AssertionError(prompt)
+
+    choices = iter(["nope", "1"])
+
+    def fake_input(prompt: str) -> str:
+        if "Choice" in prompt:
+            return next(choices)
+        if "webhook" in prompt.lower() or "n8n" in prompt.lower():
+            return "https://n8n.example.com/"
+        raise AssertionError(prompt)
+
+    monkeypatch.setattr(_MODULE.getpass, "getpass", fake_getpass)
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    credentials = _MODULE.collect_credentials(interactive=True)
+
+    assert credentials.hf_token == "hf_token"
+    assert credentials.download_agent_backend == "local"
+    assert credentials.openai_api_key == ""
+    assert credentials.admin_password == "admin"
+
+
+def test_interactive_openai_choice_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_getpass(prompt: str) -> str:
+        if "Hugging Face" in prompt:
+            return "hf_token"
+        if "OpenAI" in prompt:
+            return "sk-live"
+        if "bot token" in prompt:
+            return "123:bot-token"
+        if "API ID" in prompt:
+            return "111111"
+        if "API hash" in prompt:
+            return "api-hash"
+        if "verification password" in prompt:
+            return "verify-secret-password"
+        if "Admin password" in prompt:
+            return "secret-admin"
+        raise AssertionError(prompt)
+
+    def fake_input(prompt: str) -> str:
+        if "Choice" in prompt:
+            return "2"
+        if "webhook" in prompt.lower() or "n8n" in prompt.lower():
+            return "https://n8n.example.com/"
+        raise AssertionError(prompt)
+
+    monkeypatch.setattr(_MODULE.getpass, "getpass", fake_getpass)
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    credentials = _MODULE.collect_credentials(interactive=True)
+
+    assert credentials.download_agent_backend == "openai"
+    assert credentials.openai_api_key == "sk-live"
+    assert credentials.admin_password == "secret-admin"
+
+
+def test_setup_writes_download_agent_backend(tmp_path: Path) -> None:
+    _write_example(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker.example",
+        "OPENAI_API_KEY=replace-me\nDOWNLOAD_AGENT_BACKEND=openai\n",
+    )
+    credentials = _MODULE.UserCredentials(
+        openai_api_key="",
+        telegram_bot_token="123:bot-token",
+        telegram_api_id="111111",
+        telegram_api_hash="api-hash",
+        webhook_url="https://n8n.example.com/",
+        telegram_verify_password="verify-secret-password",
+        hf_token="hf_test_token",
+        download_agent_backend="local",
+    )
+
+    _MODULE.setup_env_files(tmp_path, credentials)
+
+    values = _env(tmp_path / "docker/app/.env.llm_gateway.docker")
+    assert values["DOWNLOAD_AGENT_BACKEND"] == "local"
+    assert values["OPENAI_API_KEY"] == ""
 
 
 def test_is_generated_secret_does_not_match_token_count_settings() -> None:

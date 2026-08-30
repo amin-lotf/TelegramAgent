@@ -181,30 +181,39 @@ def test_translates_and_reuses_completed(
     content_sync_uow_factory,
 ) -> None:
     job_id = _seed_transcript(content_sync_sessionmaker, language="en")
-    client = FakeLlmClient()
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient()
     service = SyncSubtitleTranslationService(
         uow_factory=content_sync_uow_factory,
         settings=settings,
-        llm_gateway_client=client,  # type: ignore[arg-type]
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
     )
 
     first = service.ensure_translated(source_job_id=job_id, target_language="fa")
-    assert [segment.text for segment in first] == ["FA:Hello Alice", "FA:How are you?"]
+    assert [segment.text for segment in first] == [
+        "LOCAL:Hello Alice",
+        "LOCAL:How are you?",
+    ]
     assert first[0].start_ms == 0
     assert first[0].end_ms == 800
-    assert client.glossary_calls == 1
-    assert client.translate_calls >= 1
+    assert llm.glossary_calls == 0
+    assert llm.translate_calls == 0
+    assert len(madlad.calls) == 1
 
-    second_client = FakeLlmClient()
+    second_madlad = FakeMadladClient()
     service2 = SyncSubtitleTranslationService(
         uow_factory=content_sync_uow_factory,
         settings=settings,
-        llm_gateway_client=second_client,  # type: ignore[arg-type]
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=second_madlad,  # type: ignore[arg-type]
     )
     second = service2.ensure_translated(source_job_id=job_id, target_language="fa")
-    assert [segment.text for segment in second] == ["FA:Hello Alice", "FA:How are you?"]
-    assert second_client.glossary_calls == 0
-    assert second_client.translate_calls == 0
+    assert [segment.text for segment in second] == [
+        "LOCAL:Hello Alice",
+        "LOCAL:How are you?",
+    ]
+    assert second_madlad.calls == []
 
     with content_sync_sessionmaker() as session:
         translation = session.scalar(
@@ -235,25 +244,25 @@ def test_multi_batch_translation_persists_all_segments(
         texts=[f"line {i}" for i in range(6)],
     )
 
-    # Force tiny batches so multi-batch is guaranteed.
-    monkeypatch.setattr(settings, "subtitle_translation_max_segments_per_batch", 2)
-    monkeypatch.setattr(settings, "subtitle_translation_max_source_tokens", 50)
-
-    client = FakeLlmClient()
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient()
     service = SyncSubtitleTranslationService(
         uow_factory=content_sync_uow_factory,
         settings=settings,
-        llm_gateway_client=client,  # type: ignore[arg-type]
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
     )
 
     segments = service.ensure_translated(source_job_id=job_id, target_language="fa")
     assert len(segments) == 6
-    assert all(segment.text.startswith("FA:") for segment in segments)
-    assert client.translate_calls >= 3
+    assert all(segment.text.startswith("LOCAL:") for segment in segments)
+    assert llm.translate_calls == 0
+    assert llm.glossary_calls == 0
+    assert [len(call[0]) for call in madlad.calls] == [6]
 
     with content_sync_sessionmaker() as session:
         batches = list(session.scalars(select(TranslationBatch)))
-        assert len(batches) >= 3
+        assert len(batches) == 1
         assert all(batch.status == TranslationBatchStatus.SUCCEEDED for batch in batches)
         translated = list(session.scalars(select(TranslatedSegment)))
         assert len(translated) == 6
@@ -266,17 +275,25 @@ def test_cancellation_after_provider_response_releases_claimed_batch(
     job_id = _seed_transcript(content_sync_sessionmaker, language="en")
     cancellation_observed = False
 
-    class CancellingLlmClient(FakeLlmClient):
-        def translate_subtitle_batch(
+    class CancellingMadladClient(FakeMadladClient):
+        def translate(
             self,
+            texts: list[str],
             *,
-            system_prompt: str,
-            user_prompt: str,
-        ) -> LlmGatewayGeneration:
+            source_lang: str,
+            target_lang: str,
+            request_id: str = "",
+            heartbeat=None,
+            cancellation_requested=None,
+        ) -> MadladGeneration:
             nonlocal cancellation_observed
-            result = super().translate_subtitle_batch(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
+            result = super().translate(
+                texts,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                request_id=request_id,
+                heartbeat=heartbeat,
+                cancellation_requested=cancellation_requested,
             )
             cancellation_observed = True
             return result
@@ -284,7 +301,8 @@ def test_cancellation_after_provider_response_releases_claimed_batch(
     service = SyncSubtitleTranslationService(
         uow_factory=content_sync_uow_factory,
         settings=settings,
-        llm_gateway_client=CancellingLlmClient(),  # type: ignore[arg-type]
+        llm_gateway_client=FakeLlmClient(),  # type: ignore[arg-type]
+        madlad_client=CancellingMadladClient(),  # type: ignore[arg-type]
     )
 
     with pytest.raises(SecondaryTaskCancelledError):
@@ -404,7 +422,7 @@ def test_madlad_translations_are_sanitized(
     assert [segment.text for segment in segments] == ["It's recycled."]
 
 
-def test_unlisted_pair_keeps_existing_external_translation(
+def test_unlisted_pair_uses_madlad(
     content_sync_sessionmaker: sessionmaker[Session],
     content_sync_uow_factory,
     monkeypatch,
@@ -420,11 +438,17 @@ def test_unlisted_pair_keeps_existing_external_translation(
         madlad_client=madlad,  # type: ignore[arg-type]
     )
 
-    service.ensure_translated(source_job_id=job_id, target_language="es")
+    segments = service.ensure_translated(source_job_id=job_id, target_language="es")
 
-    assert llm.glossary_calls > 0
-    assert llm.translate_calls > 0
-    assert madlad.calls == []
+    assert [segment.text for segment in segments] == [
+        "LOCAL:Hello Alice",
+        "LOCAL:How are you?",
+    ]
+    assert llm.glossary_calls == 0
+    assert llm.translate_calls == 0
+    assert madlad.calls == [
+        (["Hello Alice", "How are you?"], "en", "es"),
+    ]
 
 
 def test_madlad_retryable_failure_does_not_call_llm(

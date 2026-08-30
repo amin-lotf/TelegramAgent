@@ -34,7 +34,7 @@ class GenerationService:
             {"role": "system", "content": command.system_prompt},
             {"role": "user", "content": command.user_prompt},
         ]
-        generation = await self._llm.ainvoke(messages)
+        generation = await self._llm.ainvoke(messages, request_id=command.request_id)
         output = self._serialize_output(generation.output)
 
         elapsed_ms = round((monotonic() - started_at) * 1000)

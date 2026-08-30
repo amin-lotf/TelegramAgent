@@ -85,6 +85,9 @@ class SyncDownloadHandlerService:
                 base_url=settings.llm_gateway_base_url,
                 token=settings.llm_gateway_service_token,
                 timeout_seconds=settings.llm_gateway_request_timeout_seconds,
+                download_agent_timeout_seconds=(
+                    settings.llm_gateway_download_agent_timeout_seconds
+                ),
             )
         if telegram_ingress_client is None:
             telegram_ingress_client = TelegramIngressClient(
@@ -239,6 +242,7 @@ class SyncDownloadHandlerService:
                 system_prompt=prompts.system_prompt,
                 user_prompt=prompts.user_prompt,
                 media_type=prompts.media_type,
+                idempotency_key=f"download-agent:{runtime_message_id}",
             )
             try:
                 decision = DownloadAgentDecision.model_validate(generation.output)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download GPU model weights used by Whisper, CosyVoice, SAM Audio, and MADLAD.
+"""Download GPU model weights used by Whisper, CosyVoice, SAM Audio, MADLAD, and Qwen.
 
 Host usage (default): skip complete caches, prompt for a Hugging Face token when
 gated models remain, persist the token, then run the downloader inside the
@@ -34,6 +34,7 @@ DEFAULT_SAM_AUDIO_MODEL = "facebook/sam-audio-small"
 DEFAULT_SAM_AUDIO_JUDGE_MODEL = "facebook/sam-audio-judge"
 DEFAULT_LAION_CLAP_MODEL = "lukewys/laion_clap"
 DEFAULT_MADLAD_MODEL_ID = "google/madlad400-3b-mt"
+DEFAULT_QWEN_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_WHISPERX_MODEL = "large-v3"
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 IMAGEBIND_FILENAME = "imagebind_huge.pth"
@@ -133,6 +134,10 @@ def madlad_model_id() -> str:
     return _env("MADLAD_MODEL_ID", DEFAULT_MADLAD_MODEL_ID)
 
 
+def qwen_model_id() -> str:
+    return _env("QWEN_MODEL_ID", DEFAULT_QWEN_MODEL_ID)
+
+
 def whisper_asr_repo_id() -> str:
     model = _env("WHISPERX_MODEL", DEFAULT_WHISPERX_MODEL)
     if "/" in model:
@@ -156,6 +161,7 @@ def assets() -> list[Asset]:
             madlad_model_id(),
             cache="madlad_hf_home",
         ),
+        Asset("qwen", "Qwen Instruct", False, "hf", qwen_model_id()),
         Asset("imagebind", "ImageBind", False, "imagebind"),
         Asset("sam", "SAM Audio", True, "hf", sam_audio_model_id()),
         Asset(

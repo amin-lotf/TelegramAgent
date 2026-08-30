@@ -64,6 +64,10 @@ services:
     container_name: llm_gateway_app
     env_file:
       - .env.llm_gateway.docker
+    environment:
+      GPU_EXECUTION_BASE_URL: http://gpu-execution:8000/api/v1
+      GPU_EXECUTION_SERVICE_TOKEN: ${GPU_EXECUTION_SERVICE_TOKEN:-replace-me}
+      GPU_SHARED_STORAGE_ROOT: /app/media
     command: >
       python -m uvicorn
       telegram_agent.core.llm_gateway.api.v1.fastapi_app:fastapi_app

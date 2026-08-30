@@ -37,7 +37,7 @@ async def extract_download_request(
     payload: DownloadAgentRequest,
     response: Response,
 ) -> DownloadAgentHttpResponse:
-    request_id = str(uuid4())
+    request_id = payload.idempotency_key or str(uuid4())
     response.headers["X-Request-ID"] = request_id
     service = get_download_agent_service(payload.media_type)
     result = await service.generate(

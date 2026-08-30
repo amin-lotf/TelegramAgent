@@ -33,8 +33,12 @@ BOT_VERIFY_HASH = "BOT_VERIFY_HASH"
 HF_TOKEN = "HF_TOKEN"
 WHISPERX_HF_TOKEN = "WHISPERX_HF_TOKEN"
 ADMIN_PASSWORD = "ADMIN_PASSWORD"
+DOWNLOAD_AGENT_BACKEND = "DOWNLOAD_AGENT_BACKEND"
 
 DEFAULT_ADMIN_PASSWORD = "admin"
+DOWNLOAD_AGENT_BACKEND_LOCAL = "local"
+DOWNLOAD_AGENT_BACKEND_OPENAI = "openai"
+DEFAULT_DOWNLOAD_AGENT_BACKEND = DOWNLOAD_AGENT_BACKEND_OPENAI
 
 USER_PROVIDED_KEYS = {
     OPENAI_API_KEY,
@@ -45,6 +49,7 @@ USER_PROVIDED_KEYS = {
     HF_TOKEN,
     WHISPERX_HF_TOKEN,
     ADMIN_PASSWORD,
+    DOWNLOAD_AGENT_BACKEND,
 }
 GENERATED_EXACT_KEYS = {
     "N8N_CALLBACK_TOKEN",
@@ -58,7 +63,7 @@ _PROMPT_LABELS = {
     TELEGRAM_API_HASH: "Telegram API hash",
     WEBHOOK_URL: "n8n webhook URL",
     TELEGRAM_VERIFY_PASSWORD: "Telegram verification password",
-    HF_TOKEN: "Hugging Face token (optional, press Enter to skip)",
+    HF_TOKEN: "Hugging Face token",
     ADMIN_PASSWORD: 'Admin password (optional, press Enter for "admin")',
 }
 
@@ -77,6 +82,7 @@ class UserCredentials:
     telegram_verify_password: str
     hf_token: str = ""
     admin_password: str = DEFAULT_ADMIN_PASSWORD
+    download_agent_backend: str = DEFAULT_DOWNLOAD_AGENT_BACKEND
 
     def value_for(self, key: str) -> str:
         mapping = {
@@ -88,6 +94,7 @@ class UserCredentials:
             HF_TOKEN: self.hf_token,
             WHISPERX_HF_TOKEN: self.hf_token,
             ADMIN_PASSWORD: self.admin_password,
+            DOWNLOAD_AGENT_BACKEND: self.download_agent_backend,
         }
         return mapping[key]
 
@@ -238,9 +245,46 @@ def _read_optional(name: str, default: str, *, interactive: bool) -> str:
     return value.strip() or default
 
 
+def _read_download_agent_backend(*, interactive: bool) -> str:
+    if not interactive:
+        raw = os.environ.get(
+            DOWNLOAD_AGENT_BACKEND, DEFAULT_DOWNLOAD_AGENT_BACKEND
+        ).strip().lower()
+        if raw not in {
+            DOWNLOAD_AGENT_BACKEND_LOCAL,
+            DOWNLOAD_AGENT_BACKEND_OPENAI,
+        }:
+            raise SetupError(
+                f"{DOWNLOAD_AGENT_BACKEND} must be "
+                f"'{DOWNLOAD_AGENT_BACKEND_LOCAL}' or "
+                f"'{DOWNLOAD_AGENT_BACKEND_OPENAI}'."
+            )
+        return raw
+
+    print("How should the bot understand download requests?")
+    print()
+    print("  [1] Local GPU model (Qwen) — no OpenAI key")
+    print("  [2] OpenAI — usually understands requests better,")
+    print("      especially in other languages")
+    print()
+    while True:
+        choice = input("Choice [1/2]: ").strip()
+        if choice == "1":
+            return DOWNLOAD_AGENT_BACKEND_LOCAL
+        if choice == "2":
+            return DOWNLOAD_AGENT_BACKEND_OPENAI
+        print("Please enter 1 or 2.")
+
+
 def collect_credentials(*, interactive: bool) -> UserCredentials:
+    hf_token = _read_required(HF_TOKEN, interactive=interactive)
+    download_agent_backend = _read_download_agent_backend(interactive=interactive)
+    if download_agent_backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
+        openai_api_key = _read_required(OPENAI_API_KEY, interactive=interactive)
+    else:
+        openai_api_key = ""
     return UserCredentials(
-        openai_api_key=_read_required(OPENAI_API_KEY, interactive=interactive),
+        openai_api_key=openai_api_key,
         telegram_bot_token=_read_required(TELEGRAM_BOT_TOKEN, interactive=interactive),
         telegram_api_id=_read_required(TELEGRAM_API_ID, interactive=interactive),
         telegram_api_hash=_read_required(TELEGRAM_API_HASH, interactive=interactive),
@@ -248,23 +292,24 @@ def collect_credentials(*, interactive: bool) -> UserCredentials:
         telegram_verify_password=_read_required(
             TELEGRAM_VERIFY_PASSWORD, interactive=interactive
         ),
-        hf_token=_read_optional(HF_TOKEN, "", interactive=interactive),
+        hf_token=hf_token,
         admin_password=_read_optional(
             ADMIN_PASSWORD, DEFAULT_ADMIN_PASSWORD, interactive=interactive
         ),
+        download_agent_backend=download_agent_backend,
     )
 
 
 def print_summary(credentials: UserCredentials) -> None:
-    print("✓ OpenAI configured")
+    print("✓ Hugging Face configured")
+    if credentials.download_agent_backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
+        print("✓ OpenAI configured for download requests")
+    else:
+        print("✓ Local model configured for download requests")
     print("✓ Telegram configured")
     print("✓ Telegram API configured")
     print("✓ n8n webhook configured")
     print("✓ Telegram user verification configured")
-    if credentials.hf_token:
-        print("✓ Hugging Face configured")
-    else:
-        print("○ Hugging Face disabled")
     print("✓ Admin dashboard configured")
     print()
     print("Configuration completed.")
@@ -286,9 +331,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "Read credentials from environment variables instead of prompting. "
-            "Required: OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, "
+            "Required: HF_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, "
             "TELEGRAM_API_HASH, WEBHOOK_URL, TELEGRAM_VERIFY_PASSWORD. "
-            "Optional: HF_TOKEN, ADMIN_PASSWORD."
+            "OPENAI_API_KEY is required when DOWNLOAD_AGENT_BACKEND=openai "
+            "(the default). Optional: DOWNLOAD_AGENT_BACKEND (openai|local), "
+            "ADMIN_PASSWORD."
         ),
     )
     args = parser.parse_args(argv)

@@ -49,6 +49,8 @@ services:
       MADLAD_LOAD_LORA_FOR: ${MADLAD_LOAD_LORA_FOR:-fa}
       MADLAD_HF_HOME: /opt/madlad-hf-cache
       MADLAD_DEVICE: auto
+      QWEN_MODEL_ID: ${QWEN_MODEL_ID:-Qwen/Qwen3-4B-Instruct-2507}
+      QWEN_DEVICE: ${QWEN_DEVICE:-cuda}
     deploy:
       resources:
         reservations:
@@ -96,6 +98,7 @@ services:
       SAM_AUDIO_CHECKPOINTS_DIR: /opt/sam-audio-checkpoints
       MADLAD_MODEL_ID: ${MADLAD_MODEL_ID:-google/madlad400-3b-mt}
       MADLAD_HF_HOME: /opt/madlad-hf-cache
+      QWEN_MODEL_ID: ${QWEN_MODEL_ID:-Qwen/Qwen3-4B-Instruct-2507}
       WHISPERX_MODEL: ${WHISPERX_MODEL:-large-v3}
     command: python /app/scripts/download_models.py --execute
     volumes:

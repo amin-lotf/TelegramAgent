@@ -388,6 +388,7 @@ async def test_download_handler_happy_path_and_handoff(
     assert len(coordinated) >= 1
     assert all(m.status != RuntimeMessageStatus.FAILED for m in messages)
     assert len(gateway.calls) == 1
+    assert str(gateway.calls[0]["idempotency_key"]).startswith("download-agent:")
     assert len(telegram.calls) == 1
     assert telegram.calls[0]["text"] == "Got it — preparing your download."
     assert telegram.calls[0]["reply_to_message_id"] is not None

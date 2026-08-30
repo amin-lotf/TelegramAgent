@@ -13,6 +13,12 @@ class DownloadAgentRequest(BaseModel):
     system_prompt: str = Field(min_length=1, max_length=20_000)
     user_prompt: str = Field(min_length=1, max_length=100_000)
     media_type: Literal["video", "audio", "document"]
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9:._-]+$",
+    )
 
 
 class DownloadAgentHttpResponse(BaseModel):

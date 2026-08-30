@@ -1,0 +1,321 @@
+{
+  "name": "Telegram_request_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -544,
+        256
+      ],
+      "id": "536f7761-9ac2-4ef0-bd04-28183b732363",
+      "name": "Telegram Trigger",
+      "webhookId": "0864a9c8-c177-4ae3-9d19-1961808dad4a"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "16439f36-87f6-4eca-b4aa-2bd4a11cfacd",
+              "leftValue": "={{ $json.verified }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        256
+      ],
+      "id": "f8e2d401-377b-40e0-8a30-d591037d5caf",
+      "name": "is_verified"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -48,
+        336
+      ],
+      "id": "2f787494-b248-4029-ae8b-e6479c03693e",
+      "name": "inform_verification_required",
+      "webhookId": "9dc32b91-9ac2-4d31-a6e5-8649307346e6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://telegram-ingress:8000/api/v1/telegram/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AUTH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        304,
+        272
+      ],
+      "id": "ec2c9f4f-74ff-4c64-91cd-d4916a1512b0",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const update = $('Telegram Trigger').first().json;\nconst msg = update.message\n\nfunction clean(obj) {\n  return Object.fromEntries(\n    Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null && v !== \"\")\n  );\n}\n\nfunction getAttachment(message) {\n  if (!message) return undefined;\n\n  if (message.voice) {\n    return clean({\n      type: \"voice\",\n      file_id: message.voice.file_id,\n      file_unique_id: message.voice.file_unique_id,\n    });\n  }\n\n  if (message.video) {\n    return clean({\n      type: \"video\",\n      file_id: message.video.file_id,\n      file_unique_id: message.video.file_unique_id,\n    });\n  }\n\n  if (message.video_note) {\n    return clean({\n      type: \"video_note\",\n      file_id: message.video_note.file_id,\n      file_unique_id: message.video_note.file_unique_id,\n    });\n  }\n\n  if (message.document) {\n    return clean({\n      type: \"document\",\n      file_id: message.document.file_id,\n      file_unique_id: message.document.file_unique_id,\n    });\n  }\n\n  if (message.audio) {\n    return clean({\n      type: \"audio\",\n      file_id: message.audio.file_id,\n      file_unique_id: message.audio.file_unique_id,\n    });\n  }\n\n  if (message.photo?.length) {\n    const bestPhoto = message.photo[message.photo.length - 1];\n\n    return clean({\n      type: \"photo\",\n      file_id: bestPhoto.file_id,\n      file_unique_id: bestPhoto.file_unique_id,\n    });\n  }\n\n  return undefined;\n}\n\nconst payload = clean({\n  update_id: update.update_id,\n\n  telegram_user_id: msg?.from?.id,\n  chat_id: msg?.chat?.id,\n\n  first_name: msg?.from?.first_name,\n  last_name: msg?.from?.last_name,\n  username: msg?.from?.username,\n\n  message_id: msg?.message_id,\n  reply_to_message_id: msg?.reply_to_message?.message_id,\n\n  text: msg?.text,\n  caption: msg?.caption,\n\n  attachment: getAttachment(msg),\n});\n\nreturn [\n  {\n    json: payload,\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        272
+      ],
+      "id": "ee725f79-031a-44ac-8f13-95dc622686e8",
+      "name": "Field extractor"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://telegram-auth:8000/api/v1/telegram-auth/check",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AUTH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.message.chat.id }}"
+            },
+            {
+              "name": "password",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "username",
+              "value": "={{ $json.message.from.username }}"
+            },
+            {
+              "name": "first_name",
+              "value": "={{ $json.message.from.first_name }}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{ $json.message.from.last_name }}"
+            },
+            {
+              "name": "is_bot",
+              "value": "={{ $json.message.from.is_bot }}"
+            },
+            {
+              "name": "language_code",
+              "value": "={{ $json.message.from.language_code }}"
+            },
+            {
+              "name": "telegram_user_id",
+              "value": "={{ $json.message.from.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -384,
+        256
+      ],
+      "id": "ecb0f97e-6bed-4fa0-a66f-82c9a1c41ed3",
+      "name": "verify1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        144,
+        112
+      ],
+      "id": "1970bdfc-01ef-4f61-a047-0bc7278cbfe9",
+      "name": "Send a text message",
+      "webhookId": "91842139-b466-4a3a-be6b-c913990fcf41",
+      "credentials": {
+        "telegramApi": {
+          "id": "HAThZEbmbGaM0o2K",
+          "name": "Telegram account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f7c7be44-affb-4d59-bc0c-d0b8efb28bfa",
+              "leftValue": "={{ $json.was_verification_request }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -48,
+        192
+      ],
+      "id": "fb59d24e-cc51-4f79-aa67-1f0be19bd3f5",
+      "name": "was_verification_request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "verify1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is_verified": {
+      "main": [
+        [
+          {
+            "node": "was_verification_request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "inform_verification_required",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Field extractor": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verify1": {
+      "main": [
+        [
+          {
+            "node": "is_verified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "was_verification_request": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Field extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "a5466ed4-65c2-4782-b83b-b39022f31949",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f46cc2a23da2a6fa7f0ec7110a8bd297ddd3eea6df2b419e02207f7a26a50f7f"
+  },
+  "id": "Cwod1fKQLZiWE1Ld",
+  "tags": []
+}

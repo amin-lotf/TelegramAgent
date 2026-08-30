@@ -82,6 +82,13 @@ records the terminal canceled state.
 JSON consumed by content processing. One child owns transcription, alignment,
 and diarization for the complete media job.
 
+`qwen.structured_generation.v1` loads `Qwen/Qwen3-4B-Instruct-2507` in an isolated
+`/opt/qwen` runtime, generates JSON constrained to the caller-supplied schema,
+validates it, retries in-process on schema failures, writes the parsed object,
+and exits so VRAM is released. `llm_gateway` uses this workload when
+`DOWNLOAD_AGENT_BACKEND=local`. A download-agent reply waits behind any other
+job already on the single GPU queue.
+
 ## Adding a workload type
 
 1. Define a stable integration identifier in

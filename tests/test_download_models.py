@@ -144,6 +144,7 @@ def test_execute_downloads_missing_public_and_imagebind(
     assert _MODULE.cosyvoice_model_id() in downloader.snapshots
     assert _MODULE.whisper_asr_repo_id() in downloader.snapshots
     assert _MODULE.madlad_model_id() in downloader.snapshots
+    assert _MODULE.qwen_model_id() in downloader.snapshots
     assert _MODULE.sam_audio_model_id() in downloader.snapshots
     assert _MODULE.sam_audio_judge_model_id() in downloader.snapshots
     assert _MODULE.laion_clap_model_id() in downloader.snapshots
