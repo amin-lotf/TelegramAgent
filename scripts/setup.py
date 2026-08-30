@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -420,7 +421,130 @@ def collect_credentials(*, interactive: bool) -> UserCredentials:
     )
 
 
-def print_summary(credentials: UserCredentials) -> None:
+def later_up_command(backend: str) -> str:
+    if backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
+        return "make up openai"
+    return "make up"
+
+
+def print_later_commands(
+    backend: str,
+    *,
+    include_build: bool = False,
+    include_download: bool = False,
+    include_up: bool = True,
+) -> None:
+    commands: list[str] = []
+    if include_build:
+        commands.append("make build")
+    if include_download:
+        commands.append("make download-models")
+    if include_up:
+        commands.append(later_up_command(backend))
+    if not commands:
+        return
+    print()
+    if len(commands) == 1:
+        print(f"You can run this later with: {commands[0]}")
+        return
+    print("You can run these later:")
+    for command in commands:
+        print(f"  {command}")
+
+
+def _prompt_yes_no(question: str, later_command: str) -> bool:
+    print()
+    print(f"{question} [y/N]")
+    print(f"You can also run this later with: {later_command}")
+    while True:
+        choice = input("Proceed? [y/N]: ").strip().lower()
+        if choice in {"", "n", "no"}:
+            return False
+        if choice in {"y", "yes"}:
+            return True
+        print("Please enter y or n.")
+
+
+def _run_make(root: Path, *args: str) -> int:
+    command = ["make", *args]
+    print()
+    print(f"Running: {' '.join(command)}")
+    try:
+        completed = subprocess.run(command, cwd=root, check=False)
+    except FileNotFoundError as exc:
+        raise SetupError(
+            "make is required to continue. Install make, then retry."
+        ) from exc
+    return completed.returncode
+
+
+def offer_followup_steps(root: Path, backend: str) -> int:
+    up_command = later_up_command(backend)
+    if not _prompt_yes_no("Build Docker images now?", "make build"):
+        print_later_commands(
+            backend, include_build=True, include_download=True, include_up=True
+        )
+        return 0
+
+    build_code = _run_make(root, "build")
+    if build_code != 0:
+        print(
+            "Build failed. You can retry later with: make build",
+            file=sys.stderr,
+        )
+        print_later_commands(
+            backend, include_build=True, include_download=True, include_up=True
+        )
+        return 1
+
+    download_complete = False
+    download_failed = False
+    if _prompt_yes_no(
+        "Download GPU model weights now?", "make download-models"
+    ):
+        download_code = _run_make(root, "download-models")
+        if download_code != 0:
+            download_failed = True
+            print(
+                "Model download failed. You can retry later with: "
+                "make download-models",
+                file=sys.stderr,
+            )
+        else:
+            download_complete = True
+
+    if not _prompt_yes_no("Start the stack now?", up_command):
+        print_later_commands(
+            backend,
+            include_download=not download_complete,
+            include_up=True,
+        )
+        return 1 if download_failed else 0
+
+    up_args = (
+        ("up", "openai")
+        if backend == DOWNLOAD_AGENT_BACKEND_OPENAI
+        else ("up",)
+    )
+    up_code = _run_make(root, *up_args)
+    if up_code != 0:
+        print(
+            f"Failed to start the stack. You can retry later with: {up_command}",
+            file=sys.stderr,
+        )
+        print_later_commands(
+            backend,
+            include_download=not download_complete,
+            include_up=True,
+        )
+        return 1
+    if download_failed:
+        print_later_commands(backend, include_download=True, include_up=False)
+        return 1
+    return 0
+
+
+def print_summary(credentials: UserCredentials, *, interactive: bool) -> None:
     print("✓ Hugging Face configured")
     if credentials.download_agent_backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
         print("✓ OpenAI configured for download requests and subtitle translation")
@@ -433,9 +557,11 @@ def print_summary(credentials: UserCredentials) -> None:
     print("✓ Admin dashboard configured")
     print()
     print("Configuration completed.")
+    if interactive:
+        return
     print("Run: make build")
     print("     make download-models")
-    print("     make up")
+    print(f"     {later_up_command(credentials.download_agent_backend)}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -500,8 +626,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if interactive:
         print()
-    print_summary(credentials)
-    return 0
+    print_summary(credentials, interactive=interactive)
+    if not interactive:
+        return 0
+    try:
+        return offer_followup_steps(args.root, credentials.download_agent_backend)
+    except SetupError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

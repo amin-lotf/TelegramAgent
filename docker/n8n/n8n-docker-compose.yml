@@ -35,8 +35,10 @@ services:
       - N8N_DIAGNOSTICS_ENABLED=false
       - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
-      - ./docker_data/n8n:/home/node/.n8n
+      - n8n:/home/node/.n8n
     networks:
       - fatol-net
+volumes:
+  n8n:
 networks:
   fatol-net:

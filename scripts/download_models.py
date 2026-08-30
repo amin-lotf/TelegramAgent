@@ -13,14 +13,16 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import socket
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
+from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,6 +35,8 @@ DEFAULT_COSYVOICE_MODEL_DIR = "/opt/CosyVoice/pretrained_models/Fun-CosyVoice3-0
 DEFAULT_SAM_AUDIO_MODEL = "facebook/sam-audio-small"
 DEFAULT_SAM_AUDIO_JUDGE_MODEL = "facebook/sam-audio-judge"
 DEFAULT_LAION_CLAP_MODEL = "lukewys/laion_clap"
+# SAM Audio loads this exact checkpoint; do not snapshot the rest of the repo.
+LAION_CLAP_FILENAME = "630k-best.pt"
 DEFAULT_MADLAD_MODEL_ID = "google/madlad400-3b-mt"
 DEFAULT_QWEN_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_WHISPERX_MODEL = "large-v3"
@@ -40,6 +44,9 @@ DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 IMAGEBIND_FILENAME = "imagebind_huge.pth"
 IMAGEBIND_URL = "https://dl.fbaipublicfiles.com/imagebind/imagebind_huge.pth"
 DEFAULT_IMAGEBIND_MIN_BYTES = 3 * 1024 * 1024 * 1024
+HF_ENDPOINT = "HF_ENDPOINT"
+HF_HUB_DISABLE_XET = "HF_HUB_DISABLE_XET"
+DEFAULT_HF_ENDPOINT = "https://huggingface.co"
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -73,6 +80,7 @@ class HubDownloader(Protocol):
         cache_dir: Path | None = None,
         local_dir: Path | None = None,
         token: str | None = None,
+        allow_patterns: tuple[str, ...] | None = None,
     ) -> None: ...
 
     def http_file(self, url: str, dest: Path) -> None: ...
@@ -94,6 +102,8 @@ class Asset:
     kind: str
     repo_id: str | None = None
     cache: str = "hf_home"
+    # Exact Hub filenames only. Never globs, paths, or env-supplied names.
+    allow_patterns: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _env(name: str, default: str) -> str:
@@ -101,6 +111,73 @@ def _env(name: str, default: str) -> str:
     if value is None or not value.strip():
         return default
     return value.strip()
+
+
+def hub_filenames(names: tuple[str, ...]) -> tuple[str, ...]:
+    """Accept only exact filenames. Reject globs, paths, and empty names."""
+    safe: list[str] = []
+    for name in names:
+        path = Path(name)
+        if (
+            not name
+            or name != path.name
+            or path.name in {".", ".."}
+            or any(sep in name for sep in ("/", "\\"))
+            or any(char in name for char in ("*", "?", "[", "]"))
+        ):
+            raise DownloadModelsError(
+                f"Refusing unsafe Hub filename pattern: {name!r}"
+            )
+        safe.append(name)
+    return tuple(safe)
+
+
+def trusted_hf_endpoint(value: str | None = None) -> str:
+    raw = (os.environ.get(HF_ENDPOINT, "") if value is None else value).strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or any(ch.isspace() for ch in raw)
+    ):
+        raise DownloadModelsError(
+            "HF_ENDPOINT must be an https:// URL when set."
+        )
+    return raw.rstrip("/")
+
+
+_IPV4_PATCHED = False
+
+
+def prefer_ipv4() -> None:
+    global _IPV4_PATCHED
+    if _IPV4_PATCHED:
+        return
+
+    original = socket.getaddrinfo
+
+    def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        infos = original(host, port, family, type, proto, flags)
+        ipv4 = [info for info in infos if info[0] == socket.AF_INET]
+        return ipv4 or infos
+
+    socket.getaddrinfo = getaddrinfo
+    _IPV4_PATCHED = True
+
+
+def hub_unreachable_error(repo_id: str, exc: BaseException) -> DownloadModelsError:
+    return DownloadModelsError(
+        f"Hugging Face Hub is unreachable for {repo_id} "
+        f"({type(exc).__name__}: {exc}). "
+        "Copy .cache/huggingface, .cache/cosyvoice, and pretrained_models/ "
+        "from a machine that already ran make download-models, "
+        "or set HF_ENDPOINT to a trusted https:// Hugging Face mirror and retry: "
+        "make download-models"
+    )
 
 
 def imagebind_min_bytes() -> int:
@@ -127,7 +204,8 @@ def sam_audio_judge_model_id() -> str:
 
 
 def laion_clap_model_id() -> str:
-    return _env("LAION_CLAP_MODEL", DEFAULT_LAION_CLAP_MODEL)
+    # Pinned: SAM Audio always loads lukewys/laion_clap / 630k-best.pt.
+    return DEFAULT_LAION_CLAP_MODEL
 
 
 def madlad_model_id() -> str:
@@ -171,7 +249,14 @@ def assets() -> list[Asset]:
             "hf",
             sam_audio_judge_model_id(),
         ),
-        Asset("laion-clap", "LAION CLAP", False, "hf", laion_clap_model_id()),
+        Asset(
+            "laion-clap",
+            "LAION CLAP",
+            False,
+            "hf",
+            laion_clap_model_id(),
+            allow_patterns=(LAION_CLAP_FILENAME,),
+        ),
         Asset(
             "whisper-diarization",
             "Whisper diarization",
@@ -219,7 +304,11 @@ def hf_repo_cache_dir(cache_root: Path, repo_id: str) -> Path:
     return cache_root / "hub" / f"models--{repo_id.replace('/', '--')}"
 
 
-def hf_snapshot_complete(cache_root: Path, repo_id: str) -> bool:
+def hf_snapshot_complete(
+    cache_root: Path,
+    repo_id: str,
+    required_files: tuple[str, ...] = (),
+) -> bool:
     repo_dir = hf_repo_cache_dir(cache_root, repo_id)
     revision = None
     for name in ("main", "master"):
@@ -231,7 +320,13 @@ def hf_snapshot_complete(cache_root: Path, repo_id: str) -> bool:
     if not revision:
         return False
     snapshot = repo_dir / "snapshots" / revision
-    if not snapshot.is_dir() or not any(snapshot.iterdir()):
+    if not snapshot.is_dir():
+        return False
+    if required_files:
+        for filename in hub_filenames(required_files):
+            if not (snapshot / filename).is_file():
+                return False
+    elif not any(snapshot.iterdir()):
         return False
     blobs = repo_dir / "blobs"
     if blobs.is_dir() and any(blobs.glob("*.incomplete")):
@@ -264,7 +359,11 @@ def is_complete(asset: Asset, locations: Locations) -> bool:
     if asset.kind == "hf":
         if not asset.repo_id:
             return False
-        return hf_snapshot_complete(cache_root_for(asset, locations), asset.repo_id)
+        return hf_snapshot_complete(
+            cache_root_for(asset, locations),
+            asset.repo_id,
+            required_files=asset.allow_patterns,
+        )
     return False
 
 
@@ -392,6 +491,10 @@ def print_status(asset: Asset, locations: Locations) -> None:
 
 
 class HuggingfaceDownloader:
+    def __init__(self) -> None:
+        prefer_ipv4()
+        trusted_hf_endpoint()
+
     def snapshot(
         self,
         repo_id: str,
@@ -399,6 +502,7 @@ class HuggingfaceDownloader:
         cache_dir: Path | None = None,
         local_dir: Path | None = None,
         token: str | None = None,
+        allow_patterns: tuple[str, ...] | None = None,
     ) -> None:
         from huggingface_hub import snapshot_download
 
@@ -414,6 +518,8 @@ class HuggingfaceDownloader:
         if cache_dir is not None:
             cache_dir.mkdir(parents=True, exist_ok=True)
             kwargs["cache_dir"] = str(cache_dir)
+        if allow_patterns:
+            kwargs["allow_patterns"] = list(hub_filenames(allow_patterns))
         try:
             try:
                 snapshot_download(**kwargs, local_files_only=True)
@@ -422,6 +528,10 @@ class HuggingfaceDownloader:
                 snapshot_download(**kwargs, local_files_only=False)
         except GatedRepoError as exc:
             raise GatedDownloadError(repo_id, str(exc)) from exc
+        except LocalEntryNotFoundError as exc:
+            raise hub_unreachable_error(repo_id, exc) from exc
+        except (OSError, ConnectionError, TimeoutError) as exc:
+            raise hub_unreachable_error(repo_id, exc) from exc
 
     def http_file(self, url: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -484,6 +594,7 @@ def download_asset(
             asset.repo_id,
             cache_dir=cache_root_for(asset, locations),
             token=token or None,
+            allow_patterns=asset.allow_patterns or None,
         )
         return "download"
     raise DownloadModelsError(f"Unknown asset kind: {asset.kind}")
@@ -524,7 +635,7 @@ def execute_downloads(
 
 
 def compose_download_command(*, token: str) -> list[str]:
-    return [
+    command = [
         "docker",
         "compose",
         "--profile",
@@ -535,8 +646,14 @@ def compose_download_command(*, token: str) -> list[str]:
         "-T",
         "-e",
         f"{HF_TOKEN}={token}",
-        "gpu-dubbing-models-init",
+        "-e",
+        f"{HF_HUB_DISABLE_XET}=1",
     ]
+    endpoint = trusted_hf_endpoint()
+    if endpoint:
+        command.extend(["-e", f"{HF_ENDPOINT}={endpoint}"])
+    command.append("gpu-dubbing-models-init")
+    return command
 
 
 def run_compose_download(*, root: Path, token: str) -> int:
@@ -599,6 +716,7 @@ def run_host(
         return EXIT_OK
 
     ensure_host_directories(locations)
+    trusted_hf_endpoint()
     token = token_from_env_files(root)
     gated = _gated_pending(locations)
     if gated and not token:

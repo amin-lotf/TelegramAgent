@@ -51,6 +51,11 @@ services:
       MADLAD_DEVICE: auto
       QWEN_MODEL_ID: ${QWEN_MODEL_ID:-Qwen/Qwen3-4B-Instruct-2507}
       QWEN_DEVICE: ${QWEN_DEVICE:-cuda}
+      HF_HUB_DISABLE_XET: "1"
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     deploy:
       resources:
         reservations:
@@ -100,6 +105,11 @@ services:
       MADLAD_HF_HOME: /opt/madlad-hf-cache
       QWEN_MODEL_ID: ${QWEN_MODEL_ID:-Qwen/Qwen3-4B-Instruct-2507}
       WHISPERX_MODEL: ${WHISPERX_MODEL:-large-v3}
+      HF_HUB_DISABLE_XET: "1"
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     command: python /app/scripts/download_models.py --execute
     volumes:
       - ../../.cache/huggingface:/root/.cache/huggingface

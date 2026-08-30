@@ -380,7 +380,8 @@ def test_non_interactive_reads_env_and_defaults_admin(
     assert "○ Hugging Face disabled" not in output
     assert "Run: make build" in output
     assert "make download-models" in output
-    assert "make up" in output
+    assert "     make up openai" in output
+    assert "Build Docker images now?" not in output
 
 
 def _set_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -438,6 +439,9 @@ def test_non_interactive_local_backend_skips_openai_key(
     output = capsys.readouterr().out
     assert "✓ Local model configured for download requests" in output
     assert "✓ Hugging Face configured" in output
+    assert "     make up" in output
+    assert "make up openai" not in output
+    assert "Build Docker images now?" not in output
 
 
 def test_non_interactive_openai_backend_requires_api_key(
@@ -778,6 +782,294 @@ def test_apply_backend_invalid_choice_is_rejected_by_argparse() -> None:
     with pytest.raises(SystemExit) as exc:
         _MODULE.main(["--apply-backend", "cloud"])
     assert exc.value.code == 2
+
+
+def _write_setup_examples(tmp_path: Path) -> None:
+    _write_example(
+        tmp_path,
+        "docker/app/.env.llm_gateway.docker.example",
+        "OPENAI_API_KEY=replace-me\nDOWNLOAD_AGENT_BACKEND=openai\n",
+    )
+    _write_example(
+        tmp_path,
+        "docker/n8n/.env.n8n.docker.example",
+        "WEBHOOK_URL=\n",
+    )
+    _write_example(
+        tmp_path,
+        "docker/app/.env.telegram_auth.docker.example",
+        "BOT_VERIFY_HASH=replace-me\nBOT_VERIFY_SECRET=replace-me\n",
+    )
+
+
+def _interactive_getpass(*, openai_key: str | None = "sk-live"):
+    def fake_getpass(prompt: str) -> str:
+        if "Hugging Face" in prompt:
+            return "hf_token"
+        if "OpenAI" in prompt:
+            if openai_key is None:
+                raise AssertionError("OpenAI key must not be requested")
+            return openai_key
+        if "bot token" in prompt:
+            return "123:bot-token"
+        if "API ID" in prompt:
+            return "111111"
+        if "API hash" in prompt:
+            return "api-hash"
+        if "verification password" in prompt:
+            return "verify-secret-password"
+        if "Admin password" in prompt:
+            return ""
+        raise AssertionError(prompt)
+
+    return fake_getpass
+
+
+def _patch_input(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str]:
+    remaining = list(answers)
+
+    def fake_input(prompt: str) -> str:
+        if not remaining:
+            raise AssertionError(f"Unexpected input prompt: {prompt!r}")
+        return remaining.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    return remaining
+
+
+def _patch_make(
+    monkeypatch: pytest.MonkeyPatch, codes: list[int] | None = None
+) -> list[list[str]]:
+    calls: list[list[str]] = []
+    remaining = list(codes or [])
+
+    def fake_run(command, cwd=None, check=False):
+        del cwd, check
+        calls.append(list(command))
+        code = remaining.pop(0) if remaining else 0
+
+        class Result:
+            returncode = code
+
+        return Result()
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", fake_run)
+    return calls
+
+
+def _prepare_interactive_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    answers: list[str],
+    openai_key: str | None = "sk-live",
+    make_codes: list[int] | None = None,
+) -> tuple[list[str], list[list[str]]]:
+    _write_setup_examples(tmp_path)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(_MODULE.getpass, "getpass", _interactive_getpass(openai_key=openai_key))
+    remaining = _patch_input(monkeypatch, answers)
+    calls = _patch_make(monkeypatch, make_codes)
+    return remaining, calls
+
+
+def test_non_interactive_does_not_run_make(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_setup_examples(tmp_path)
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.delenv("DOWNLOAD_AGENT_BACKEND", raising=False)
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("non-interactive setup must not run make")
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", fake_run)
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--non-interactive"])
+
+    assert exit_code == 0
+
+
+def test_interactive_decline_build_prints_later_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    remaining, calls = _prepare_interactive_setup(
+        tmp_path,
+        monkeypatch,
+        answers=["2", "https://n8n.example.com/", "n"],
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path)])
+
+    assert exit_code == 0
+    assert remaining == []
+    assert calls == []
+    output = capsys.readouterr().out
+    assert "Configuration completed." in output
+    assert "Build Docker images now?" in output
+    assert "You can also run this later with: make build" in output
+    assert "You can run these later:" in output
+    assert "  make build" in output
+    assert "  make download-models" in output
+    assert "  make up openai" in output
+    assert "Download GPU model weights now?" not in output
+    assert "Start the stack now?" not in output
+
+
+def test_interactive_yes_build_failure_skips_download_and_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    remaining, calls = _prepare_interactive_setup(
+        tmp_path,
+        monkeypatch,
+        answers=["2", "https://n8n.example.com/", "y"],
+        make_codes=[1],
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path)])
+
+    assert exit_code == 1
+    assert remaining == []
+    assert calls == [["make", "build"]]
+    captured = capsys.readouterr()
+    assert "Build failed. You can retry later with: make build" in captured.err
+    assert "  make download-models" in captured.out
+    assert "Download GPU model weights now?" not in captured.out
+    assert "Start the stack now?" not in captured.out
+
+
+def test_interactive_yes_build_skip_models_and_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    remaining, calls = _prepare_interactive_setup(
+        tmp_path,
+        monkeypatch,
+        answers=["2", "https://n8n.example.com/", "y", "n", "n"],
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path)])
+
+    assert exit_code == 0
+    assert remaining == []
+    assert calls == [["make", "build"]]
+    output = capsys.readouterr().out
+    assert "Running: make build" in output
+    assert "Download GPU model weights now?" in output
+    assert "Start the stack now?" in output
+    assert "  make download-models" in output
+    assert "  make up openai" in output
+    assert "  make build" not in output
+
+
+def test_interactive_full_chain_openai_runs_up_openai(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    remaining, calls = _prepare_interactive_setup(
+        tmp_path,
+        monkeypatch,
+        answers=["2", "https://n8n.example.com/", "y", "y", "y"],
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path)])
+
+    assert exit_code == 0
+    assert remaining == []
+    assert calls == [
+        ["make", "build"],
+        ["make", "download-models"],
+        ["make", "up", "openai"],
+    ]
+
+
+def test_interactive_full_chain_local_runs_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    remaining, calls = _prepare_interactive_setup(
+        tmp_path,
+        monkeypatch,
+        answers=["1", "https://n8n.example.com/", "y", "y", "y"],
+        openai_key=None,
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path)])
+
+    assert exit_code == 0
+    assert remaining == []
+    assert calls == [
+        ["make", "build"],
+        ["make", "download-models"],
+        ["make", "up"],
+    ]
+    output = capsys.readouterr().out
+    assert "You can also run this later with: make up" in output
+    assert "make up openai" not in output
+
+
+def test_interactive_download_failure_still_offers_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    remaining, calls = _prepare_interactive_setup(
+        tmp_path,
+        monkeypatch,
+        answers=["2", "https://n8n.example.com/", "y", "y", "y"],
+        make_codes=[0, 2, 0],
+    )
+
+    exit_code = _MODULE.main(["--root", str(tmp_path)])
+
+    assert exit_code == 1
+    assert remaining == []
+    assert calls == [
+        ["make", "build"],
+        ["make", "download-models"],
+        ["make", "up", "openai"],
+    ]
+    captured = capsys.readouterr()
+    assert "Model download failed" in captured.err
+    assert "make download-models" in captured.out
+
+
+def test_apply_backend_does_not_offer_followup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _backend_env_tree(tmp_path, openai_key="sk-existing", backend="openai")
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("apply-backend must not run make")
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", fake_run)
+    monkeypatch.setattr("builtins.input", lambda prompt: (_ for _ in ()).throw(
+        AssertionError(f"apply-backend must not prompt: {prompt!r}")
+    ))
+
+    exit_code = _MODULE.main(["--root", str(tmp_path), "--apply-backend", "local"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Using local GPU" in output
+    assert "Build Docker images now?" not in output
+
+
+def test_prompt_yes_no_rejects_invalid_then_accepts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remaining = _patch_input(monkeypatch, ["maybe", "Y"])
+
+    assert _MODULE._prompt_yes_no("Build Docker images now?", "make build") is True
+    assert remaining == []
 
 
 def test_is_generated_secret_does_not_match_token_count_settings() -> None:

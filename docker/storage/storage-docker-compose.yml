@@ -101,7 +101,7 @@ services:
       - POSTGRES_PASSWORD=@WebAnalyzer2026
       - POSTGRES_DB=n8n
     volumes:
-      - ./docker_data/n8n_postgres_data:/var/lib/postgresql/data
+      - n8n_postgres_data:/var/lib/postgresql/data
     networks:
       - fatol-net
   telegram_auth_postgres:
@@ -200,5 +200,6 @@ volumes:
   content_processing_postgres_data:
   agent_runtime_postgres_data:
   gpu_execution_postgres_data:
+  n8n_postgres_data:
 networks:
   fatol-net:

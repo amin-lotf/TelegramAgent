@@ -17,16 +17,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_hf_snapshot(
-    cache_root: Path, repo_id: str, *, incomplete: bool = False
+    cache_root: Path,
+    repo_id: str,
+    *,
+    incomplete: bool = False,
+    files: tuple[str, ...] = ("config.json",),
 ) -> None:
     repo_dir = cache_root / "hub" / f"models--{repo_id.replace('/', '--')}"
-    (repo_dir / "refs").mkdir(parents=True)
+    (repo_dir / "refs").mkdir(parents=True, exist_ok=True)
     (repo_dir / "refs" / "main").write_text("abc123\n", encoding="utf-8")
     snapshot = repo_dir / "snapshots" / "abc123"
-    snapshot.mkdir(parents=True)
-    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    snapshot.mkdir(parents=True, exist_ok=True)
+    for name in files:
+        (snapshot / name).write_bytes(b"data")
     blobs = repo_dir / "blobs"
-    blobs.mkdir()
+    blobs.mkdir(exist_ok=True)
     (blobs / "hash").write_bytes(b"data")
     if incomplete:
         (blobs / "hash.incomplete").write_bytes(b"partial")
@@ -40,7 +45,10 @@ def _complete_all(locations: _MODULE.Locations) -> None:
     for asset in _MODULE.assets():
         if asset.kind != "hf" or not asset.repo_id:
             continue
-        _write_hf_snapshot(_MODULE.cache_root_for(asset, locations), asset.repo_id)
+        files = asset.allow_patterns or ("config.json",)
+        _write_hf_snapshot(
+            _MODULE.cache_root_for(asset, locations), asset.repo_id, files=files
+        )
 
 
 class FakeDownloader:
@@ -53,6 +61,7 @@ class FakeDownloader:
         self.gated = set(gated)
         self.fail = set(fail)
         self.snapshots: list[str] = []
+        self.allow_patterns: list[tuple[str, tuple[str, ...] | None]] = []
         self.http: list[str] = []
 
     def snapshot(
@@ -62,8 +71,10 @@ class FakeDownloader:
         cache_dir: Path | None = None,
         local_dir: Path | None = None,
         token: str | None = None,
+        allow_patterns: tuple[str, ...] | None = None,
     ) -> None:
         self.snapshots.append(repo_id)
+        self.allow_patterns.append((repo_id, allow_patterns))
         if repo_id in self.gated:
             raise _MODULE.GatedDownloadError(repo_id)
         if repo_id in self.fail:
@@ -72,7 +83,8 @@ class FakeDownloader:
             local_dir.mkdir(parents=True, exist_ok=True)
             (local_dir / "cosyvoice3.yaml").write_text("ok\n", encoding="utf-8")
         if cache_dir is not None:
-            _write_hf_snapshot(cache_dir, repo_id)
+            files = allow_patterns or ("config.json",)
+            _write_hf_snapshot(cache_dir, repo_id, files=files)
 
     def http_file(self, url: str, dest: Path) -> None:
         self.http.append(url)
@@ -112,6 +124,33 @@ def test_hf_snapshot_complete_and_incomplete(tmp_path: Path) -> None:
     assert not _MODULE.hf_snapshot_complete(tmp_path, "Systran/faster-whisper-large-v3")
 
 
+def test_laion_clap_is_pinned_to_known_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAION_CLAP_MODEL", "evil/not-clap")
+    clap = next(asset for asset in _MODULE.assets() if asset.key == "laion-clap")
+    assert clap.repo_id == "lukewys/laion_clap"
+    assert _MODULE.laion_clap_model_id() == "lukewys/laion_clap"
+    assert clap.allow_patterns == ("630k-best.pt",)
+    assert clap.allow_patterns == (_MODULE.LAION_CLAP_FILENAME,)
+
+
+def test_clap_snapshot_requires_known_checkpoint(tmp_path: Path) -> None:
+    repo = _MODULE.laion_clap_model_id()
+    required = (_MODULE.LAION_CLAP_FILENAME,)
+    _write_hf_snapshot(tmp_path, repo, files=("config.json", "630k-fusion-best.pt"))
+    assert not _MODULE.hf_snapshot_complete(tmp_path, repo, required_files=required)
+    _write_hf_snapshot(tmp_path, repo, files=required)
+    assert _MODULE.hf_snapshot_complete(tmp_path, repo, required_files=required)
+
+
+def test_hub_filenames_reject_paths_and_globs() -> None:
+    assert _MODULE.hub_filenames(("630k-best.pt",)) == ("630k-best.pt",)
+    for name in ("../630k-best.pt", "weights/*.pt", "dir/630k-best.pt", "*", ""):
+        with pytest.raises(_MODULE.DownloadModelsError, match="unsafe Hub filename"):
+            _MODULE.hub_filenames((name,))
+
+
 def test_execute_skips_complete_assets_without_downloading(
     tmp_path: Path, min_imagebind: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -149,6 +188,11 @@ def test_execute_downloads_missing_public_and_imagebind(
     assert _MODULE.sam_audio_judge_model_id() in downloader.snapshots
     assert _MODULE.laion_clap_model_id() in downloader.snapshots
     assert _MODULE.diarization_repo_id() in downloader.snapshots
+    assert (
+        _MODULE.laion_clap_model_id(),
+        (_MODULE.LAION_CLAP_FILENAME,),
+    ) in downloader.allow_patterns
+    assert (_MODULE.diarization_repo_id(), None) in downloader.allow_patterns
     assert downloader.http == [_MODULE.IMAGEBIND_URL]
     assert _MODULE.cosyvoice_complete(locations.cosyvoice_dir)
     assert _MODULE.imagebind_complete(locations.imagebind_path)
@@ -287,6 +331,37 @@ def test_compose_run_does_not_pass_no_build() -> None:
         "--rm",
     ]
     assert "gpu-dubbing-models-init" in command
+    assert f"{_MODULE.HF_HUB_DISABLE_XET}=1" in command
+
+
+def test_compose_forwards_https_endpoint_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HF_ENDPOINT", "https://example-mirror.test/hub")
+    command = _MODULE.compose_download_command(token="hf_test")
+    assert "HF_ENDPOINT=https://example-mirror.test/hub" in command
+
+    monkeypatch.setenv("HF_ENDPOINT", "http://evil.example/hub")
+    with pytest.raises(_MODULE.DownloadModelsError, match="https://"):
+        _MODULE.compose_download_command(token="hf_test")
+
+
+def test_trusted_hf_endpoint_rejects_non_https(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HF_ENDPOINT", raising=False)
+    assert _MODULE.trusted_hf_endpoint() == ""
+    assert _MODULE.trusted_hf_endpoint("https://huggingface.co/") == (
+        "https://huggingface.co"
+    )
+    for value in (
+        "http://huggingface.co",
+        "https://user:pass@huggingface.co",
+        "https://huggingface.co/ path",
+        "ftp://huggingface.co",
+    ):
+        with pytest.raises(_MODULE.DownloadModelsError, match="https://"):
+            _MODULE.trusted_hf_endpoint(value)
 
 
 def test_makefile_exposes_build_and_download_models() -> None:
@@ -319,5 +394,92 @@ def test_init_service_runs_execute_and_mounts_madlad_cache() -> None:
         "gpu-execution-control-worker:"
     )[0]
     assert "sam-audio-checkpoints:/app/.checkpoints" not in init_block
+    assert "HF_HUB_DISABLE_XET: \"1\"" in init_block
+    assert "HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}" in init_block
+    assert "1.1.1.1" in init_block
+    worker_block = compose.split("gpu-execution-worker:")[1].split(
+        "gpu-dubbing-models-init:"
+    )[0]
+    assert "HF_HUB_DISABLE_XET: \"1\"" in worker_block
+    assert "1.1.1.1" in worker_block
     assert "download_cosyvoice_models.py" not in compose
     assert "download_sam_audio_model.py" not in compose
+
+
+def _install_fake_hub(monkeypatch: pytest.MonkeyPatch, snapshot_download):
+    import types
+
+    monkeypatch.delenv("HF_ENDPOINT", raising=False)
+    errors = types.ModuleType("huggingface_hub.errors")
+
+    class GatedRepoError(Exception):
+        pass
+
+    class LocalEntryNotFoundError(Exception):
+        pass
+
+    errors.GatedRepoError = GatedRepoError
+    errors.LocalEntryNotFoundError = LocalEntryNotFoundError
+    hub = types.ModuleType("huggingface_hub")
+    hub.snapshot_download = snapshot_download
+    hub.errors = errors
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    monkeypatch.setitem(sys.modules, "huggingface_hub.errors", errors)
+    return errors
+
+
+def test_snapshot_maps_hub_miss_to_unreachable_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    errors = _install_fake_hub(
+        monkeypatch,
+        lambda **kwargs: (_ for _ in ()).throw(
+            sys.modules["huggingface_hub.errors"].LocalEntryNotFoundError("missing")
+        ),
+    )
+    del errors
+
+    downloader = _MODULE.HuggingfaceDownloader()
+    with pytest.raises(_MODULE.DownloadModelsError, match="Hub is unreachable") as exc:
+        downloader.snapshot("pyannote/speaker-diarization-community-1")
+    message = str(exc.value)
+    assert "pyannote/speaker-diarization-community-1" in message
+    assert "pretrained_models/" in message
+    assert "HF_ENDPOINT" in message
+    assert "make download-models" in message
+
+
+def test_snapshot_still_raises_gated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def snapshot_download(**kwargs):
+        errors = sys.modules["huggingface_hub.errors"]
+        if kwargs.get("local_files_only"):
+            raise errors.LocalEntryNotFoundError("missing")
+        raise errors.GatedRepoError("accept terms")
+
+    _install_fake_hub(monkeypatch, snapshot_download)
+    downloader = _MODULE.HuggingfaceDownloader()
+    with pytest.raises(_MODULE.GatedDownloadError) as exc:
+        downloader.snapshot("facebook/sam-audio-small")
+    assert exc.value.repo_id == "facebook/sam-audio-small"
+
+
+def test_snapshot_passes_exact_allow_patterns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict[str, object]] = []
+
+    def snapshot_download(**kwargs):
+        seen.append(kwargs)
+
+    _install_fake_hub(monkeypatch, snapshot_download)
+    downloader = _MODULE.HuggingfaceDownloader()
+    downloader.snapshot(
+        "lukewys/laion_clap",
+        allow_patterns=(_MODULE.LAION_CLAP_FILENAME,),
+    )
+    assert seen
+    assert seen[0]["repo_id"] == "lukewys/laion_clap"
+    assert seen[0]["allow_patterns"] == ["630k-best.pt"]
+    assert seen[0]["local_files_only"] is True
