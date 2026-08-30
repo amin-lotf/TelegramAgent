@@ -1,6 +1,6 @@
 """Runtime configuration loaded from environment variables and .env."""
 import sys
-from typing import Any,  get_args
+from typing import Any, Literal, get_args
 
 from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,6 +41,7 @@ from telegram_agent.core.content_processing.common.const import (
     DEFAULT_SUBTITLE_GLOSSARY_MAX_WINDOWS_LONG,
     DEFAULT_SUBTITLE_GLOSSARY_OVERLAP_RATIO,
     DEFAULT_SUBTITLE_GLOSSARY_WINDOW_TOKEN_BUDGET,
+    DEFAULT_SUBTITLE_TRANSLATION_BACKEND,
     DEFAULT_SUBTITLE_TRANSLATION_BATCH_LEASE_SECONDS,
     DEFAULT_SUBTITLE_TRANSLATION_ENABLED,
     DEFAULT_SUBTITLE_TRANSLATION_LOOKAHEAD,
@@ -393,6 +394,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "SUBTITLE_TRANSLATION_ENABLED",
             "subtitle_translation_enabled",
+        ),
+    )
+    subtitle_translation_backend: Literal["openai", "local"] = Field(
+        default=DEFAULT_SUBTITLE_TRANSLATION_BACKEND,
+        validation_alias=AliasChoices(
+            "SUBTITLE_TRANSLATION_BACKEND",
+            "subtitle_translation_backend",
         ),
     )
     subtitle_translation_max_source_tokens: int = Field(

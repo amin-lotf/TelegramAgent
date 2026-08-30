@@ -32,22 +32,33 @@ from telegram_agent.core.content_processing.db.repositories.sync_subtitle_transl
 from telegram_agent.core.content_processing.db.uow.sync_content_processing import (
     SyncSqlAlchemyContentProcessingUnitOfWork,
 )
+from telegram_agent.core.content_processing.prompts.glossary_extraction import (
+    build_glossary_extraction_prompts,
+)
+from telegram_agent.core.content_processing.prompts.subtitle_translation import (
+    build_subtitle_translation_prompts,
+)
 from telegram_agent.core.content_processing.services.subtitle_preparation_service import (
     SubtitleSegment,
 )
 from telegram_agent.core.content_processing.services.subtitle_translation_helpers import (
     SourceSegmentView,
+    build_glossary_windows,
+    consolidate_glossaries,
+    context_pair_payload,
     empty_glossary,
     languages_match,
     normalize_language,
     plan_translation_batches,
+    segment_payload,
+    validate_batch_translations,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class SyncSubtitleTranslationService:
-    """Resumable subtitle translation via MADLAD GPU jobs."""
+    """Resumable subtitle translation via OpenAI LLM gateway or MADLAD."""
 
     def __init__(
         self,
@@ -76,14 +87,31 @@ class SyncSubtitleTranslationService:
             sync_content_processing_uow_factory,
         )
 
-        if madlad_client is None and settings.subtitle_translation_enabled:
-            madlad_client = MadladClient.from_settings(settings)
+        if settings.subtitle_translation_enabled:
+            if (
+                llm_gateway_client is None
+                and settings.subtitle_translation_backend == "openai"
+                and settings.llm_gateway_service_token is not None
+            ):
+                llm_gateway_client = LlmGatewayClient(
+                    base_url=settings.llm_gateway_base_url,
+                    token=settings.llm_gateway_service_token,
+                    timeout_seconds=settings.llm_gateway_request_timeout_seconds,
+                )
+            if (
+                madlad_client is None
+                and settings.subtitle_translation_backend == "local"
+            ):
+                madlad_client = MadladClient.from_settings(settings)
         return cls(
             uow_factory=sync_content_processing_uow_factory,
             settings=settings,
             llm_gateway_client=llm_gateway_client,
             madlad_client=madlad_client,
         )
+
+    def _uses_openai(self) -> bool:
+        return self._settings.subtitle_translation_backend == "openai"
 
     def ensure_translated(
         self,
@@ -117,6 +145,7 @@ class SyncSubtitleTranslationService:
         if target_norm is None:
             return self._as_subtitle_segments(source_segments)
 
+        use_openai = self._uses_openai()
         translation = self._get_or_create_translation(
             source_job_id=source_job_id,
             source_language=source_language,
@@ -130,17 +159,28 @@ class SyncSubtitleTranslationService:
             self._prepare_failed_for_resume(translation.id)
 
         if translation.glossary is None:
-            self._set_empty_glossary(translation.id)
+            if use_openai:
+                self._build_glossary(
+                    translation_id=translation.id,
+                    source_language=source_language,
+                    target_language=target_norm,
+                    source_segments=source_segments,
+                    cancellation_requested=cancellation_requested,
+                )
+            else:
+                self._set_empty_glossary(translation.id)
 
         self._ensure_batches_planned(
             translation_id=translation.id,
             source_segments=source_segments,
+            use_openai=use_openai,
         )
         self._translate_remaining_batches(
             translation_id=translation.id,
             source_language=source_language,
             target_language=target_norm,
             source_segments=source_segments,
+            use_openai=use_openai,
             cancellation_requested=cancellation_requested,
         )
         self._raise_if_cancelled(cancellation_requested)
@@ -244,6 +284,20 @@ class SyncSubtitleTranslationService:
                 status=SubtitleTranslationStatus.TRANSLATING,
             )
 
+    def _require_llm_client(self) -> LlmGatewayClient:
+        if self._llm_gateway_client is not None:
+            return self._llm_gateway_client
+        if self._settings.llm_gateway_service_token is None:
+            raise PermanentContentProcessingError(
+                "LLM_GATEWAY_SERVICE_TOKEN must be configured for subtitle translation"
+            )
+        self._llm_gateway_client = LlmGatewayClient(
+            base_url=self._settings.llm_gateway_base_url,
+            token=self._settings.llm_gateway_service_token,
+            timeout_seconds=self._settings.llm_gateway_request_timeout_seconds,
+        )
+        return self._llm_gateway_client
+
     def _require_madlad_client(self) -> MadladClient:
         if self._madlad_client is None:
             self._madlad_client = MadladClient.from_settings(self._settings)
@@ -256,16 +310,107 @@ class SyncSubtitleTranslationService:
                 glossary=empty_glossary(),
             )
 
+    def _build_glossary(
+        self,
+        *,
+        translation_id: UUID,
+        source_language: str | None,
+        target_language: str,
+        source_segments: list[SourceSegmentView],
+        cancellation_requested: Callable[[], bool] | None,
+    ) -> None:
+        with self._uow_factory() as uow:
+            uow.subtitle_translations.set_status(
+                translation_id=translation_id,
+                status=SubtitleTranslationStatus.BUILDING_GLOSSARY,
+            )
+
+        windows = build_glossary_windows(
+            source_segments,
+            window_token_budget=self._settings.subtitle_glossary_window_token_budget,
+            max_windows=self._settings.subtitle_glossary_max_windows,
+            max_windows_long=self._settings.subtitle_glossary_max_windows_long,
+            overlap_ratio=self._settings.subtitle_glossary_overlap_ratio,
+        )
+        client = self._require_llm_client()
+        partials: list[dict[str, object]] = []
+        last_model: str | None = None
+
+        try:
+            for window_index, window in enumerate(windows):
+                self._raise_if_cancelled(cancellation_requested)
+                prompts = build_glossary_extraction_prompts(
+                    source_language=source_language,
+                    target_language=target_language,
+                    window_segments=[segment_payload(segment) for segment in window],
+                    window_index=window_index,
+                    window_count=len(windows),
+                )
+                generation = client.extract_glossary(
+                    system_prompt=prompts.system_prompt,
+                    user_prompt=prompts.user_prompt,
+                )
+                self._raise_if_cancelled(cancellation_requested)
+                partials.append(generation.output)
+                last_model = generation.model
+        except (SecondaryTaskCancelledError, GpuExecutionCanceledError):
+            raise SecondaryTaskCancelledError("Subtitle translation was cancelled")
+        except RetryableContentProcessingError:
+            raise
+        except PermanentContentProcessingError as exc:
+            with self._uow_factory() as uow:
+                uow.subtitle_translations.mark_failed(
+                    translation_id=translation_id,
+                    error_message=str(exc),
+                )
+            raise
+
+        glossary = (
+            consolidate_glossaries(
+                partials,
+                max_entries=self._settings.subtitle_glossary_max_entries,
+            )
+            if partials
+            else empty_glossary()
+        )
+
+        with self._uow_factory() as uow:
+            uow.subtitle_translations.set_glossary(
+                translation_id=translation_id,
+                glossary=glossary,
+            )
+            if last_model:
+                uow.subtitle_translations.set_model_name(
+                    translation_id=translation_id,
+                    model_name=last_model,
+                )
+
+        logger.info(
+            "Built subtitle glossary",
+            extra={
+                "translation_id": str(translation_id),
+                "window_count": len(windows),
+                "entry_count": len(glossary.get("entries") or []),
+            },
+        )
+
     def _ensure_batches_planned(
         self,
         *,
         translation_id: UUID,
         source_segments: list[SourceSegmentView],
+        use_openai: bool,
     ) -> None:
+        if use_openai:
+            max_source_tokens = self._settings.subtitle_translation_max_source_tokens
+            max_segments = self._settings.subtitle_translation_max_segments_per_batch
+        else:
+            max_source_tokens = 10**9
+            max_segments = max(len(source_segments), 1)
         plans = plan_translation_batches(
             source_segments,
-            max_source_tokens=10**9,
-            max_segments=max(len(source_segments), 1),
+            max_source_tokens=max_source_tokens,
+            max_segments=max_segments,
         )
         with self._uow_factory() as uow:
             uow.subtitle_translations.ensure_batches(
@@ -284,11 +429,13 @@ class SyncSubtitleTranslationService:
         source_language: str | None,
         target_language: str,
         source_segments: list[SourceSegmentView],
+        use_openai: bool,
         cancellation_requested: Callable[[], bool] | None,
     ) -> None:
         by_index = {segment.segment_index: segment for segment in source_segments}
         ordered_indexes = [segment.segment_index for segment in source_segments]
-        madlad_client = self._require_madlad_client()
+        llm_client = self._require_llm_client() if use_openai else None
+        madlad_client = None if use_openai else self._require_madlad_client()
         lease_owner = f"subtitle-translation:{uuid4()}"
         lease_timeout = timedelta(
             seconds=self._settings.subtitle_translation_batch_lease_seconds
@@ -329,6 +476,14 @@ class SyncSubtitleTranslationService:
                 batch_attempt = batch.attempt_count
                 start_index = batch.start_segment_index
                 end_index = batch.end_segment_index
+                translation = uow.subtitle_translations.get_by_id(translation_id)
+                if translation is None or (
+                    use_openai and translation.glossary is None
+                ):
+                    raise PermanentContentProcessingError(
+                        "Subtitle translation glossary is missing before batch translate"
+                    )
+                glossary_payload = dict(translation.glossary or empty_glossary())
             batch_indexes = [
                 index
                 for index in ordered_indexes
@@ -345,24 +500,85 @@ class SyncSubtitleTranslationService:
                     "Translation batch range contains no source segments"
                 )
 
+            first_pos = ordered_indexes.index(batch_indexes[0])
+            last_pos = ordered_indexes.index(batch_indexes[-1])
+            prev_start = max(
+                0, first_pos - self._settings.subtitle_translation_previous_context
+            )
+            prev_indexes = ordered_indexes[prev_start:first_pos]
+            upcoming_indexes = ordered_indexes[
+                last_pos + 1 : last_pos + 1 + self._settings.subtitle_translation_lookahead
+            ]
+
+            with self._uow_factory() as uow:
+                prev_translated = {
+                    row.segment_index: row.text
+                    for row in uow.subtitle_translations.get_translated_by_indexes(
+                        translation_id=translation_id,
+                        segment_indexes=prev_indexes,
+                    )
+                }
+
             try:
                 self._raise_if_cancelled(cancellation_requested)
-                generation = self._translate_with_madlad(
-                    client=madlad_client,
-                    source_language=source_language,
-                    target_language=target_language,
-                    batch_indexes=batch_indexes,
-                    by_index=by_index,
-                    request_id=(
-                        f"{translation_id}/{batch_id}/attempt-{batch_attempt}"
-                    ),
-                    cancellation_requested=cancellation_requested,
-                )
-                self._raise_if_cancelled(cancellation_requested)
-                validated = list(zip(batch_indexes, generation.translations))
-                provider_request_id = None
-                input_tokens = None
-                output_tokens = None
+                if use_openai:
+                    assert llm_client is not None
+                    previous_context = []
+                    for index in prev_indexes:
+                        translated_text = prev_translated.get(index)
+                        if translated_text is None:
+                            continue
+                        previous_context.append(
+                            context_pair_payload(
+                                source=by_index[index],
+                                translated_text=translated_text,
+                            )
+                        )
+                    prompts = build_subtitle_translation_prompts(
+                        source_language=source_language,
+                        target_language=target_language,
+                        glossary=glossary_payload,
+                        previous_context=previous_context,
+                        translate_segments=[
+                            segment_payload(by_index[index]) for index in batch_indexes
+                        ],
+                        upcoming_segments=[
+                            segment_payload(by_index[index])
+                            for index in upcoming_indexes
+                        ],
+                    )
+                    generation = llm_client.translate_subtitle_batch(
+                        system_prompt=prompts.system_prompt,
+                        user_prompt=prompts.user_prompt,
+                    )
+                    self._raise_if_cancelled(cancellation_requested)
+                    validated = validate_batch_translations(
+                        expected_indexes=set(batch_indexes),
+                        output=generation.output,
+                    )
+                    provider_request_id = generation.provider_request_id
+                    input_tokens = generation.usage.input_tokens
+                    output_tokens = generation.usage.output_tokens
+                    last_model = generation.model
+                else:
+                    assert madlad_client is not None
+                    generation = self._translate_with_madlad(
+                        client=madlad_client,
+                        source_language=source_language,
+                        target_language=target_language,
+                        batch_indexes=batch_indexes,
+                        by_index=by_index,
+                        request_id=(
+                            f"{translation_id}/{batch_id}/attempt-{batch_attempt}"
+                        ),
+                        cancellation_requested=cancellation_requested,
+                    )
+                    self._raise_if_cancelled(cancellation_requested)
+                    validated = list(zip(batch_indexes, generation.translations))
+                    provider_request_id = None
+                    input_tokens = None
+                    output_tokens = None
+                    last_model = generation.model
             except (SecondaryTaskCancelledError, GpuExecutionCanceledError):
                 with self._uow_factory() as uow:
                     uow.subtitle_translations.release_cancelled_batch(
@@ -402,7 +618,6 @@ class SyncSubtitleTranslationService:
                 )
                 for index, text in validated
             ]
-            last_model = generation.model
 
             self._raise_if_cancelled(cancellation_requested)
             with self._uow_factory() as uow:

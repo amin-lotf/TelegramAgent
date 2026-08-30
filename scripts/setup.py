@@ -34,6 +34,7 @@ HF_TOKEN = "HF_TOKEN"
 WHISPERX_HF_TOKEN = "WHISPERX_HF_TOKEN"
 ADMIN_PASSWORD = "ADMIN_PASSWORD"
 DOWNLOAD_AGENT_BACKEND = "DOWNLOAD_AGENT_BACKEND"
+SUBTITLE_TRANSLATION_BACKEND = "SUBTITLE_TRANSLATION_BACKEND"
 
 DEFAULT_ADMIN_PASSWORD = "admin"
 DOWNLOAD_AGENT_BACKEND_LOCAL = "local"
@@ -50,6 +51,7 @@ USER_PROVIDED_KEYS = {
     WHISPERX_HF_TOKEN,
     ADMIN_PASSWORD,
     DOWNLOAD_AGENT_BACKEND,
+    SUBTITLE_TRANSLATION_BACKEND,
 }
 GENERATED_EXACT_KEYS = {
     "N8N_CALLBACK_TOKEN",
@@ -95,6 +97,7 @@ class UserCredentials:
             WHISPERX_HF_TOKEN: self.hf_token,
             ADMIN_PASSWORD: self.admin_password,
             DOWNLOAD_AGENT_BACKEND: self.download_agent_backend,
+            SUBTITLE_TRANSLATION_BACKEND: self.download_agent_backend,
         }
         return mapping[key]
 
@@ -261,11 +264,12 @@ def _read_download_agent_backend(*, interactive: bool) -> str:
             )
         return raw
 
-    print("How should the bot understand download requests?")
+    print("How should the bot understand download requests and translate subtitles?")
     print()
-    print("  [1] Local GPU model (Qwen) — no OpenAI key")
-    print("  [2] OpenAI — usually understands requests better,")
-    print("      especially in other languages")
+    print("  [1] Local GPU — Qwen for requests, MADLAD for translation")
+    print("      (no OpenAI key)")
+    print("  [2] OpenAI — download requests plus glossary and")
+    print("      subtitle translation")
     print()
     while True:
         choice = input("Choice [1/2]: ").strip()
@@ -303,9 +307,9 @@ def collect_credentials(*, interactive: bool) -> UserCredentials:
 def print_summary(credentials: UserCredentials) -> None:
     print("✓ Hugging Face configured")
     if credentials.download_agent_backend == DOWNLOAD_AGENT_BACKEND_OPENAI:
-        print("✓ OpenAI configured for download requests")
+        print("✓ OpenAI configured for download requests and subtitle translation")
     else:
-        print("✓ Local model configured for download requests")
+        print("✓ Local model configured for download requests and MADLAD translation")
     print("✓ Telegram configured")
     print("✓ Telegram API configured")
     print("✓ n8n webhook configured")
@@ -334,8 +338,9 @@ def main(argv: list[str] | None = None) -> int:
             "Required: HF_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, "
             "TELEGRAM_API_HASH, WEBHOOK_URL, TELEGRAM_VERIFY_PASSWORD. "
             "OPENAI_API_KEY is required when DOWNLOAD_AGENT_BACKEND=openai "
-            "(the default). Optional: DOWNLOAD_AGENT_BACKEND (openai|local), "
-            "ADMIN_PASSWORD."
+            "(the default). That choice also selects OpenAI glossary and "
+            "subtitle translation instead of MADLAD. Optional: "
+            "DOWNLOAD_AGENT_BACKEND (openai|local), ADMIN_PASSWORD."
         ),
     )
     args = parser.parse_args(argv)

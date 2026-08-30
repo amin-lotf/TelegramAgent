@@ -332,6 +332,7 @@ def test_configured_pair_uses_madlad_without_llm_calls(
         language="en",
         texts=["Hello", "world", "again"],
     )
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "local")
     monkeypatch.setattr(settings, "madlad_language_pairs", "en:fa")
     monkeypatch.setattr(settings, "madlad_client_batch_size", 2)
     llm = FakeLlmClient()
@@ -428,6 +429,7 @@ def test_unlisted_pair_uses_madlad(
     monkeypatch,
 ) -> None:
     job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "local")
     monkeypatch.setattr(settings, "madlad_language_pairs", "en:fa")
     llm = FakeLlmClient()
     madlad = FakeMadladClient()
@@ -495,3 +497,151 @@ def test_overwrite_rejected(
             target_language="fa",
             overwrite=True,
         )
+
+
+def test_openai_backend_builds_glossary_then_translates(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "openai")
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient()
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
+    )
+
+    first = service.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert [segment.text for segment in first] == [
+        "FA:Hello Alice",
+        "FA:How are you?",
+    ]
+    assert first[0].start_ms == 0
+    assert first[0].end_ms == 800
+    assert llm.glossary_calls == 1
+    assert llm.translate_calls >= 1
+    assert madlad.calls == []
+    assert any('"source_term":"Alice"' in prompt for prompt in llm.translate_prompts)
+
+    second_llm = FakeLlmClient()
+    second_madlad = FakeMadladClient()
+    service2 = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=second_llm,  # type: ignore[arg-type]
+        madlad_client=second_madlad,  # type: ignore[arg-type]
+    )
+    second = service2.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert [segment.text for segment in second] == [
+        "FA:Hello Alice",
+        "FA:How are you?",
+    ]
+    assert second_llm.glossary_calls == 0
+    assert second_llm.translate_calls == 0
+    assert second_madlad.calls == []
+
+    with content_sync_sessionmaker() as session:
+        translation = session.scalar(
+            select(SubtitleTranslation).where(
+                SubtitleTranslation.job_id == job_id,
+                SubtitleTranslation.target_language == "fa",
+            )
+        )
+        assert translation is not None
+        assert translation.status == SubtitleTranslationStatus.COMPLETED
+        assert translation.glossary is not None
+        assert translation.glossary["entries"][0]["source_term"] == "Alice"
+        batches = list(session.scalars(select(TranslationBatch)))
+        assert batches
+        assert all(batch.input_tokens == 20 for batch in batches)
+        assert all(batch.output_tokens == 12 for batch in batches)
+
+
+def test_openai_multi_batch_translation_persists_all_segments(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "openai")
+    monkeypatch.setattr(settings, "subtitle_translation_max_segments_per_batch", 2)
+    monkeypatch.setattr(settings, "subtitle_translation_max_source_tokens", 50)
+    job_id = _seed_transcript(
+        content_sync_sessionmaker,
+        language="en",
+        texts=[f"line {i}" for i in range(6)],
+    )
+
+    llm = FakeLlmClient()
+    madlad = FakeMadladClient()
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=llm,  # type: ignore[arg-type]
+        madlad_client=madlad,  # type: ignore[arg-type]
+    )
+
+    segments = service.ensure_translated(source_job_id=job_id, target_language="fa")
+    assert len(segments) == 6
+    assert all(segment.text.startswith("FA:") for segment in segments)
+    assert llm.glossary_calls == 1
+    assert llm.translate_calls >= 3
+    assert madlad.calls == []
+
+    with content_sync_sessionmaker() as session:
+        batches = list(session.scalars(select(TranslationBatch)))
+        assert len(batches) >= 3
+        assert all(batch.status == TranslationBatchStatus.SUCCEEDED for batch in batches)
+        translated = list(session.scalars(select(TranslatedSegment)))
+        assert len(translated) == 6
+
+
+def test_openai_cancellation_after_provider_response_releases_claimed_batch(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "subtitle_translation_backend", "openai")
+    job_id = _seed_transcript(content_sync_sessionmaker, language="en")
+    cancellation_observed = False
+
+    class CancellingLlmClient(FakeLlmClient):
+        def translate_subtitle_batch(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+        ) -> LlmGatewayGeneration:
+            nonlocal cancellation_observed
+            result = super().translate_subtitle_batch(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            cancellation_observed = True
+            return result
+
+    service = SyncSubtitleTranslationService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        llm_gateway_client=CancellingLlmClient(),  # type: ignore[arg-type]
+        madlad_client=FakeMadladClient(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(SecondaryTaskCancelledError):
+        service.ensure_translated(
+            source_job_id=job_id,
+            target_language="fa",
+            cancellation_requested=lambda: cancellation_observed,
+        )
+
+    with content_sync_sessionmaker() as session:
+        batches = list(session.scalars(select(TranslationBatch)))
+        assert len(batches) == 1
+        assert batches[0].status == TranslationBatchStatus.PENDING
+        assert batches[0].attempt_count == 0
+        assert batches[0].locked_at is None
+        assert batches[0].locked_by is None
+        assert list(session.scalars(select(TranslatedSegment))) == []

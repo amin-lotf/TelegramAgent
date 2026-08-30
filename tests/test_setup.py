@@ -560,6 +560,11 @@ def test_setup_writes_download_agent_backend(tmp_path: Path) -> None:
         "docker/app/.env.llm_gateway.docker.example",
         "OPENAI_API_KEY=replace-me\nDOWNLOAD_AGENT_BACKEND=openai\n",
     )
+    _write_example(
+        tmp_path,
+        "docker/app/.env.content_processing.docker.example",
+        "SUBTITLE_TRANSLATION_BACKEND=openai\n",
+    )
     credentials = _MODULE.UserCredentials(
         openai_api_key="",
         telegram_bot_token="123:bot-token",
@@ -576,6 +581,8 @@ def test_setup_writes_download_agent_backend(tmp_path: Path) -> None:
     values = _env(tmp_path / "docker/app/.env.llm_gateway.docker")
     assert values["DOWNLOAD_AGENT_BACKEND"] == "local"
     assert values["OPENAI_API_KEY"] == ""
+    translation = _env(tmp_path / "docker/app/.env.content_processing.docker")
+    assert translation["SUBTITLE_TRANSLATION_BACKEND"] == "local"
 
 
 def test_is_generated_secret_does_not_match_token_count_settings() -> None:
