@@ -12,6 +12,7 @@ services:
         required: false
     environment:
       MADLAD_ADAPTER_DIR: /adapters
+      MADLAD_HF_HOME: /home/appuser/.cache/huggingface
       HF_HOME: /home/appuser/.cache/huggingface
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility

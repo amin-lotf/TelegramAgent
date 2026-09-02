@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,7 +13,12 @@ from telegram_agent.core.gpu_execution.workloads.madlad_engine import (
     ADAPTER_WEIGHTS_NAME,
     MadladEngine,
     adapter_files_complete,
+    apply_madlad_hub_cache_env,
+    configure_madlad_hf_home,
     fix_madlad_embeddings,
+    is_missing_local_madlad_weights,
+    madlad_from_pretrained_kwargs,
+    missing_madlad_weights_error,
     sha256_file,
 )
 from telegram_agent.core.gpu_execution.workloads.madlad_languages import (
@@ -264,3 +271,131 @@ def test_preferred_tokenizer_source_uses_adapter_when_present(tmp_path: Path) ->
 def test_preferred_tokenizer_source_falls_back_to_model_id(tmp_path: Path) -> None:
     engine = _engine(tmp_path, lora_languages="fa")
     assert engine._preferred_tokenizer_source() == "google/madlad400-3b-mt"
+
+
+def test_configure_madlad_hf_home_sets_hub_cache_not_hf_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_HF_HOME", str(tmp_path))
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    configure_madlad_hf_home()
+    assert os.environ["HF_HUB_CACHE"] == str(tmp_path)
+    assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(tmp_path)
+    assert os.environ.get("HF_HOME") != str(tmp_path)
+
+
+def test_from_pretrained_kwargs_are_local_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_HF_HOME", str(tmp_path))
+    kwargs = madlad_from_pretrained_kwargs(token="hf_test")
+    assert kwargs["local_files_only"] is True
+    assert kwargs["cache_dir"] == str(tmp_path)
+    assert kwargs["token"] == "hf_test"
+
+
+def test_apply_hub_cache_env_copies_madlad_home(tmp_path: Path) -> None:
+    env = {"MADLAD_HF_HOME": str(tmp_path), "PATH": "/bin"}
+    apply_madlad_hub_cache_env(env)
+    assert env["HF_HUB_CACHE"] == str(tmp_path)
+    assert env["HUGGINGFACE_HUB_CACHE"] == str(tmp_path)
+
+
+def test_missing_local_weights_error_mentions_download_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_HF_HOME", str(tmp_path))
+    error = missing_madlad_weights_error("google/madlad400-3b-mt", OSError("offline"))
+    assert "make download-models" in str(error)
+    assert str(tmp_path) in str(error)
+    assert is_missing_local_madlad_weights(OSError("offline"))
+    assert is_missing_local_madlad_weights(RuntimeError("local_files_only=True"))
+    assert not is_missing_local_madlad_weights(RuntimeError("CUDA out of memory"))
+
+
+def test_load_passes_local_cache_dir_to_from_pretrained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_HF_HOME", str(tmp_path))
+    captured: dict[str, dict] = {}
+
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def is_bf16_supported() -> bool:
+            return True
+
+    fake_torch = SimpleNamespace(
+        cuda=_Cuda(),
+        bfloat16="bf16",
+        float16="fp16",
+    )
+
+    class _Tok:
+        pad_token_id = 1
+        eos_token = "</s>"
+        pad_token = None
+
+    def from_tokenizer(source, **kwargs):
+        captured["tokenizer"] = {"source": source, **kwargs}
+        return _Tok()
+
+    def from_model(model_id, **kwargs):
+        captured["model"] = {"model_id": model_id, **kwargs}
+        return _BaseModel()
+
+    fake_transformers = SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=from_tokenizer),
+        AutoModelForSeq2SeqLM=SimpleNamespace(from_pretrained=from_model),
+        BitsAndBytesConfig=lambda **kwargs: kwargs,
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+
+    engine = _engine(tmp_path)
+    engine.load()
+
+    assert captured["tokenizer"]["local_files_only"] is True
+    assert captured["tokenizer"]["cache_dir"] == str(tmp_path)
+    assert captured["model"]["local_files_only"] is True
+    assert captured["model"]["cache_dir"] == str(tmp_path)
+    assert engine.ready
+
+
+def test_load_missing_snapshot_is_runtime_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MADLAD_HF_HOME", str(tmp_path))
+
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def is_bf16_supported() -> bool:
+            return True
+
+    def from_tokenizer(source, **kwargs):
+        raise OSError("Cannot find the requested files in the disk cache")
+
+    fake_transformers = SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=from_tokenizer),
+        AutoModelForSeq2SeqLM=SimpleNamespace(from_pretrained=from_tokenizer),
+        BitsAndBytesConfig=lambda **kwargs: kwargs,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=_Cuda(), bfloat16="bf16", float16="fp16"),
+    )
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+
+    engine = _engine(tmp_path)
+    with pytest.raises(RuntimeError, match="make download-models"):
+        engine.load()

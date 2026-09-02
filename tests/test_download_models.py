@@ -22,8 +22,9 @@ def _write_hf_snapshot(
     *,
     incomplete: bool = False,
     files: tuple[str, ...] = ("config.json",),
+    hub_cache: bool = False,
 ) -> None:
-    repo_dir = cache_root / "hub" / f"models--{repo_id.replace('/', '--')}"
+    repo_dir = _MODULE.hf_repo_cache_dir(cache_root, repo_id, hub_cache=hub_cache)
     (repo_dir / "refs").mkdir(parents=True, exist_ok=True)
     (repo_dir / "refs" / "main").write_text("abc123\n", encoding="utf-8")
     snapshot = repo_dir / "snapshots" / "abc123"
@@ -45,9 +46,12 @@ def _complete_all(locations: _MODULE.Locations) -> None:
     for asset in _MODULE.assets():
         if asset.kind != "hf" or not asset.repo_id:
             continue
-        files = asset.allow_patterns or ("config.json",)
+        files = asset.required_files or asset.allow_patterns or ("config.json",)
         _write_hf_snapshot(
-            _MODULE.cache_root_for(asset, locations), asset.repo_id, files=files
+            _MODULE.cache_root_for(asset, locations),
+            asset.repo_id,
+            files=files,
+            hub_cache=_MODULE.cache_is_hub_cache(asset),
         )
 
 
@@ -83,8 +87,14 @@ class FakeDownloader:
             local_dir.mkdir(parents=True, exist_ok=True)
             (local_dir / "cosyvoice3.yaml").write_text("ok\n", encoding="utf-8")
         if cache_dir is not None:
-            files = allow_patterns or ("config.json",)
-            _write_hf_snapshot(cache_dir, repo_id, files=files)
+            hub_cache = cache_dir.name == "madlad-hf-cache"
+            if hub_cache and not allow_patterns:
+                files = _MODULE.MADLAD_REQUIRED_FILES
+            else:
+                files = allow_patterns or ("config.json",)
+            _write_hf_snapshot(
+                cache_dir, repo_id, files=files, hub_cache=hub_cache
+            )
 
     def http_file(self, url: str, dest: Path) -> None:
         self.http.append(url)
@@ -122,6 +132,44 @@ def test_hf_snapshot_complete_and_incomplete(tmp_path: Path) -> None:
     _write_hf_snapshot(tmp_path, "facebook/sam-audio-small", incomplete=True)
     assert not _MODULE.hf_snapshot_complete(tmp_path, "facebook/sam-audio-small")
     assert not _MODULE.hf_snapshot_complete(tmp_path, "Systran/faster-whisper-large-v3")
+
+
+def test_madlad_complete_uses_hub_cache_layout_not_hf_home(tmp_path: Path) -> None:
+    locations = _MODULE.host_locations(tmp_path)
+    asset = next(item for item in _MODULE.assets() if item.key == "madlad")
+    assert _MODULE.cache_is_hub_cache(asset)
+    _write_hf_snapshot(
+        locations.madlad_hf_home,
+        asset.repo_id or _MODULE.DEFAULT_MADLAD_MODEL_ID,
+        files=_MODULE.MADLAD_REQUIRED_FILES,
+        hub_cache=True,
+    )
+    assert _MODULE.is_complete(asset, locations)
+    assert not _MODULE.hf_snapshot_complete(
+        locations.madlad_hf_home,
+        asset.repo_id or _MODULE.DEFAULT_MADLAD_MODEL_ID,
+    )
+
+
+def test_madlad_incomplete_without_tokenizer_or_weights(tmp_path: Path) -> None:
+    locations = _MODULE.host_locations(tmp_path)
+    asset = next(item for item in _MODULE.assets() if item.key == "madlad")
+    repo = asset.repo_id or _MODULE.DEFAULT_MADLAD_MODEL_ID
+    _write_hf_snapshot(
+        locations.madlad_hf_home,
+        repo,
+        files=("config.json", "model.safetensors"),
+        hub_cache=True,
+    )
+    assert not _MODULE.is_complete(asset, locations)
+    _write_hf_snapshot(
+        locations.madlad_hf_home,
+        repo,
+        files=_MODULE.MADLAD_REQUIRED_FILES,
+        hub_cache=True,
+        incomplete=True,
+    )
+    assert not _MODULE.is_complete(asset, locations)
 
 
 def test_laion_clap_is_pinned_to_known_checkpoint(
@@ -166,6 +214,7 @@ def test_execute_skips_complete_assets_without_downloading(
     output = capsys.readouterr().out
     assert "skip CosyVoice" in output
     assert "skip ImageBind" in output
+    assert "skip MADLAD" in output
     assert "skip SAM Audio" in output
     assert "skip SAM Audio judge" in output
     assert "skip LAION CLAP" in output

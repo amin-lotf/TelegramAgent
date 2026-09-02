@@ -133,6 +133,33 @@ def test_build_engine_empty_lora_list_loads_none(
     assert engine.lora_languages == ()
 
 
+def test_missing_local_weights_is_permanent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _MissingEngine(_FakeEngine):
+        def load(self) -> None:
+            raise RuntimeError(
+                "MADLAD weights for 'google/madlad400-3b-mt' are not available "
+                "locally in /opt/madlad-hf-cache. Run: make download-models"
+            )
+
+    monkeypatch.setattr(
+        "telegram_agent.core.gpu_execution.workloads.madlad_translation._build_engine",
+        lambda **kwargs: _MissingEngine(),
+    )
+    input_path = tmp_path / "input.json"
+    input_path.write_text(
+        json.dumps({"texts": ["a"], "target_lang": "fa"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(GpuWorkloadPermanentError, match="make download-models"):
+        MadladTranslationWorkload().execute(
+            input_path=input_path,
+            output_path=tmp_path / "output.json",
+            parameters={"model": "google/madlad400-3b-mt"},
+        )
+
+
 def test_empty_texts_are_permanent(tmp_path: Path) -> None:
     input_path = tmp_path / "input.json"
     input_path.write_text(json.dumps({"texts": [], "target_lang": "fa"}), encoding="utf-8")

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import UUID
 
+from telegram_agent.core.common.gpu_workloads import MADLAD_TRANSLATION_WORKLOAD
 from telegram_agent.core.gpu_execution.common.registry import get_workload_definition
 from telegram_agent.core.gpu_execution.common.results import GpuExecutionResult
 from telegram_agent.core.gpu_execution.common.settings import Settings, settings
@@ -25,6 +26,16 @@ from telegram_agent.core.gpu_execution.workloads.runner import (
     EXIT_INVALID_DESCRIPTOR,
     EXIT_PERMANENT_FAILURE,
 )
+
+
+def _workload_child_env(workload_type: str) -> dict[str, str]:
+    env = os.environ.copy()
+    if workload_type == MADLAD_TRANSLATION_WORKLOAD:
+        cache = env.get("MADLAD_HF_HOME", "").strip()
+        if cache:
+            env["HF_HUB_CACHE"] = cache
+            env["HUGGINGFACE_HUB_CACHE"] = cache
+    return env
 
 
 class SyncGpuExecutionService:
@@ -113,6 +124,7 @@ class SyncGpuExecutionService:
                     stderr=subprocess.STDOUT,
                     close_fds=True,
                     start_new_session=True,
+                    env=_workload_child_env(job.workload_type),
                 )
                 with self._uow_factory() as uow:
                     if not uow.jobs.set_process_id(

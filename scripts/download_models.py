@@ -38,6 +38,11 @@ DEFAULT_LAION_CLAP_MODEL = "lukewys/laion_clap"
 # SAM Audio loads this exact checkpoint; do not snapshot the rest of the repo.
 LAION_CLAP_FILENAME = "630k-best.pt"
 DEFAULT_MADLAD_MODEL_ID = "google/madlad400-3b-mt"
+MADLAD_REQUIRED_FILES = (
+    "config.json",
+    "model.safetensors",
+    "tokenizer_config.json",
+)
 DEFAULT_QWEN_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 DEFAULT_WHISPERX_MODEL = "large-v3"
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
@@ -104,6 +109,8 @@ class Asset:
     cache: str = "hf_home"
     # Exact Hub filenames only. Never globs, paths, or env-supplied names.
     allow_patterns: tuple[str, ...] = field(default_factory=tuple)
+    # Completeness-only. Unlike allow_patterns, these are not download filters.
+    required_files: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _env(name: str, default: str) -> str:
@@ -238,6 +245,7 @@ def assets() -> list[Asset]:
             "hf",
             madlad_model_id(),
             cache="madlad_hf_home",
+            required_files=MADLAD_REQUIRED_FILES,
         ),
         Asset("qwen", "Qwen Instruct", False, "hf", qwen_model_id()),
         Asset("imagebind", "ImageBind", False, "imagebind"),
@@ -300,16 +308,28 @@ def execute_locations() -> Locations:
     )
 
 
-def hf_repo_cache_dir(cache_root: Path, repo_id: str) -> Path:
-    return cache_root / "hub" / f"models--{repo_id.replace('/', '--')}"
+def cache_is_hub_cache(asset: Asset) -> bool:
+    """MADLAD_HF_HOME is passed to snapshot_download(cache_dir=...), not HF_HOME."""
+    return asset.cache == "madlad_hf_home"
+
+
+def hf_repo_cache_dir(
+    cache_root: Path, repo_id: str, *, hub_cache: bool = False
+) -> Path:
+    repo = f"models--{repo_id.replace('/', '--')}"
+    if hub_cache:
+        return cache_root / repo
+    return cache_root / "hub" / repo
 
 
 def hf_snapshot_complete(
     cache_root: Path,
     repo_id: str,
     required_files: tuple[str, ...] = (),
+    *,
+    hub_cache: bool = False,
 ) -> bool:
-    repo_dir = hf_repo_cache_dir(cache_root, repo_id)
+    repo_dir = hf_repo_cache_dir(cache_root, repo_id, hub_cache=hub_cache)
     revision = None
     for name in ("main", "master"):
         ref = repo_dir / "refs" / name
@@ -362,7 +382,8 @@ def is_complete(asset: Asset, locations: Locations) -> bool:
         return hf_snapshot_complete(
             cache_root_for(asset, locations),
             asset.repo_id,
-            required_files=asset.allow_patterns,
+            required_files=asset.required_files or asset.allow_patterns,
+            hub_cache=cache_is_hub_cache(asset),
         )
     return False
 

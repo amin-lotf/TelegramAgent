@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import MutableMapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -70,10 +70,63 @@ def read_adapter_meta(adapter_dir: str | Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def madlad_hub_cache() -> str | None:
+    """Directory that contains `models--*` repos (`HF_HUB_CACHE` layout)."""
+    value = os.environ.get("MADLAD_HF_HOME", "").strip()
+    return value or None
+
+
+def apply_madlad_hub_cache_env(env: MutableMapping[str, str]) -> None:
+    cache = (env.get("MADLAD_HF_HOME") or "").strip()
+    if cache:
+        env["HF_HUB_CACHE"] = cache
+        env["HUGGINGFACE_HUB_CACHE"] = cache
+
+
 def configure_madlad_hf_home() -> None:
-    madlad_hf_home = os.environ.get("MADLAD_HF_HOME", "").strip()
-    if madlad_hf_home:
-        os.environ["HF_HOME"] = madlad_hf_home
+    apply_madlad_hub_cache_env(os.environ)
+
+
+def madlad_from_pretrained_kwargs(*, token: str | None = None) -> dict[str, Any]:
+    """Load only the snapshot produced by `make download-models`."""
+    configure_madlad_hf_home()
+    kwargs: dict[str, Any] = {"local_files_only": True}
+    if token:
+        kwargs["token"] = token
+    cache = madlad_hub_cache()
+    if cache:
+        kwargs["cache_dir"] = cache
+    return kwargs
+
+
+def missing_madlad_weights_error(model_id: str, exc: BaseException) -> RuntimeError:
+    cache = madlad_hub_cache() or "the Hugging Face cache"
+    return RuntimeError(
+        f"MADLAD weights for {model_id!r} are not available locally in {cache}. "
+        "Run: make download-models"
+    )
+
+
+def is_missing_local_madlad_weights(exc: BaseException) -> bool:
+    if isinstance(exc, OSError):
+        return True
+    name = type(exc).__name__
+    if name in {
+        "LocalEntryNotFoundError",
+        "OfflineModeIsEnabled",
+        "RepositoryNotFoundError",
+    }:
+        return True
+    message = str(exc).lower()
+    return (
+        "local_files_only" in message
+        or "offline" in message
+        or "not the path to a directory" in message
+        or "cannot find the requested files" in message
+    )
+
+
+configure_madlad_hf_home()
 
 
 class MadladEngine:
@@ -177,10 +230,16 @@ class MadladEngine:
             raise RuntimeError("4-bit MADLAD inference requires a CUDA GPU")
 
         tokenizer_source = self._preferred_tokenizer_source()
+        pretrained_kwargs = madlad_from_pretrained_kwargs(token=self._hf_token)
         logger.info("Loading MADLAD tokenizer from %s", tokenizer_source)
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_source, token=self._hf_token
-        )
+        try:
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_source, **pretrained_kwargs
+            )
+        except Exception as exc:
+            if is_missing_local_madlad_weights(exc):
+                raise missing_madlad_weights_error(self.model_id, exc) from exc
+            raise
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
 
@@ -198,13 +257,18 @@ class MadladEngine:
             self.model_id,
             compute_dtype,
         )
-        base = AutoModelForSeq2SeqLM.from_pretrained(
-            self.model_id,
-            quantization_config=quantization_config,
-            dtype=compute_dtype,
-            device_map={"": 0},
-            token=self._hf_token,
-        )
+        try:
+            base = AutoModelForSeq2SeqLM.from_pretrained(
+                self.model_id,
+                quantization_config=quantization_config,
+                dtype=compute_dtype,
+                device_map={"": 0},
+                **pretrained_kwargs,
+            )
+        except Exception as exc:
+            if is_missing_local_madlad_weights(exc):
+                raise missing_madlad_weights_error(self.model_id, exc) from exc
+            raise
         self._base_model = fix_madlad_embeddings(base)
         self._attach_available_adapters()
         self.ready = True

@@ -41,6 +41,7 @@ def test_madlad_compose_uses_container_env_file_without_interpolation() -> None:
     assert '"127.0.0.1:8003:8000"' in compose
     assert "../../pretrained_models/madlad:/adapters:ro" in compose
     assert "../../pretrained_models/madlad/adapter:/adapters:ro" not in compose
+    assert "MADLAD_HF_HOME: /home/appuser/.cache/huggingface" in compose
 
 
 def test_gpu_worker_mounts_language_adapter_root() -> None:
