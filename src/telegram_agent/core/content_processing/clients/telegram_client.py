@@ -20,7 +20,11 @@ from telegram_agent.core.content_processing.common.settings import Settings
 
 
 class TelegramClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         if not settings.telegram_bot_token:
             raise TelegramDownloadPermanentError("Telegram bot token is not configured")
         self._token = settings.telegram_bot_token
@@ -31,6 +35,7 @@ class TelegramClient:
             write=settings.media_http_write_timeout_seconds,
             pool=settings.media_http_pool_timeout_seconds,
         )
+        self._transport = transport
 
     def send_video(
         self,
@@ -47,6 +52,8 @@ class TelegramClient:
             file_path=file_path,
             caption=caption,
             reply_to_message_id=reply_to_message_id,
+            extra_data={"supports_streaming": "true"},
+            content_type="video/mp4",
         )
 
     def send_audio(
@@ -92,6 +99,8 @@ class TelegramClient:
         file_path: str,
         caption: str | None,
         reply_to_message_id: int | None = None,
+        extra_data: dict[str, str] | None = None,
+        content_type: str | None = None,
     ) -> TelegramDeliveryResult:
         path = Path(file_path)
         if not path.is_file() or path.is_symlink() or path.stat().st_size <= 0:
@@ -101,6 +110,8 @@ class TelegramClient:
 
         # Multipart form fields must be strings; nested reply_parameters is JSON.
         data: dict[str, str] = {"chat_id": str(chat_id)}
+        if extra_data:
+            data.update(extra_data)
         if caption:
             data["caption"] = caption[:1024]
         if reply_to_message_id is not None:
@@ -108,11 +119,18 @@ class TelegramClient:
 
         try:
             with path.open("rb") as handle:
-                with httpx.Client(timeout=self._timeout) as client:
+                file_payload: tuple[str, object] | tuple[str, object, str]
+                if content_type:
+                    file_payload = (path.name, handle, content_type)
+                else:
+                    file_payload = (path.name, handle)
+                with httpx.Client(
+                    timeout=self._timeout, transport=self._transport
+                ) as client:
                     response = client.post(
                         f"{self._base_url}/bot{self._token}/{method}",
                         data=data,
-                        files={field_name: (path.name, handle)},
+                        files={field_name: file_payload},
                     )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             raise TelegramDownloadError(
@@ -149,7 +167,9 @@ class TelegramClient:
         if reply_to_message_id is not None:
             body["reply_parameters"] = self._reply_parameters(reply_to_message_id)
         try:
-            with httpx.Client(timeout=self._timeout) as client:
+            with httpx.Client(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
                 response = client.post(
                     f"{self._base_url}/bot{self._token}/sendMessage",
                     json=body,
@@ -196,7 +216,9 @@ class TelegramClient:
 
     def get_file(self, file_id: str) -> TelegramFile:
         try:
-            with httpx.Client(timeout=self._timeout) as client:
+            with httpx.Client(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
                 response = client.post(
                     f"{self._base_url}/bot{self._token}/getFile",
                     json={"file_id": file_id},
@@ -239,7 +261,9 @@ class TelegramClient:
             return
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
+            with httpx.Client(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
                 with client.stream("GET", self._file_url(file_path)) as response:
                     self._raise_for_telegram_status(response, operation="file download")
                     yield TelegramFileStream(

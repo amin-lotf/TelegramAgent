@@ -171,8 +171,9 @@ class SyncDownloadDeliveryService:
         caption: str | None,
         reply_to_message_id: int | None = None,
     ) -> TelegramDeliveryResult:
-        # MKV (and other non-MP4 containers) must go as documents; sendVideo
-        # only reliably accepts progressive MP4.
+        # MKV and other non-MP4 containers cannot play inline; sendVideo
+        # only reliably accepts progressive MP4. Leftover MKV jobs still
+        # fall back to sendDocument.
         suffix = final_path.rsplit(".", 1)[-1].lower() if "." in final_path else ""
         send_kwargs = {
             "chat_id": chat_id,

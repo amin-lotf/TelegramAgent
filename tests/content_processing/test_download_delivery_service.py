@@ -28,19 +28,27 @@ class _Telegram:
     def __init__(self, *, fail_once: bool = False) -> None:
         self.fail_once = fail_once
         self.media_calls = 0
+        self.media_methods: list[str] = []
         self.media_kwargs: list[dict] = []
         self.messages: list[dict] = []
 
-    def send_document(self, **kwargs) -> TelegramDeliveryResult:
+    def _send_media(self, method: str, **kwargs) -> TelegramDeliveryResult:
         self.media_calls += 1
+        self.media_methods.append(method)
         self.media_kwargs.append(kwargs)
         if self.fail_once:
             self.fail_once = False
             raise TelegramDownloadError("temporary Telegram failure")
         return TelegramDeliveryResult(message_id=321)
 
-    send_video = send_document
-    send_audio = send_document
+    def send_document(self, **kwargs) -> TelegramDeliveryResult:
+        return self._send_media("send_document", **kwargs)
+
+    def send_video(self, **kwargs) -> TelegramDeliveryResult:
+        return self._send_media("send_video", **kwargs)
+
+    def send_audio(self, **kwargs) -> TelegramDeliveryResult:
+        return self._send_media("send_audio", **kwargs)
 
     def send_message(
         self,
@@ -61,7 +69,7 @@ def test_delivery_is_persisted_and_duplicate_task_is_a_noop(
     content_sync_uow_factory,
     tmp_path: Path,
 ) -> None:
-    final_path = tmp_path / "dubbed.mkv"
+    final_path = tmp_path / "dubbed.mp4"
     final_path.write_bytes(b"media")
     job_id = _seed_request(
         content_sync_sessionmaker,
@@ -79,6 +87,7 @@ def test_delivery_is_persisted_and_duplicate_task_is_a_noop(
     assert service.execute(job_id=job_id, retry_count=0).error_message is None
     assert service.execute(job_id=job_id, retry_count=0).error_message is None
     assert telegram.media_calls == 1
+    assert telegram.media_methods == ["send_video"]
     assert telegram.media_kwargs[0]["caption"] == "Video with es dub"
     assert telegram.media_kwargs[0]["reply_to_message_id"] == 42
     # Preparing/status text must not be used as the media caption.
@@ -98,7 +107,7 @@ def test_retryable_delivery_returns_to_pending_and_can_resume(
     content_sync_uow_factory,
     tmp_path: Path,
 ) -> None:
-    final_path = tmp_path / "dubbed.mkv"
+    final_path = tmp_path / "dubbed.mp4"
     final_path.write_bytes(b"media")
     job_id = _seed_request(
         content_sync_sessionmaker,
@@ -181,7 +190,33 @@ def test_subtitle_delivery_caption(
         telegram_client=telegram,  # type: ignore[arg-type]
     )
     assert service.execute(job_id=job_id, retry_count=0).error_message is None
+    assert telegram.media_methods == ["send_video"]
     assert telegram.media_kwargs[0]["caption"] == "Video with English subtitles"
+
+
+def test_mkv_video_is_still_sent_as_document(
+    content_sync_sessionmaker: sessionmaker[Session],
+    content_sync_uow_factory,
+    tmp_path: Path,
+) -> None:
+    final_path = tmp_path / "legacy.mkv"
+    final_path.write_bytes(b"media")
+    job_id = _seed_request(
+        content_sync_sessionmaker,
+        status=JobStatus.COMPLETED,
+        final_path=str(final_path),
+        requested_dub_language=None,
+        requested_subtitle_language="English",
+        media_type=DownloadMediaType.VIDEO.value,
+    )
+    telegram = _Telegram()
+    service = SyncDownloadDeliveryService(
+        uow_factory=content_sync_uow_factory,
+        settings=settings,
+        telegram_client=telegram,  # type: ignore[arg-type]
+    )
+    assert service.execute(job_id=job_id, retry_count=0).error_message is None
+    assert telegram.media_methods == ["send_document"]
 
 
 def _seed_request(

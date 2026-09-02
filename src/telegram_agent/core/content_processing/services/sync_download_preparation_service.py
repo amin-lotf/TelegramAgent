@@ -384,6 +384,7 @@ class SyncDownloadPreparationService:
             video_path=video_path,
             audio_path=audio_path,
             subtitle_path=subtitle_path,
+            subtitle_language=subtitle_language,
             cancellation_requested=lambda: self._is_cancelled(request.job_id),
         )
 

@@ -61,7 +61,7 @@ class SubtitlePreparationService:
 
     Whisper segments are often one long sentence (90–150+ chars). Mobile players
     render that as a large block. This service reflows text into short cues
-    before writing SRT (later converted to styled ASS and muxed into MKV).
+    before writing SRT (later converted to styled ASS and burned into MP4).
 
     This service is deterministic and never calls an LLM. Callers must pass
     already-translated (or original) segments. ``target_language`` is retained

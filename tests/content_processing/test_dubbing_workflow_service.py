@@ -203,7 +203,7 @@ def test_dubbing_pipeline_persists_each_stage_and_final_delivery(
         clipper=_Clipper(),  # type: ignore[arg-type]
         assembly_service=_Assembly(tmp_path / "mixed.wav"),  # type: ignore[arg-type]
         subtitle_service=_Subtitles(tmp_path / "subtitles.srt"),  # type: ignore[arg-type]
-        mux_service=_Mux(tmp_path / "dubbed.mkv"),  # type: ignore[arg-type]
+        mux_service=_Mux(tmp_path / "dubbed.mp4"),  # type: ignore[arg-type]
     )
     preparation = SyncDownloadPreparationService(
         uow_factory=content_sync_uow_factory,
@@ -254,7 +254,7 @@ def test_dubbing_pipeline_persists_each_stage_and_final_delivery(
     assert source_job_id
     assert job is not None and job.status == JobStatus.COMPLETED
     assert request is not None
-    assert request.final_path == str(tmp_path / "dubbed.mkv")
+    assert request.final_path == str(tmp_path / "dubbed.mp4")
     assert request.delivery_status == DownloadDeliveryStatus.PENDING
     assert {item.artifact_type for item in artifacts} == {
         "dubbing_plan",

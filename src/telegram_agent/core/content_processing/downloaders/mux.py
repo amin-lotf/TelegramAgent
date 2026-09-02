@@ -14,28 +14,46 @@ from telegram_agent.core.common.exceptions import (
     SecondaryTaskCancelledError,
     StorageError,
 )
+from telegram_agent.core.content_processing.common.language_codes import (
+    InvalidLanguageCodeError,
+    canonical_madlad_language,
+)
 from telegram_agent.core.content_processing.common.settings import Settings
 from telegram_agent.core.content_processing.downloaders.cancellable_process import (
     CancellableProcessRunner,
 )
 
-# ASS FontSize is relative to PlayResY. Soft ASS in MKV scales correctly, so
-# use a normal caption size (~4% of frame height) — not the tiny values we
-# tried when fighting broken MP4 mov_text rendering.
+# ASS FontSize is relative to PlayResY. Burn-in uses PlayRes matching the
+# frame, so a normal caption size (~4% of frame height) scales correctly.
 _MIN_ASS_FONT_SIZE = 28
 _MAX_ASS_FONT_SIZE = 52
+_ARABIC_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
+_HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
+_KANA_RE = re.compile(r"[\u3040-\u30FF\uFF66-\uFF9D]")
+_HANGUL_RE = re.compile(r"[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]")
+_LATIN_FONT = "Noto Sans"
+_ARABIC_FONT = "Noto Naskh Arabic"
+_CJK_SC_FONT = "Noto Sans CJK SC"
+_CJK_TC_FONT = "Noto Sans CJK TC"
+_CJK_JP_FONT = "Noto Sans CJK JP"
+_CJK_KR_FONT = "Noto Sans CJK KR"
+_NOTO_FONT_DIRS = (
+    Path("/usr/share/fonts/opentype/noto"),
+    Path("/usr/share/fonts/truetype/noto"),
+    Path("/usr/share/fonts"),
+)
 
 
 class MuxService:
-    """Combine video, audio, and soft subtitles into a Matroska (MKV) file.
+    """Combine video, audio, and subtitles into a Telegram-playable MP4.
 
-    MKV supports real soft subtitle tracks (SRT/ASS) with proper styling.
-    We convert the prepared SRT into a styled ASS track (PlayRes + FontSize)
-    and mux with stream copy for video (no slow burn-in re-encode).
+    Telegram's in-app player needs H.264 + AAC in MP4 (yuv420p, faststart)
+    and does not render soft subtitle tracks. Prepared SRT is converted to
+    styled ASS and burned into the video so captions are visible inline.
 
-    The ``audio_path`` argument is an intentional extension point: a future
-    dubbing stage can supply a translated/synthesized track without changing
-    the mux API. This service always re-muxes; it never copies the original
+    The ``audio_path`` argument is an intentional extension point: the
+    dubbing stage supplies a translated/synthesized track without changing
+    the mux API. This service always re-encodes; it never copies the original
     source container as the result.
     """
 
@@ -102,12 +120,8 @@ class MuxService:
             f".{output_path.stem}.part{output_path.suffix}"
         )
         ass_path = output_path.with_name(f".{output_path.stem}.ass")
-        subtitle_language_tag = self._language_tag(subtitle_language, default="eng")
         audio_language_tag = self._language_tag(audio_language, default="und")
-        safe_subtitle_title = self._metadata_title(
-            subtitle_title or subtitle_language,
-            default="English",
-        )
+        _ = subtitle_title
 
         try:
             self._write_styled_ass(
@@ -115,9 +129,9 @@ class MuxService:
                 ass_path=ass_path,
                 width=width,
                 height=height,
+                subtitle_language=subtitle_language,
             )
-            # Soft ASS in MKV: video stream copy, audio re-encode for container safety,
-            # styled subtitles as a proper soft track (not burn-in).
+            # Telegram-playable MP4: H.264 + AAC + faststart, captions burned in.
             self._run_ffmpeg(
                 [
                     self._ffmpeg_binary,
@@ -126,32 +140,30 @@ class MuxService:
                     str(video),
                     "-i",
                     str(audio),
-                    "-i",
-                    str(ass_path),
+                    "-filter_complex",
+                    self._ass_filter_complex(ass_path),
                     "-map",
-                    "0:v:0",
+                    "[v]",
                     "-map",
                     "1:a:0",
-                    "-map",
-                    "2:0",
                     "-c:v",
-                    "copy",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "20",
                     "-c:a",
                     "aac",
                     "-b:a",
                     audio_bitrate or "128k",
                     "-metadata:s:a:0",
                     f"language={audio_language_tag}",
-                    "-c:s",
-                    "ass",
-                    "-metadata:s:s:0",
-                    f"language={subtitle_language_tag}",
-                    "-metadata:s:s:0",
-                    f"title={safe_subtitle_title}",
-                    "-disposition:s:0",
-                    "default",
+                    "-movflags",
+                    "+faststart",
                     "-f",
-                    "matroska",
+                    "mp4",
                     str(temporary_path),
                 ],
                 cancellation_requested=cancellation_requested,
@@ -174,17 +186,75 @@ class MuxService:
         return str(output_path)
 
     @staticmethod
+    def _canonical_language(value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        try:
+            return canonical_madlad_language(value)
+        except InvalidLanguageCodeError:
+            return value.strip().casefold()
+
+    @classmethod
+    def _cjk_font_for_language(cls, language: str | None) -> str:
+        canonical = cls._canonical_language(language)
+        if canonical == "zh_Hant":
+            return _CJK_TC_FONT
+        if canonical == "ja":
+            return _CJK_JP_FONT
+        if canonical == "ko":
+            return _CJK_KR_FONT
+        return _CJK_SC_FONT
+
+    @classmethod
+    def _font_for_subtitles(cls, text: str, language: str | None) -> str:
+        if _ARABIC_LETTER_RE.search(text):
+            return _ARABIC_FONT
+        if _HANGUL_RE.search(text):
+            return _CJK_KR_FONT
+        if _KANA_RE.search(text):
+            return _CJK_JP_FONT
+        if _HAN_RE.search(text):
+            return cls._cjk_font_for_language(language)
+        canonical = cls._canonical_language(language)
+        if canonical in {"zh", "zh_Hant"}:
+            return cls._cjk_font_for_language(language)
+        if canonical == "ja":
+            return _CJK_JP_FONT
+        if canonical == "ko":
+            return _CJK_KR_FONT
+        if canonical in {"fa", "ar", "ur"}:
+            return _ARABIC_FONT
+        return _LATIN_FONT
+
+    @classmethod
+    def _ass_filter_complex(cls, ass_path: Path) -> str:
+        filter_spec = f"ass={cls._escape_filter_path(ass_path)}"
+        fontsdir = next((path for path in _NOTO_FONT_DIRS if path.is_dir()), None)
+        if fontsdir is not None:
+            filter_spec += f":fontsdir={cls._escape_filter_path(fontsdir)}"
+        return f"[0:v:0]{filter_spec}[v]"
+
+    @staticmethod
+    def _escape_filter_path(path: Path) -> str:
+        # ffmpeg filtergraph specials: \ : ' [ ] , ;
+        escaped = str(path)
+        for src, dst in (
+            ("\\", "\\\\"),
+            (":", "\\:"),
+            ("'", "\\'"),
+            ("[", "\\["),
+            ("]", "\\]"),
+            (",", "\\,"),
+            (";", "\\;"),
+        ):
+            escaped = escaped.replace(src, dst)
+        return escaped
+
+    @staticmethod
     def _language_tag(value: str | None, *, default: str) -> str:
         if value is None:
             return default
         normalized = re.sub(r"[^a-z0-9-]", "", value.strip().lower())[:32]
-        return normalized or default
-
-    @staticmethod
-    def _metadata_title(value: str | None, *, default: str) -> str:
-        if value is None:
-            return default
-        normalized = " ".join(value.split())[:128]
         return normalized or default
 
     def _write_styled_ass(
@@ -194,11 +264,14 @@ class MuxService:
         ass_path: Path,
         width: int,
         height: int,
+        subtitle_language: str | None = None,
     ) -> None:
-        """Convert SRT → ASS with PlayRes and a compact FontSize for soft playback."""
-        # ~4% of height (e.g. ~43 on 1080p) — typical soft-sub caption scale.
+        """Convert SRT → ASS with PlayRes and a compact FontSize for burn-in."""
+        # ~4% of height (e.g. ~43 on 1080p) — typical caption scale.
         font_size = max(_MIN_ASS_FONT_SIZE, min(_MAX_ASS_FONT_SIZE, height // 25))
-        events = self._srt_to_ass_events(srt_path.read_text(encoding="utf-8"))
+        srt_text = srt_path.read_text(encoding="utf-8")
+        font_name = self._font_for_subtitles(srt_text, subtitle_language)
+        events = self._srt_to_ass_events(srt_text)
         # PrimaryColour/OutlineColour are ASS &HAABBGGRR
         header = (
             "[Script Info]\n"
@@ -214,7 +287,7 @@ class MuxService:
             "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
             "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
             "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-            f"Style: Default,Arial,{font_size},"
+            f"Style: Default,{font_name},{font_size},"
             "&H00FFFFFF,&H000000FF,&H00000000,&H64000000,"
             "0,0,0,0,100,100,0,0,1,1.6,0.8,2,60,60,40,1\n"
             "\n"
@@ -320,7 +393,7 @@ class MuxService:
     def _output_path(self, job_id: UUID) -> Path:
         # Short, unique basename shown to the user in Telegram.
         short_id = job_id.hex[:10]
-        path = (self._storage_root / str(job_id) / f"v{short_id}.mkv").resolve()
+        path = (self._storage_root / str(job_id) / f"v{short_id}.mp4").resolve()
         try:
             path.relative_to(self._storage_root)
         except ValueError as exc:

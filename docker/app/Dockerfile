@@ -162,7 +162,12 @@ RUN uv sync --extra telegram-ingress --extra apps --no-dev --frozen
 FROM base AS content-processing
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends \
+       ffmpeg \
+       fontconfig \
+       fonts-noto-core \
+       fonts-noto-cjk \
+       fonts-noto-ui-core \
     && rm -rf /var/lib/apt/lists/*
 
 RUN uv sync --extra content-processing --extra apps --no-dev --frozen --no-install-project

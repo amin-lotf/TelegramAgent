@@ -52,7 +52,7 @@ def test_video_preparation_sets_final_path_and_delivery_outbox(
         requested_subtitle_language="en",
     )
 
-    muxed_path = tmp_path / str(prep_job_id) / "vtest123456.mkv"
+    muxed_path = tmp_path / str(prep_job_id) / "vtest123456.mp4"
     muxed_path.parent.mkdir(parents=True, exist_ok=True)
     muxed_path.write_bytes(b"muxed-video")
 
@@ -64,9 +64,11 @@ def test_video_preparation_sets_final_path_and_delivery_outbox(
             video_path,
             audio_path,
             subtitle_path,
+            subtitle_language=None,
             cancellation_requested=None,
         ):
             assert cancellation_requested is not None
+            assert subtitle_language == "en"
             assert job_id == prep_job_id
             assert Path(video_path).is_file()
             assert Path(audio_path).is_file()
