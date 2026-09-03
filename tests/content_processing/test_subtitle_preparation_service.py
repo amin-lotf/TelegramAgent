@@ -9,6 +9,7 @@ from telegram_agent.core.common.exceptions import PermanentContentProcessingErro
 from telegram_agent.core.content_processing.services.subtitle_preparation_service import (
     SubtitlePreparationService,
     SubtitleSegment,
+    _display_width,
     _format_rtl_srt_line,
 )
 
@@ -62,6 +63,30 @@ def test_prepare_reflows_long_whisper_segment_to_mobile_safe_cues(
         assert 1 <= len(text_lines) <= 2
         for line in text_lines:
             assert len(line) <= 37
+            assert _display_width(line) <= 37
+
+
+def test_prepare_reflows_long_chinese_to_short_cjk_lines(tmp_path: Path) -> None:
+    service = SubtitlePreparationService(storage_root=tmp_path)
+    long_text = (
+        "这是一段很长的中文字幕用于测试换行是否会超出画面范围"
+        "我们需要把它拆成多行以免字幕画到画面外面去"
+    )
+    path = service.prepare(
+        job_id=uuid4(),
+        segments=[SubtitleSegment(start_ms=0, end_ms=8000, text=long_text)],
+        target_language="zh",
+    )
+    content = Path(path).read_text(encoding="utf-8")
+    blocks = [block for block in content.strip().split("\n\n") if block.strip()]
+    assert len(blocks) >= 2
+    for block in blocks:
+        text_lines = block.split("\n")[2:]
+        assert 1 <= len(text_lines) <= 2
+        for line in text_lines:
+            assert _display_width(line) <= 37
+            han = [char for char in line if "\u4e00" <= char <= "\u9fff"]
+            assert len(han) <= 18
 
 
 def test_prepare_skips_empty_segments_and_keeps_sequential_indices(

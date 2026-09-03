@@ -44,21 +44,26 @@ Local mode means **local AI inference**. Telegram connectivity and the initial m
 ## How a Video Is Processed
 
 ```mermaid
-flowchart LR
+flowchart TB
     A[Video and instruction<br/>sent in Telegram] --> B[n8n verification<br/>and ingestion]
-    B --> C[Download and<br/>audio extraction]
-    C --> D[WhisperX<br/>transcription and diarization]
-    D --> E{Translate when needed}
-    E -->|Local| F[MADLAD]
-    E -->|OpenAI| G[OpenAI]
-    F --> H{Requested output}
-    G --> H
-    H -->|Subtitles| I[Prepare timed subtitles]
-    H -->|Dubbing| J[CosyVoice<br/>translated speech]
-    J --> K[SAM Audio<br/>preserve background]
-    I --> L[FFmpeg mux]
-    K --> L
-    L --> M[Finished video<br/>returned in Telegram]
+    B --> C{Understand the request}
+    C -->|Local mode| D[Qwen]
+    C -->|OpenAI mode| E[OpenAI]
+    D --> F[Download video<br/>and extract audio]
+    E --> F
+    F --> G[WhisperX<br/>transcription and diarization]
+    G --> H{Translation needed?}
+    H -->|No| K{Requested output}
+    H -->|Local mode| I[MADLAD]
+    H -->|OpenAI mode| J[OpenAI]
+    I --> K
+    J --> K
+    K -->|Subtitles only| L[Prepare timed subtitles]
+    K -->|Dubbing| M[CosyVoice<br/>translated speech]
+    M --> N[SAM Audio<br/>preserve background]
+    L --> O[FFmpeg<br/>align, mix, and mux]
+    N --> O
+    O --> P[Finished video<br/>returned in Telegram]
 ```
 
 For a subtitle-only request, the speech synthesis and background separation stages are skipped. For dubbing, generated speech is aligned to the original timing, mixed with the preserved background, and packaged with the subtitle track.

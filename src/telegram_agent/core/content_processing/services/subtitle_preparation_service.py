@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -15,9 +16,10 @@ from telegram_agent.core.content_processing.db.models.content_processing import 
 )
 
 # Industry-aligned defaults for mobile soft subtitles (BBC / Netflix-style).
-# - BBC: ~37 chars/line, max 2 lines
-# - Netflix: max 2 lines, max ~7s per event, min ~5/6s
+# - BBC: ~37 Latin chars/line, max 2 lines
+# - Netflix CJK: ~13–16 glyphs/line (wide characters count as 2 columns)
 # - Common reading speed target: ~15–20 characters/second
+# Budget is display columns, not raw strlen, so CJK stays inside the frame.
 _MAX_CHARS_PER_LINE = 37
 _MAX_LINES = 2
 _MAX_CHARS_PER_CUE = _MAX_CHARS_PER_LINE * _MAX_LINES
@@ -38,6 +40,73 @@ _PERSIAN_PUNCTUATION = str.maketrans({
 _RLE = "\u202B"
 _PDF = "\u202C"
 _ALM = "\u061C"
+
+
+def _char_display_width(char: str) -> int:
+    if unicodedata.combining(char) or unicodedata.category(char) in {"Mn", "Me", "Cf"}:
+        return 0
+    if unicodedata.east_asian_width(char) in {"W", "F", "A"}:
+        return 2
+    return 1
+
+
+def _display_width(text: str) -> int:
+    """Visible columns: CJK/kana/hangul/fullwidth count as 2, Latin as 1."""
+    return sum(_char_display_width(char) for char in text)
+
+
+def _wrap_tokens(text: str) -> list[str]:
+    """Latin words stay intact; wide-script glyphs wrap per character."""
+    tokens: list[str] = []
+    buffer: list[str] = []
+    for char in text:
+        if char.isspace():
+            if buffer:
+                tokens.append("".join(buffer))
+                buffer = []
+            continue
+        if _char_display_width(char) >= 2:
+            if buffer:
+                tokens.append("".join(buffer))
+                buffer = []
+            tokens.append(char)
+        else:
+            buffer.append(char)
+    if buffer:
+        tokens.append("".join(buffer))
+    return tokens
+
+
+def _join_token(current: str, token: str) -> str:
+    if not current:
+        return token
+    prev = current[-1]
+    first = token[0]
+    if _char_display_width(prev) >= 2 and _char_display_width(first) >= 2:
+        return current + token
+    if _char_display_width(first) >= 2:
+        return f"{current} {token}"
+    if _char_display_width(prev) >= 2:
+        return current + token
+    return f"{current} {token}"
+
+
+def _split_by_display_width(text: str, max_width: int) -> list[str]:
+    pieces: list[str] = []
+    current: list[str] = []
+    width = 0
+    for char in text:
+        char_width = _char_display_width(char)
+        if current and width + char_width > max_width:
+            pieces.append("".join(current))
+            current = [char]
+            width = char_width
+        else:
+            current.append(char)
+            width += char_width
+    if current:
+        pieces.append("".join(current))
+    return pieces
 
 
 def _format_rtl_srt_line(line: str) -> str:
@@ -221,9 +290,9 @@ class SubtitlePreparationService:
         return cues
 
     def _chunk_text(self, text: str) -> list[str]:
-        """Split into cues of at most 2 lines × max chars/line."""
-        words = text.split()
-        if not words:
+        """Split into cues of at most 2 lines × max display columns/line."""
+        tokens = _wrap_tokens(text)
+        if not tokens:
             return []
 
         cues: list[str] = []
@@ -239,32 +308,32 @@ class SubtitlePreparationService:
                 cues.append("\n".join(current_lines))
                 current_lines = []
 
-        for word in words:
-            candidate = word if not current_line else f"{current_line} {word}"
-            if len(candidate) <= self._max_chars_per_line:
-                current_line = candidate
-                continue
-
-            # Current line is full — push it and start a new line or cue.
+        def start_piece(piece: str) -> None:
+            nonlocal current_line
             if current_line:
                 current_lines.append(current_line)
                 current_line = ""
+            if len(current_lines) >= self._max_lines:
+                flush_cue()
+            current_line = piece
 
+        for token in tokens:
+            candidate = _join_token(current_line, token)
+            if _display_width(candidate) <= self._max_chars_per_line:
+                current_line = candidate
+                continue
+
+            if current_line:
+                current_lines.append(current_line)
+                current_line = ""
             if len(current_lines) >= self._max_lines:
                 flush_cue()
 
-            if len(word) <= self._max_chars_per_line:
-                current_line = word
+            if _display_width(token) <= self._max_chars_per_line:
+                current_line = token
             else:
-                # Hard-wrap oversized tokens.
-                for start in range(0, len(word), self._max_chars_per_line):
-                    piece = word[start : start + self._max_chars_per_line]
-                    if current_line:
-                        current_lines.append(current_line)
-                        current_line = ""
-                    if len(current_lines) >= self._max_lines:
-                        flush_cue()
-                    current_line = piece
+                for piece in _split_by_display_width(token, self._max_chars_per_line):
+                    start_piece(piece)
 
         if current_line:
             current_lines.append(current_line)

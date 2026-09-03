@@ -79,6 +79,9 @@ def test_mux_burns_in_ass_and_writes_mp4(tmp_path: Path, monkeypatch) -> None:
     assert "copy" not in command
     assert "-c:s" not in command
     assert "Style: Default,Noto Sans," in captured["ass"]
+    assert "WrapStyle: 1" in captured["ass"]
+    assert "2,60,60,40,1" not in captured["ass"]
+    assert "2,120,120,54,1" in captured["ass"]
 
 
 def test_mux_uses_arabic_font_for_persian_subtitles(

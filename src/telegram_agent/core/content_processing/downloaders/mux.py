@@ -25,8 +25,9 @@ from telegram_agent.core.content_processing.downloaders.cancellable_process impo
 
 # ASS FontSize is relative to PlayResY. Burn-in uses PlayRes matching the
 # frame, so a normal caption size (~4% of frame height) scales correctly.
-_MIN_ASS_FONT_SIZE = 28
+_MIN_ASS_FONT_SIZE = 18
 _MAX_ASS_FONT_SIZE = 52
+_MIN_ASS_MARGIN = 24
 _ARABIC_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
 _HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 _KANA_RE = re.compile(r"[\u3040-\u30FF\uFF66-\uFF9D]")
@@ -269,14 +270,17 @@ class MuxService:
         """Convert SRT → ASS with PlayRes and a compact FontSize for burn-in."""
         # ~4% of height (e.g. ~43 on 1080p) — typical caption scale.
         font_size = max(_MIN_ASS_FONT_SIZE, min(_MAX_ASS_FONT_SIZE, height // 25))
+        margin_x = max(_MIN_ASS_MARGIN, width // 16)
+        margin_y = max(_MIN_ASS_MARGIN, height // 20)
         srt_text = srt_path.read_text(encoding="utf-8")
         font_name = self._font_for_subtitles(srt_text, subtitle_language)
         events = self._srt_to_ass_events(srt_text)
         # PrimaryColour/OutlineColour are ASS &HAABBGGRR
+        # WrapStyle 1 breaks mid-word / CJK so leftover long runs stay in frame.
         header = (
             "[Script Info]\n"
             "ScriptType: v4.00+\n"
-            "WrapStyle: 0\n"
+            "WrapStyle: 1\n"
             "ScaledBorderAndShadow: yes\n"
             f"PlayResX: {width}\n"
             f"PlayResY: {height}\n"
@@ -289,7 +293,7 @@ class MuxService:
             "Alignment, MarginL, MarginR, MarginV, Encoding\n"
             f"Style: Default,{font_name},{font_size},"
             "&H00FFFFFF,&H000000FF,&H00000000,&H64000000,"
-            "0,0,0,0,100,100,0,0,1,1.6,0.8,2,60,60,40,1\n"
+            f"0,0,0,0,100,100,0,0,1,1.6,0.8,2,{margin_x},{margin_x},{margin_y},1\n"
             "\n"
             "[Events]\n"
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
